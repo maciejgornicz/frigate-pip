@@ -47,7 +47,7 @@ cargo build --release
 "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" /DAppVersion=1.0.0 installer\frigate-pip.iss
 ```
 
-The installer is written to `target\installer`.
+The installer is written to `target\installer`. GitHub Actions runs `cargo fmt --check`, clippy and the tests for every push and pull request, and builds the exe and the installer.
 
 ## Project layout
 
@@ -104,4 +104,4 @@ To add a language:
 
 ## Releases
 
-Maintainers bump `version` in `Cargo.toml`, build and test the exe and the installer, tag the commit `vX.Y.Z` and publish both files with their SHA-256 checksums on the Releases page.
+Maintainers bump `version` in `Cargo.toml` and push a matching `vX.Y.Z` tag. The workflow then builds the exe and the installer and publishes them with their SHA-256 checksums on the Releases page (it fails if the tag and the version differ).
