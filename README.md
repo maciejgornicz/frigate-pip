@@ -1,5 +1,10 @@
 # FrigatePiP
 
+[![Latest release](https://img.shields.io/github/v/release/maciejgornicz/frigate-pip)](https://github.com/maciejgornicz/frigate-pip/releases/latest)
+[![Build](https://github.com/maciejgornicz/frigate-pip/actions/workflows/build.yml/badge.svg)](https://github.com/maciejgornicz/frigate-pip/actions/workflows/build.yml)
+[![License: GPL-3.0](https://img.shields.io/github/license/maciejgornicz/frigate-pip)](LICENSE)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/maciejgornicz)
+
 **Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows — and on Linux.**
 
 When Frigate detects a person, a car or any other object, FrigatePiP pops up a small window with that camera's live video in a corner of your screen — within milliseconds — and closes it again when nothing moves any more.
