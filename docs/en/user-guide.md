@@ -35,7 +35,7 @@ FrigatePiP is a small Windows tray application for [Frigate NVR](https://frigate
 
 ### With the installer (recommended)
 
-1. Download `FrigatePiP-Setup-<version>.exe` from the [Releases](https://github.com/maciejgornicz/frigate-pip/releases) page.
+1. Download `FrigatePiP-<version>-installer.exe` from the [Releases](https://github.com/maciejgornicz/frigate-pip/releases) page.
 2. Run it. The installer does not need administrator rights; it installs for the current user only, into `%LOCALAPPDATA%\Programs\FrigatePiP`.
 3. Choose whether FrigatePiP should **start with Windows** (on by default) and whether to create a desktop shortcut.
 4. At the end, leave **Launch FrigatePiP** checked. The tray icon appears and the settings window opens on the first start.
@@ -44,7 +44,7 @@ The installer and the application are not signed with a code-signing certificate
 
 ### Portable (without installing)
 
-Download `frigate-pip.exe` from the Releases page and run it from any folder. Settings are stored in the same place as with the installer (see [Files](#10-files-privacy-and-resources)). Use **Start FrigatePiP with Windows** in the settings to start it automatically.
+Download `FrigatePiP-<version>-portable.exe` from the Releases page and run it from any folder. Settings are stored in the same place as with the installer (see [Files](#10-files-privacy-and-resources)). Use **Start FrigatePiP with Windows** in the settings to start it automatically.
 
 ### Updating
 

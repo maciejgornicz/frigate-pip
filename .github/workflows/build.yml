@@ -44,7 +44,7 @@ jobs:
           & $iscc /Q "/DAppVersion=$version" installer\frigate-pip.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target\release\frigate-pip.exe dist\
+          Copy-Item target\release\frigate-pip.exe "dist\FrigatePiP-$version-portable.exe"
           Copy-Item target\installer\*.exe dist\
 
       - uses: actions/upload-artifact@v4

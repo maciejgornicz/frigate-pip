@@ -35,7 +35,7 @@ O FrigatePiP é uma pequena aplicação da área de notificação do Windows par
 
 ### Com o instalador (recomendado)
 
-1. Transfira `FrigatePiP-Setup-<version>.exe` da página [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
+1. Transfira `FrigatePiP-<version>-installer.exe` da página [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
 2. Execute-o. O instalador não precisa de direitos de administrador; instala apenas para o utilizador atual, em `%LOCALAPPDATA%\Programs\FrigatePiP`.
 3. Escolha se o FrigatePiP deve **iniciar com o Windows** (ativado por predefinição) e se deve ser criado um atalho no ambiente de trabalho.
 4. No final, deixe **Executar FrigatePiP** marcado. O ícone aparece na área de notificação e a janela de configurações abre-se na primeira execução.
@@ -44,7 +44,7 @@ O instalador e a aplicação não estão assinados com um certificado de assinat
 
 ### Versão portátil (sem instalação)
 
-Transfira `frigate-pip.exe` da página Releases e execute-o a partir de qualquer pasta. As configurações são guardadas no mesmo local que com o instalador (ver [Ficheiros](#10-ficheiros-privacidade-e-recursos)). Use **Iniciar o FrigatePiP com o Windows** nas configurações para o iniciar automaticamente.
+Transfira `FrigatePiP-<version>-portable.exe` da página Releases e execute-o a partir de qualquer pasta. As configurações são guardadas no mesmo local que com o instalador (ver [Ficheiros](#10-ficheiros-privacidade-e-recursos)). Use **Iniciar o FrigatePiP com o Windows** nas configurações para o iniciar automaticamente.
 
 ### Atualização
 

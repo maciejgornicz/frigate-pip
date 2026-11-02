@@ -35,7 +35,7 @@ FrigatePiP to mała aplikacja dla systemu Windows, działająca w zasobniku syst
 
 ### Za pomocą instalatora (zalecane)
 
-1. Pobierz `FrigatePiP-Setup-<version>.exe` ze strony [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
+1. Pobierz `FrigatePiP-<version>-installer.exe` ze strony [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
 2. Uruchom go. Instalator nie wymaga uprawnień administratora; instaluje program tylko dla bieżącego użytkownika, w folderze `%LOCALAPPDATA%\Programs\FrigatePiP`.
 3. Wybierz, czy zaznaczyć **Uruchamiaj FrigatePiP razem z Windows** (domyślnie włączone) i czy utworzyć skrót na pulpicie.
 4. Na koniec pozostaw zaznaczone **Uruchom aplikację FrigatePiP**. Pojawi się ikona w zasobniku, a przy pierwszym uruchomieniu otworzy się okno ustawień.
@@ -44,7 +44,7 @@ Instalator i aplikacja nie są podpisane certyfikatem podpisywania kodu. Windows
 
 ### Wersja przenośna (bez instalacji)
 
-Pobierz `frigate-pip.exe` ze strony Releases i uruchom go z dowolnego folderu. Ustawienia są przechowywane w tym samym miejscu co w wersji z instalatorem (zob. [Pliki](#10-pliki-prywatność-i-zasoby)). Aby program uruchamiał się automatycznie, włącz w ustawieniach opcję **Uruchamiaj FrigatePiP razem z Windows**.
+Pobierz `FrigatePiP-<version>-portable.exe` ze strony Releases i uruchom go z dowolnego folderu. Ustawienia są przechowywane w tym samym miejscu co w wersji z instalatorem (zob. [Pliki](#10-pliki-prywatność-i-zasoby)). Aby program uruchamiał się automatycznie, włącz w ustawieniach opcję **Uruchamiaj FrigatePiP razem z Windows**.
 
 ### Aktualizacja
 

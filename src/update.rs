@@ -73,7 +73,7 @@ pub fn parse_release(j: &Json) -> Option<Release> {
     };
     // The file name becomes a path in %TEMP%: plain characters only.
     let safe = |n: &str| n.chars().all(|c| c.is_ascii_alphanumeric() || "-._".contains(c));
-    let installer = asset(&|n| n.starts_with("FrigatePiP-Setup-") && n.ends_with(".exe") && safe(n));
+    let installer = asset(&|n| n.starts_with("FrigatePiP-") && n.ends_with("-installer.exe") && safe(n));
     let checksums = asset(&|n| n == "SHA256SUMS.txt").map(|(_, url)| url);
     Some(Release { version, page: j.get("html_url").str().unwrap_or_default().to_string(), installer, checksums })
 }
@@ -236,19 +236,20 @@ mod tests {
     fn reads_github_release() {
         let j = Json::parse(
             r#"{"tag_name": "v1.2.0", "html_url": "https://github.com/x/y/releases/tag/v1.2.0", "draft": false, "prerelease": false,
-               "assets": [{"name": "frigate-pip.exe", "browser_download_url": "https://e/frigate-pip.exe"},
-                          {"name": "FrigatePiP-Setup-1.2.0.exe", "browser_download_url": "https://e/setup.exe"},
+               "assets": [{"name": "FrigatePiP-1.2.0-portable.exe", "browser_download_url": "https://e/portable.exe"},
+                          {"name": "FrigatePiP-1.2.0-installer.exe", "browser_download_url": "https://e/setup.exe"},
                           {"name": "SHA256SUMS.txt", "browser_download_url": "https://e/sums"}]}"#,
         )
         .unwrap();
         let r = parse_release(&j).unwrap();
         assert_eq!(r.version, "1.2.0");
-        assert_eq!(r.installer, Some(("FrigatePiP-Setup-1.2.0.exe".into(), "https://e/setup.exe".into())));
+        assert_eq!(r.installer, Some(("FrigatePiP-1.2.0-installer.exe".into(), "https://e/setup.exe".into())));
         assert_eq!(r.checksums.as_deref(), Some("https://e/sums"));
         let pre = Json::parse(r#"{"tag_name": "v9.0.0", "prerelease": true, "assets": []}"#).unwrap();
         assert_eq!(parse_release(&pre), None);
-        let odd = Json::parse(r#"{"tag_name": "v9.0.0", "assets": [{"name": "FrigatePiP-Setup-..\\x.exe", "browser_download_url": "https://e/x"}]}"#)
-            .unwrap();
+        let odd =
+            Json::parse(r#"{"tag_name": "v9.0.0", "assets": [{"name": "FrigatePiP-..\\x-installer.exe", "browser_download_url": "https://e/x"}]}"#)
+                .unwrap();
         assert_eq!(parse_release(&odd).unwrap().installer, None);
     }
 

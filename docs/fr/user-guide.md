@@ -35,7 +35,7 @@ FrigatePiP est une petite application Windows de la zone de notification pour [F
 
 ### Avec le programme d’installation (recommandé)
 
-1. Téléchargez `FrigatePiP-Setup-<version>.exe` depuis la page [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
+1. Téléchargez `FrigatePiP-<version>-installer.exe` depuis la page [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
 2. Exécutez-le. Le programme d’installation ne nécessite pas de droits d’administrateur ; il installe FrigatePiP pour l’utilisateur actuel uniquement, dans `%LOCALAPPDATA%\Programs\FrigatePiP`.
 3. Indiquez si vous voulez **Lancer FrigatePiP au démarrage de Windows** (option activée par défaut) et créer une icône sur le Bureau.
 4. À la fin, laissez **Exécuter FrigatePiP** coché. L’icône apparaît dans la zone de notification et la fenêtre des paramètres s’ouvre au premier démarrage.
@@ -44,7 +44,7 @@ Le programme d’installation et l’application ne sont pas signés avec un cer
 
 ### Version portable (sans installation)
 
-Téléchargez `frigate-pip.exe` depuis la page Releases et exécutez-le depuis n’importe quel dossier. Les paramètres sont stockés au même endroit qu’avec le programme d’installation (voir [Fichiers](#10-fichiers-confidentialité-et-ressources)). Utilisez **Lancer FrigatePiP au démarrage de Windows** dans les paramètres pour le démarrer automatiquement.
+Téléchargez `FrigatePiP-<version>-portable.exe` depuis la page Releases et exécutez-le depuis n’importe quel dossier. Les paramètres sont stockés au même endroit qu’avec le programme d’installation (voir [Fichiers](#10-fichiers-confidentialité-et-ressources)). Utilisez **Lancer FrigatePiP au démarrage de Windows** dans les paramètres pour le démarrer automatiquement.
 
 ### Mise à jour
 

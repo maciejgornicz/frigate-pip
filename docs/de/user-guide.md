@@ -35,7 +35,7 @@ FrigatePiP ist eine kleine Windows-Anwendung im Infobereich der Taskleiste für 
 
 ### Mit dem Installationsprogramm (empfohlen)
 
-1. Laden Sie `FrigatePiP-Setup-<version>.exe` von der Seite [Releases](https://github.com/maciejgornicz/frigate-pip/releases) herunter.
+1. Laden Sie `FrigatePiP-<version>-installer.exe` von der Seite [Releases](https://github.com/maciejgornicz/frigate-pip/releases) herunter.
 2. Führen Sie die Datei aus. Das Installationsprogramm benötigt keine Administratorrechte; es installiert nur für den aktuellen Benutzer, nach `%LOCALAPPDATA%\Programs\FrigatePiP`.
 3. Wählen Sie, ob FrigatePiP **mit Windows starten** soll (standardmäßig aktiviert) und ob eine Desktopverknüpfung erstellt werden soll.
 4. Lassen Sie am Ende **FrigatePiP starten** aktiviert. Das Tray-Symbol erscheint, und beim ersten Start öffnet sich das Einstellungsfenster.
@@ -44,7 +44,7 @@ Installationsprogramm und Anwendung sind nicht mit einem Code-Signing-Zertifikat
 
 ### Portabel (ohne Installation)
 
-Laden Sie `frigate-pip.exe` von der Releases-Seite herunter und starten Sie die Datei aus einem beliebigen Ordner. Die Einstellungen werden am selben Ort gespeichert wie bei der Installation (siehe [Dateien](#10-dateien-datenschutz-und-ressourcen)). Verwenden Sie in den Einstellungen **FrigatePiP mit Windows starten**, um es automatisch zu starten.
+Laden Sie `FrigatePiP-<version>-portable.exe` von der Releases-Seite herunter und starten Sie die Datei aus einem beliebigen Ordner. Die Einstellungen werden am selben Ort gespeichert wie bei der Installation (siehe [Dateien](#10-dateien-datenschutz-und-ressourcen)). Verwenden Sie in den Einstellungen **FrigatePiP mit Windows starten**, um es automatisch zu starten.
 
 ### Aktualisieren
 
