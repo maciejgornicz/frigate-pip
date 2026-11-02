@@ -514,7 +514,21 @@ fn window_rect(hwnd: HWND) -> RECT {
 
 unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
-        WM_NCHITTEST => LRESULT(HTCAPTION as isize),
+        WM_NCHITTEST => {
+            // The close button in the top-right corner; the rest of the window drags it.
+            let mut pt = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
+            let _ = ScreenToClient(hwnd, &mut pt);
+            let mut rc = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rc);
+            let (l, t, r, b) = crate::render::close_button_rect(rc.right, GetDpiForWindow(hwnd));
+            let on_close = pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
+            LRESULT(if on_close { HTCLOSE } else { HTCAPTION } as isize)
+        }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HTCLOSE => {
+            // Closes at once, on the press (an emergency must not wait for the button release).
+            with_app(|a| a.close_hwnd(hwnd));
+            LRESULT(0)
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_NCLBUTTONDOWN => {
             // Dragging moves the window; a plain click pins / unpins it.
@@ -536,11 +550,11 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             LRESULT(0)
         }
         WM_NCMOUSEMOVE => {
-            with_app(|a| a.hover(hwnd, true));
+            with_app(|a| a.hover(hwnd, true, wp.0 as u32 == HTCLOSE));
             DefWindowProcW(hwnd, msg, wp, lp)
         }
         WM_NCMOUSELEAVE => {
-            with_app(|a| a.hover(hwnd, false));
+            with_app(|a| a.hover(hwnd, false, false));
             LRESULT(0)
         }
         WM_MOUSEWHEEL => {
@@ -1261,8 +1275,14 @@ impl App {
         }
     }
 
-    fn hover(&mut self, hwnd: HWND, on: bool) {
+    /// Mouse over the window (`on`) and over its close button (`on_close`).
+    fn hover(&mut self, hwnd: HWND, on: bool, on_close: bool) {
         let Some(p) = self.find(hwnd) else { return };
+        p.shared.set_close_button(match (on, on_close) {
+            (false, _) => 0,
+            (true, false) => 1,
+            (true, true) => 2,
+        });
         if on && !p.hovered {
             p.hovered = true;
             let mut tme = TRACKMOUSEEVENT {

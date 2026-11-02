@@ -113,6 +113,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 | **Ziehen** | Verschiebt das Fenster. Es bleibt dort, wo Sie es abgelegt haben, bis es sich schließt. |
 | **Klicken** | Das Fenster wird **angeheftet**: Es bleibt geöffnet, bis Sie es schließen (die Beschriftung zeigt *angeheftet*). Erneut klicken, um es zu lösen. |
 | **Mausrad** | Vergrößert oder verkleinert das Fenster. |
+| **×** (oben rechts) | Schließt das Fenster sofort. Die Schaltfläche erscheint, wenn Sie mit der Maus auf das Fenster zeigen. |
 | **Rechtsklick** | Schließt das Fenster. |
 | **Doppelklick** | Öffnet diese Kamera in der Frigate-Weboberfläche. |
 | **Darauf zeigen** | Solange sich der Mauszeiger über dem Fenster befindet, schließt es sich nicht. Nachdem Sie die Maus wegbewegt haben, bleibt es noch mindestens 3 Sekunden geöffnet. |

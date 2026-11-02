@@ -113,6 +113,7 @@ Las ventanas de vista previa nunca toman el foco del teclado, por lo que no inte
 | **Arrastrar** | Mueve la ventana. Se queda donde la coloque hasta que se cierre. |
 | **Clic** | **Fija** la ventana: permanece abierta hasta que usted la cierre (el texto muestra *fijada*). Haga clic de nuevo para dejar de fijarla. |
 | **Rueda del mouse** | Agranda o reduce la ventana. |
+| **×** (esquina superior derecha) | Cierra la ventana al instante. El botón aparece al señalar la ventana con el mouse. |
 | **Clic derecho** | Cierra la ventana. |
 | **Doble clic** | Abre esta cámara en la interfaz web de Frigate. |
 | **Pasar el puntero** | Mientras el puntero del mouse está sobre la ventana, esta no se cierra. Después de retirarlo, permanece abierta al menos 3 segundos más. |

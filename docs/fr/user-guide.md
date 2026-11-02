@@ -113,6 +113,7 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 | **Glisser** | Déplace la fenêtre. Elle reste là où vous l’avez placée jusqu’à sa fermeture. |
 | **Clic** | **Épingle** la fenêtre : elle reste ouverte jusqu’à ce que vous la fermiez (la légende affiche *épinglé*). Cliquez à nouveau pour la désépingler. |
 | **Molette de la souris** | Agrandit ou réduit la fenêtre. |
+| **×** (coin supérieur droit) | Ferme immédiatement la fenêtre. Le bouton apparaît lorsque vous pointez la souris sur la fenêtre. |
 | **Clic droit** | Ferme la fenêtre. |
 | **Double-clic** | Ouvre cette caméra dans l’interface web de Frigate. |
 | **Survol** | Tant que le pointeur de la souris se trouve sur la fenêtre, celle-ci ne se ferme pas. Une fois le pointeur éloigné, elle reste encore au moins 3 secondes. |

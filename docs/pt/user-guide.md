@@ -113,6 +113,7 @@ As janelas de pré-visualização nunca recebem o foco do teclado, por isso não
 | **Arrastar** | Move a janela. Fica onde a colocar até se fechar. |
 | **Clique** | **Fixa** a janela: fica aberta até a fechar (a legenda mostra *fixada*). Clique novamente para a desafixar. |
 | **Roda do rato** | Aumenta ou diminui a janela. |
+| **×** (canto superior direito) | Fecha a janela de imediato. O botão aparece quando aponta o rato para a janela. |
 | **Clique direito** | Fecha a janela. |
 | **Duplo clique** | Abre esta câmara na interface web do Frigate. |
 | **Passar o rato por cima** | Enquanto o ponteiro do rato estiver sobre a janela, esta não se fecha. Depois de afastar o rato, fica aberta pelo menos mais 3 segundos. |

@@ -21,6 +21,17 @@ use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
 pub struct Overlay {
     pub text: String,
     pub live: bool,
+    /// Close button: 0 = hidden, 1 = shown (mouse over the window), 2 = highlighted (mouse over the button).
+    pub close: u8,
+}
+
+/// Close button in the top-right corner of the window, in client pixels (left, top, right, bottom).
+/// Used both for drawing and for hit-testing the mouse.
+pub fn close_button_rect(client_width: i32, dpi: u32) -> (i32, i32, i32, i32) {
+    let scale = dpi.max(96) as f32 / 96.0;
+    let size = (24.0 * scale).round() as i32;
+    let margin = (8.0 * scale).round() as i32;
+    (client_width - margin - size, margin, client_width - margin, margin + size)
 }
 
 enum Last {
@@ -371,14 +382,30 @@ impl Renderer {
     }
 
     unsafe fn draw_overlay(&self, ov: &Overlay) {
-        if ov.text.is_empty() {
-            return;
-        }
         self.d2d.SetTransform(&Matrix3x2::identity());
+        let button = (ov.close > 0).then(|| close_button_rect(self.size.0 as i32, GetDpiForWindow(self.hwnd)));
+        if !ov.text.is_empty() {
+            // The caption must not run under the close button.
+            self.draw_caption(ov, button.map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
+        }
+        if let Some((l, t, r, b)) = button {
+            let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
+            let circle = D2D1_ELLIPSE { point: D2D_POINT_2F { x: cx, y: cy }, radiusX: rad, radiusY: rad };
+            self.d2d.FillEllipse(&circle, if ov.close == 2 { &self.red } else { &self.shade });
+            let arm = rad * 0.38;
+            let width = (rad / 7.0).max(1.5);
+            let p = |x: f32, y: f32| D2D_POINT_2F { x, y };
+            self.d2d.DrawLine(p(cx - arm, cy - arm), p(cx + arm, cy + arm), &self.white, width, None);
+            self.d2d.DrawLine(p(cx - arm, cy + arm), p(cx + arm, cy - arm), &self.white, width, None);
+        }
+    }
+
+    /// Camera, object and time in the top-left corner; `reserve` = pixels kept free on the right.
+    unsafe fn draw_caption(&self, ov: &Overlay, reserve: f32) {
         let pad = (self.font_px * 0.6).round();
         let dot = self.font_px * 0.62;
         let wide: Vec<u16> = HSTRING::from(ov.text.as_str()).as_wide().to_vec();
-        let max_w = (self.size.0 as f32 - pad * 4.0 - dot * 2.0).max(10.0);
+        let max_w = (self.size.0 as f32 - pad * 4.0 - dot * 2.0 - reserve).max(10.0);
         let Ok(layout) = self.dwrite.CreateTextLayout(&wide, &self.font, max_w, self.font_px * 2.0) else { return };
         let _ = layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         let trimming = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };

@@ -113,6 +113,7 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 | **Przeciągnięcie** | Przesuwa okno. Okno zostaje tam, gdzie je umieścisz, aż się zamknie. |
 | **Kliknięcie** | **Przypina** okno: zostaje otwarte, dopóki go nie zamkniesz (napis pokazuje *przypięte*). Kliknij ponownie, aby je odpiąć. |
 | **Kółko myszy** | Powiększa lub zmniejsza okno. |
+| **×** (prawy górny róg) | Od razu zamyka okno. Przycisk pojawia się po najechaniu myszą na okno. |
 | **Kliknięcie prawym przyciskiem** | Zamyka okno. |
 | **Dwukrotne kliknięcie** | Otwiera tę kamerę w interfejsie webowym Frigate. |
 | **Najechanie kursorem** | Dopóki wskaźnik myszy jest nad oknem, okno się nie zamyka. Gdy odsuniesz kursor, okno pozostaje jeszcze co najmniej 3 sekundy. |

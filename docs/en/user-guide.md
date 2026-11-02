@@ -113,6 +113,7 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 | **Drag** | Moves the window. It stays where you put it until it closes. |
 | **Click** | **Pins** the window: it stays open until you close it (the caption shows *pinned*). Click again to unpin. |
 | **Mouse wheel** | Makes the window bigger or smaller. |
+| **×** (top-right corner) | Closes the window at once. The button appears when you point at the window. |
 | **Right click** | Closes the window. |
 | **Double click** | Opens this camera in the Frigate web interface. |
 | **Hover** | While the mouse pointer is over the window, it does not close. After you move away it stays at least 3 more seconds. |

@@ -80,7 +80,7 @@ pub static STRINGS: Strings = Strings {
     overlay: "Legenda na imagem (câmara, objeto, hora)",
     sound: "Som de notificação (som do sistema quando aparece uma janela)",
     skip_fullscreen: "Não mostrar durante jogos ou apresentações em ecrã inteiro",
-    window_hint: "Na janela: arrastar – mover, clique – fixar, roda – tamanho, clique direito – fechar, duplo clique – câmara no Frigate.",
+    window_hint: "Na janela: arrastar – mover, clique – fixar, roda – tamanho, × ou clique direito – fechar, duplo clique – câmara no Frigate.",
     live: "Imagem ao vivo",
     live_rtsp: "RTSP do go2rtc – fluido, descodificação por hardware",
     live_mjpeg: "MJPEG do Frigate – cerca de 5 fps",

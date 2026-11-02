@@ -8,7 +8,7 @@ use crate::render::{Overlay, Renderer};
 use crate::rtp::{AccessUnit, VideoTrack};
 use crate::util::Cancel;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -37,12 +37,20 @@ pub struct Shared {
     pub cancel: Cancel,
     overlay: Mutex<String>,
     overlay_on: AtomicBool,
+    /// Close button state, see `render::Overlay::close`.
+    close_button: AtomicU8,
     dirty: AtomicBool,
 }
 
 impl Shared {
     pub fn new(text: String, overlay_on: bool) -> Arc<Shared> {
-        Arc::new(Shared { cancel: Cancel::new(), overlay: Mutex::new(text), overlay_on: AtomicBool::new(overlay_on), dirty: AtomicBool::new(false) })
+        Arc::new(Shared {
+            cancel: Cancel::new(),
+            overlay: Mutex::new(text),
+            overlay_on: AtomicBool::new(overlay_on),
+            close_button: AtomicU8::new(0),
+            dirty: AtomicBool::new(false),
+        })
     }
 
     pub fn set_overlay(&self, text: String) {
@@ -53,6 +61,13 @@ impl Shared {
     /// Turns the on-video text overlay on / off (live, e.g. from the settings window).
     pub fn set_overlay_on(&self, on: bool) {
         if self.overlay_on.swap(on, Ordering::Relaxed) != on {
+            self.dirty.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Shows / highlights / hides the close button (from the mouse position).
+    pub fn set_close_button(&self, state: u8) {
+        if self.close_button.swap(state, Ordering::Relaxed) != state {
             self.dirty.store(true, Ordering::Relaxed);
         }
     }
@@ -272,6 +287,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let overlay_text = |live: bool| Overlay {
         text: if shared.overlay_on.load(Ordering::Relaxed) { shared.overlay.lock().unwrap().clone() } else { String::new() },
         live,
+        close: shared.close_button.load(Ordering::Relaxed),
     };
     let _ = r.redraw(&overlay_text(false));
 
