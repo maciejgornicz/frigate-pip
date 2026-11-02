@@ -155,9 +155,23 @@ impl Cancel {
 static LOG: Mutex<Option<File>> = Mutex::new(None);
 static LOG_STDERR: AtomicBool = AtomicBool::new(false);
 
+/// Folder with the settings and the log: `%APPDATA%\\FrigatePiP` on Windows,
+/// `$XDG_CONFIG_HOME/frigate-pip` (usually `~/.config/frigate-pip`) on Linux.
 pub fn app_dir() -> PathBuf {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    base.join("FrigatePiP")
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+        base.join("FrigatePiP")
+    }
+    #[cfg(not(windows))]
+    {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join("frigate-pip")
+    }
 }
 
 pub fn log_path() -> PathBuf {
@@ -191,15 +205,29 @@ macro_rules! log {
 
 /// Local time as `HH:MM:SS` (with milliseconds if `ms`).
 pub fn local_time(ms: bool) -> String {
-    let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    #[cfg(windows)]
+    let (h, m, s, millis) = {
+        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+        (t.wHour as i32, t.wMinute as i32, t.wSecond as i32, t.wMilliseconds as u32)
+    };
+    #[cfg(not(windows))]
+    let (h, m, s, millis) = {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        #[allow(deprecated)] // musl: libc::time_t is going to become 64-bit
+        let secs = now.as_secs() as libc::time_t;
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        unsafe { libc::localtime_r(&secs, &mut tm) };
+        (tm.tm_hour, tm.tm_min, tm.tm_sec, now.subsec_millis())
+    };
     if ms {
-        format!("{:02}:{:02}:{:02}.{:03}", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds)
+        format!("{h:02}:{m:02}:{s:02}.{millis:03}")
     } else {
-        format!("{:02}:{:02}:{:02}", t.wHour, t.wMinute, t.wSecond)
+        format!("{h:02}:{m:02}:{s:02}")
     }
 }
 
 /// Returns unused working-set memory to the OS (after preview windows close).
+#[cfg(windows)]
 pub fn trim_memory() {
     use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
     unsafe {

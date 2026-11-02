@@ -345,6 +345,7 @@ mod tests {
 
     /// Receives ~3 s of each go2rtc stream and decodes it in software and hardware.
     #[test]
+    #[cfg(windows)]
     #[ignore = "requires Frigate on the network"]
     fn live_decode() {
         use crate::decoder::{Decoder, Frame};
@@ -413,6 +414,7 @@ mod tests {
 
     /// Audio from go2rtc: AAC track, frames and decoding.
     #[test]
+    #[cfg(windows)]
     #[ignore = "requires Frigate on the network"]
     fn live_audio_decode() {
         use crate::audio::AudioDecoder;
@@ -463,6 +465,7 @@ mod tests {
 
     /// Level of decoded camera audio (peak and RMS in dBFS every 0.5 s).
     #[test]
+    #[cfg(windows)]
     #[ignore = "requires Frigate on the network"]
     fn live_audio_levels() {
         use crate::audio::AudioDecoder;

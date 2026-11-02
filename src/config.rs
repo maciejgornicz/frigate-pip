@@ -449,8 +449,8 @@ pub fn save(path: &PathBuf, doc: &IniDoc) {
 
 pub const DEFAULT_INI: &str = "\
 ; FrigatePiP settings
-; Everything here can also be changed in the settings window (left-click the
-; tray icon). Changes saved in this file are applied automatically.
+; On Windows everything here can also be changed in the settings window
+; (left-click the tray icon). Changes saved in this file are applied automatically.
 
 [app]
 ; auto = Windows display language (English if not supported), or: en, pl, de, es, pt, fr
@@ -535,6 +535,14 @@ gpu_warm = false
 ; Camera audio in the preview window (AAC / G.711 from the RTSP stream).
 ; Played on its own thread - it never delays the window or the video.
 camera_audio = false
+
+[console]
+; Linux console version only (not used on Windows):
+; output = auto, framebuffer or terminal
+; graphics = auto, kitty, sixel or blocks (pictures in a terminal)
+; framebuffer = /dev/fb0
+; ffmpeg = ffmpeg
+; font = TrueType font for captions on the framebuffer (default: DejaVu Sans Bold)
 
 ; Per-camera overrides (optional):
 ; [camera.front_door]
@@ -646,6 +654,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn load_never_overwrites_unreadable_file() {
         use std::os::windows::fs::OpenOptionsExt;
         let dir = std::env::temp_dir().join(format!("fpip-test-{}", std::process::id()));

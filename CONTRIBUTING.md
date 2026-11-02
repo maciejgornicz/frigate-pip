@@ -14,7 +14,7 @@ The log contains your Frigate address and camera names — remove anything you d
 
 ## Development setup
 
-- Windows 10 or 11, 64-bit.
+- Windows 10 or 11, 64-bit, for the Windows application; Linux (or WSL on Windows) with `ffmpeg` for the console version.
 - [Rust](https://rustup.rs) stable, 1.87 or later, with either the MSVC (`x86_64-pc-windows-msvc`, default) or the GNU (`x86_64-pc-windows-gnu`) toolchain. The only dependency is the [`windows`](https://crates.io/crates/windows) crate.
 - Optional: [Inno Setup 6](https://jrsoftware.org/isinfo.php) to build the installer.
 - Optional: a Frigate server with go2rtc to try things for real.
@@ -40,6 +40,25 @@ cargo test --release -- --ignored --nocapture
 
 `FRIGATE_STREAMS` is a comma-separated list of go2rtc stream names. Without these variables the live tests print a hint and pass. Never commit real addresses, camera names, credentials or footage.
 
+### Testing the Linux console version
+
+Build and test on Linux (WSL works well: it has a terminal with Sixel in Windows Terminal, and X11/Wayland/PulseAudio through WSLg):
+
+```
+cargo build --release
+./target/release/frigate-pip --output terminal --test front_door
+```
+
+There is no framebuffer in WSL, but a file can stand in for one; the screen can then be turned into a picture with ffmpeg:
+
+```
+touch /tmp/fakefb
+./target/release/frigate-pip --output framebuffer --framebuffer /tmp/fakefb --framebuffer-size 1280x720x32 --test front_door
+ffmpeg -f rawvideo -pix_fmt bgra -s 1280x720 -i /tmp/fakefb screen.png
+```
+
+Note that the window's background is put back when FrigatePiP exits, so copy the file while it runs. `FRIGATEPIP_FFMPEG_LOG=/tmp/ff.log` collects ffmpeg's messages; `FRIGATEPIP_AUDIO_OUT=wav:/tmp/a.wav` records the camera audio to a file instead of playing it.
+
 To try the behaviour of Windows "N" editions without Media Foundation, start the app with the environment variable `FRIGATEPIP_NO_MF=1`: live video then falls back to MJPEG.
 
 To try the update path, start the installed app with `FRIGATEPIP_FAKE_VERSION=1.0.0`: it then treats the latest GitHub release as newer and offers to install it (**Settings → Connection → Check now**).
@@ -57,7 +76,9 @@ The installer is written to `target\installer`. GitHub Actions runs `cargo fmt -
 
 | Path | Contents |
 |---|---|
-| `src/main.rs` | Entry point: command line, single instance, start-up. |
+| `src/main.rs` | Entry point: modules per platform; Windows: command line, single instance, start-up. |
+| `src/view.rs` | Shared window decisions: where a new window goes (replacing), its caption, which stream it plays. |
+| `src/console/` | Linux console version: `mod.rs` (main loop, windows, keys), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `canvas.rs` (pictures and captions). |
 | `src/app.rs` | UI thread: tray icon, menu, preview windows and their placement, settings logic. |
 | `src/settings.rs` | The settings window (Win32 controls, tooltips, live preview, connection test output). |
 | `src/config.rs` | Settings in `config.ini` (INI parser that keeps comments, defaults). |
@@ -87,6 +108,7 @@ Please keep these in mind; pull requests are reviewed against them.
 3. **Every user-visible text is translated.** Text shown to users lives in `src/i18n/` only. Log messages and code comments are in English.
 4. **Every option is documented.** A new option needs a tooltip (`tip_*` string) and a description in the user guide.
 5. **Settings stay compatible.** Old `config.ini` files must keep working; new keys need sensible defaults.
+6. **Both platforms build.** Shared modules (Frigate, RTSP, settings, translations) compile on Windows and Linux; platform code lives in the Windows-only modules (`#[cfg(windows)]`) or in `src/console/`. CI builds and tests both.
 
 ## Adding or improving a translation
 
@@ -110,4 +132,4 @@ To add a language:
 
 ## Releases
 
-Maintainers bump `version` in `Cargo.toml` and push a matching `vX.Y.Z` tag. The workflow then builds the exe and the installer and publishes them with their SHA-256 checksums on the Releases page (it fails if the tag and the version differ).
+Maintainers bump `version` in `Cargo.toml` and push a matching `vX.Y.Z` tag. The workflow then builds the exe, the installer and the static Linux archives (x86_64 and ARM64) and publishes them with their SHA-256 checksums on the Releases page (it fails if the tag and the version differ).

@@ -1,6 +1,6 @@
 # FrigatePiP
 
-**Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows.**
+**Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows — and on the Linux console.**
 
 When Frigate detects a person, a car or any other object, FrigatePiP pops up a small always-on-top window with that camera's live video in a corner of your screen — within milliseconds — and closes it again when nothing moves any more. It lives in the notification area, takes about 5–10 MB of memory and practically no CPU while waiting.
 
@@ -19,6 +19,7 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Updates itself:** checks GitHub once a day and installs a new version with one click (can be switched off).
 - **Six languages** — English, Polski, Deutsch, Español, Português, Français — chosen automatically from Windows.
 - A single small executable (~0.7 MB) with no runtime dependencies; per-user installer, no administrator rights.
+- **Linux console version** (x86_64 and ARM64): windows drawn on the framebuffer of a console without a desktop — e.g. a Raspberry Pi with a monitor on the wall — or inside a terminal (Kitty graphics, Sixel or coloured half blocks), video decoded by ffmpeg.
 
 ## Installation
 
@@ -30,6 +31,18 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 Prefer no installer? Download `FrigatePiP-<version>-portable.exe` from the same release and run it from any folder.
 
 **Requirements:** Windows 10 (1809+) or 11, 64-bit; Frigate reachable over plain `http://` on its API port **5000** (the unauthenticated port; 8971 and HTTPS are not supported — in the Home Assistant add-on, enable port 5000 in the add-on's network settings) and, for live video, go2rtc's RTSP port **8554**. On Windows N editions without the Media Feature Pack, live video falls back to MJPEG. Details, updating and uninstalling: [user guide → Installation](docs/en/user-guide.md#2-installation).
+
+## Linux console
+
+```
+sudo apt install ffmpeg
+tar xzf FrigatePiP-*-linux-x86_64.tar.gz      # or …-linux-arm64.tar.gz (Raspberry Pi)
+sudo install frigate-pip /usr/local/bin/
+frigate-pip --test-connection                # after setting url in ~/.config/frigate-pip/config.ini
+frigate-pip
+```
+
+On a console without a desktop the windows appear on the screen (framebuffer; the user needs the `video` group), in a terminal they appear inside it. Keys: **q** quit, **x** close windows, **p** pause, **1–9** show a camera. Running it as a systemd service, all options and troubleshooting: [user guide → Linux console version](docs/en/user-guide.md#12-linux-console-version).
 
 ## Usage in short
 
@@ -60,7 +73,7 @@ cargo build --release            # target\release\frigate-pip.exe
 cargo test --release
 ```
 
-The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php): `ISCC.exe /DAppVersion=1.0.0 installer\frigate-pip.iss`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout, live tests and how to add a language.
+The Linux console version builds the same way on Linux (`cargo build --release`; a static binary with `--target x86_64-unknown-linux-musl`). The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php): `ISCC.exe /DAppVersion=1.0.0 installer\frigate-pip.iss`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout, live tests and how to add a language.
 
 ## Contributing
 

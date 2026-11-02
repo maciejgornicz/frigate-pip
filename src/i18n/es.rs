@@ -169,6 +169,8 @@ pub static STRINGS: Strings = Strings {
     tip_check_updates: "Una vez al día FrigatePiP consulta en GitHub si hay una versión nueva (no se envía ningún dato sobre usted ni sus cámaras) y ofrece instalarla.",
     tip_update: "Busca ahora una versión nueva, o descarga e instala la versión encontrada. La configuración se conserva.",
 
+    console_keys: "q salir · x cerrar ventanas · p pausar · 1–9 mostrar cámara",
+
     labels: &[
         ("person", "persona"),
         ("car", "automóvil"),

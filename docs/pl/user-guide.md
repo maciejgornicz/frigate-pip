@@ -4,6 +4,8 @@
 
 FrigatePiP to mała aplikacja dla systemu Windows, działająca w zasobniku systemowym, przeznaczona dla [Frigate NVR](https://frigate.video). Gdy Frigate wykryje osobę, samochód lub dowolny inny obiekt, FrigatePiP natychmiast pokazuje w rogu ekranu małe okno typu obraz w obrazie (picture-in-picture) z wideo na żywo z tej kamery. Gdy nic się już nie rusza, okno zamyka się samo.
 
+Istnieje też wersja na konsolę Linuksa, bez pulpitu — zob. [Wersja konsolowa dla Linuksa](#12-wersja-konsolowa-dla-linuksa).
+
 ## Spis treści
 
 1. [Wymagania](#1-wymagania)
@@ -17,6 +19,7 @@ FrigatePiP to mała aplikacja dla systemu Windows, działająca w zasobniku syst
 9. [Język](#9-język)
 10. [Pliki, prywatność i zasoby](#10-pliki-prywatność-i-zasoby)
 11. [Rozwiązywanie problemów](#11-rozwiązywanie-problemów)
+12. [Wersja konsolowa dla Linuksa](#12-wersja-konsolowa-dla-linuksa)
 
 ---
 
@@ -339,3 +342,111 @@ Zacznij od **Testuj połączenie** w ustawieniach i od **Pokaż log** w menu w z
 - Sprawdź głośność *FrigatePiP* w Mikserze głośności Windows.
 
 **Coś innego** — zgłoś [problem na GitHubie](https://github.com/maciejgornicz/frigate-pip/issues) i dołącz odpowiedni fragment logu. Usuń adresy i nazwy kamer, których nie chcesz udostępniać.
+
+---
+
+## 12. Wersja konsolowa dla Linuksa
+
+FrigatePiP działa także w Linuksie **bez pulpitu** — na przykład na Raspberry Pi z monitorem na ścianie albo na serwerze, z którym łączysz się przez SSH. Pokazuje te same okna podglądu, na jeden z dwóch sposobów:
+
+- **Framebuffer** — w konsoli Linuksa bez X ani Wayland okna są rysowane bezpośrednio na ekranie, w wybranym rogu, nad tekstem konsoli. Gdy okno się zamyka, to, co było pod nim, wraca na ekran.
+- **Terminal** — w oknie terminala (także przez SSH): wiersz z napisem i obraz, rysowany za pomocą **grafiki Kitty** (Kitty, WezTerm, Ghostty), **Sixel** (foot, Konsole, xterm, Windows Terminal 1.22+) lub — w każdym terminalu z 24-bitowym kolorem — kolorowymi znakami półbloku (niska rozdzielczość). Wiersz stanu na dole pokazuje stan połączenia i klawisze.
+
+Wideo dekoduje program **ffmpeg**; dane dostarcza mu własny klient RTSP FrigatePiP, dzięki czemu obraz pojawia się kilka milisekund po najbliższej klatce kluczowej kamery.
+
+### Wymagania
+
+- Linux na **x86_64** lub **ARM64** (Raspberry Pi 3, 4 lub 5 z systemem 64-bitowym).
+- **ffmpeg**: `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) lub pakiet z Twojej dystrybucji.
+- Do napisów na framebufferze: czcionka DejaVu (`fonts-dejavu-core`, zwykle instalowana razem z ffmpeg).
+- Do framebuffera: członkostwo w grupie `video` (`sudo usermod -aG video $USER`, a potem ponowne zalogowanie).
+- Frigate dostępny tak samo jak w wersji dla Windows (port API 5000, port RTSP 8554).
+
+### Instalacja
+
+1. Pobierz `FrigatePiP-<version>-linux-x86_64.tar.gz` lub `FrigatePiP-<version>-linux-arm64.tar.gz` (Raspberry Pi) ze strony [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
+2. Rozpakuj archiwum i umieść program w jednym z katalogów w ścieżce PATH:
+
+   ```
+   tar xzf FrigatePiP-*-linux-*.tar.gz
+   sudo install frigate-pip /usr/local/bin/
+   ```
+
+3. Uruchom program raz: utworzy plik `~/.config/frigate-pip/config.ini`. W sekcji `[frigate]` ustaw `url` na adres swojego Frigate.
+4. Sprawdź połączenie: `frigate-pip --test-connection`.
+5. Uruchom `frigate-pip`. Za pomocą `--test <camera>` (lub klawiszy **1–9**) możesz od razu zobaczyć kamerę.
+
+Program to pojedynczy plik bez dodatkowych bibliotek. Aby go zaktualizować, podmień plik; aby go usunąć, usuń plik i katalog `~/.config/frigate-pip`.
+
+### Gdzie pojawiają się okna
+
+Przy `--output auto` (domyślnie) FrigatePiP używa **framebuffera**, gdy działa w konsoli Linuksa (`TERM=linux`) lub bez terminala (jako usługa), a w pozostałych przypadkach — **terminala**. W terminalu tryb obrazu jest wybierany automatycznie: grafika Kitty, jeśli jest dostępna, w przeciwnym razie Sixel, jeśli terminal go zgłasza, a w ostateczności półbloki. Oba ustawienia można zmienić w pliku ustawień lub w wierszu poleceń.
+
+### Klawisze
+
+Gdy FrigatePiP działa w terminalu lub w konsoli:
+
+| Klawisz | Efekt |
+|---|---|
+| **q** (lub Ctrl+C) | Wyjście. |
+| **x** (lub Esc) | Zamknij wszystkie okna podglądu. |
+| **p** | Wstrzymaj / wznów powiadomienia. |
+| **1**–**9** | Pokaż kamerę 1–9 (w kolejności z konfiguracji Frigate). |
+
+### Wiersz poleceń
+
+| Opcja | Efekt |
+|---|---|
+| `--output auto\|framebuffer\|terminal` | Gdzie rysować okna. |
+| `--graphics auto\|kitty\|sixel\|blocks` | Jak rysować obrazy w terminalu. |
+| `--framebuffer /dev/fb0` | Urządzenie framebuffera. |
+| `--test <camera>` | Pokazuje kamerę zaraz po uruchomieniu. |
+| `--test-connection` | Sprawdza połączenie z Frigate (jak **Testuj połączenie** w Windows) i kończy działanie. |
+| `--version`, `--help` | Wersja, krótka pomoc. |
+
+### Ustawienia
+
+Wersja dla Linuksa używa tego samego pliku `config.ini` (w `~/.config/frigate-pip/` lub `$XDG_CONFIG_HOME/frigate-pip/`) co wersja dla Windows — zob. [Plik ustawień](#7-plik-ustawień). Zmiany są stosowane w ciągu dwóch sekund od zapisania pliku. Używane są następujące ustawienia: wszystko w `[app]` (język), `[frigate]`, `[mqtt]`, `[trigger]`, a w `[display]`: `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`; w `[video]`: `live`, `stream`, `auto_main_width`, `camera_audio`; oraz sekcje `[camera.<name>]`. Ustawienia dostępne tylko w Windows (`monitor`, `topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) są pomijane.
+
+Dodatkowe ustawienia w sekcji `[console]`:
+
+| Klucz | Domyślnie | Znaczenie |
+|---|---|---|
+| `output` | `auto` | `auto`, `framebuffer` lub `terminal`. |
+| `graphics` | `auto` | `auto`, `kitty`, `sixel` lub `blocks` (obrazy w terminalu). |
+| `framebuffer` | `/dev/fb0` | Urządzenie framebuffera. |
+| `ffmpeg` | `ffmpeg` | Program ffmpeg (nazwa lub pełna ścieżka). |
+| `font` | *(DejaVu Sans Bold)* | Czcionka TrueType do napisów na framebufferze. |
+
+Język wynika z ustawień regionalnych systemu (`LANG`), chyba że w `[app]` ustawiono `language`. Dźwięk z kamery jest odtwarzany przez PulseAudio/PipeWire, jeśli są dostępne, a w przeciwnym razie przez ALSA.
+
+### Automatyczne uruchamianie (systemd)
+
+Dla monitora wyświetlającego konsolę (np. Raspberry Pi bez pulpitu) utwórz plik `/etc/systemd/system/frigate-pip.service` (zastąp `pi` nazwą swojego użytkownika):
+
+```ini
+[Unit]
+Description=FrigatePiP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+SupplementaryGroups=video audio
+ExecStart=/usr/local/bin/frigate-pip --output framebuffer
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Następnie: `sudo systemctl enable --now frigate-pip`. Log trafia do dziennika systemd (`journalctl -u frigate-pip`) oraz do `~/.config/frigate-pip/frigate-pip.log`. Aby migający kursor konsoli nie pojawiał się na oknach, dodaj `vt.global_cursor_default=0` do wiersza poleceń jądra (na Raspberry Pi: `/boot/firmware/cmdline.txt`).
+
+### Rozwiązywanie problemów w Linuksie
+
+- **„cannot start ffmpeg”** — zainstaluj ffmpeg (`sudo apt install ffmpeg`) lub ustaw `ffmpeg` w `[console]`.
+- **„/dev/fb0: Permission denied”** — dodaj użytkownika do grupy `video` i zaloguj się ponownie (dla usługi: `SupplementaryGroups=video`).
+- **Brak napisu na framebufferze** — zainstaluj `fonts-dejavu-core` lub ustaw `font` w `[console]`.
+- **Obraz w terminalu jest mocno rozpikselowany** — to tryb półbloków; użyj terminala z grafiką Kitty lub Sixel (zob. wyżej) albo ustaw `graphics`.
+- **Brak dźwięku** — dźwięk z kamery wymaga PulseAudio/PipeWire lub ALSA; użytkownik usługi musi należeć do grupy `audio`.
+- **Aby uzyskać szczegółowy raport**, uruchom FrigatePiP poleceniem `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` i dołącz do zgłoszenia koniec tego pliku oraz logu.

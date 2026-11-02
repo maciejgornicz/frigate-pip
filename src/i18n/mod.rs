@@ -79,7 +79,19 @@ impl Lang {
     }
 }
 
+/// Language from the locale environment (`LC_ALL`, `LC_MESSAGES`, `LANG`, e.g. `pl_PL.UTF-8`).
+#[cfg(not(windows))]
+pub fn detect() -> Lang {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find(|v| !v.is_empty())
+        .and_then(|v| Lang::from_code(v.get(..2)?))
+        .unwrap_or(Lang::En)
+}
+
 /// Language of the Windows user interface (English when unsupported).
+#[cfg(windows)]
 pub fn detect() -> Lang {
     let id = unsafe { windows::Win32::Globalization::GetUserDefaultUILanguage() };
     Lang::from_primary_langid(id & 0x3FF)
@@ -313,6 +325,11 @@ pub struct Strings {
     pub update_balloon_text: &'static str,
     pub tip_check_updates: &'static str,
     pub tip_update: &'static str,
+
+    // ---- Linux console version
+    /// Keys shown in the status line.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_keys: &'static str,
 
     /// Frigate labels: (label, translation)
     pub labels: &'static [(&'static str, &'static str)],

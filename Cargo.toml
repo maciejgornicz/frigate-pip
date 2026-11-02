@@ -1,6 +1,6 @@
 [package]
 name = "frigate-pip"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.87"
 description = "Instant picture-in-picture camera windows for Frigate NVR on Windows"
@@ -8,7 +8,7 @@ license = "GPL-3.0-only"
 repository = "https://github.com/maciejgornicz/frigate-pip"
 readme = "README.md"
 
-[dependencies.windows]
+[target.'cfg(windows)'.dependencies.windows]
 version = "=0.58.0"
 features = [
     "Foundation_Numerics",
@@ -44,6 +44,10 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+fontdue = "0.9"
 
 [profile.release]
 opt-level = "s"
