@@ -48,8 +48,9 @@ pub trait Output {
     fn caption_height(&self) -> u32 {
         0
     }
-    /// Draws window `id`: the picture, the caption (empty = none) and the live dot.
-    fn draw(&mut self, id: u64, rect: Rect, img: &Image, caption: &str, live: bool);
+    /// Draws window `id`: the picture, the caption (empty = none) and the live dot. The
+    /// picture is handed over (outputs that keep it need no copy).
+    fn draw(&mut self, id: u64, rect: Rect, img: Image, caption: &str, live: bool);
     /// Removes window `id` from the screen.
     fn clear(&mut self, id: u64);
     /// Status line (terminal only).
@@ -238,12 +239,15 @@ enum Ev {
 static QUIT: AtomicBool = AtomicBool::new(false);
 /// Another start (or `--settings`) asked the running copy to open its settings (SIGUSR1).
 static OPEN_SETTINGS: AtomicBool = AtomicBool::new(false);
+/// Another start with `--test CAMERA` asked the running copy to show it (SIGUSR2; the
+/// camera is in `request_path()`).
+static SHOW_CAMERA: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_signal(sig: libc::c_int) {
-    if sig == libc::SIGUSR1 {
-        OPEN_SETTINGS.store(true, Ordering::Relaxed);
-    } else {
-        QUIT.store(true, Ordering::Relaxed);
+    match sig {
+        libc::SIGUSR1 => OPEN_SETTINGS.store(true, Ordering::Relaxed),
+        libc::SIGUSR2 => SHOW_CAMERA.store(true, Ordering::Relaxed),
+        _ => QUIT.store(true, Ordering::Relaxed),
     }
 }
 
@@ -355,6 +359,9 @@ pub fn main() {
             std::process::exit(1);
         }
     };
+    if start_in_background(&args, &console) {
+        return;
+    }
     install_signals();
     // Viewer inside a tmux popup (started by the background process).
     if let Some(camera) = arg(&args, "--view") {
@@ -362,7 +369,7 @@ pub fn main() {
         return;
     }
     let (tx, rx) = mpsc::channel();
-    let (out, mode) = match open_output(&console, &cfg, &tx) {
+    let (out, mode) = match open_output(&console, &cfg, &tx, args.iter().any(|a| a == "--detached")) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("FrigatePiP: {e}");
@@ -375,11 +382,7 @@ pub fn main() {
         Mode::Window => match single_instance() {
             Ok(lock) => lock,
             Err(pid) => {
-                if pid > 0 {
-                    unsafe {
-                        libc::kill(pid, libc::SIGUSR1);
-                    }
-                }
+                hand_over(pid, &args);
                 println!("{}", t().console_already_running);
                 return;
             }
@@ -438,10 +441,16 @@ fn camera_list(url: &str, cams: &[CameraInfo]) -> String {
     out
 }
 
-/// Lock file of the desktop windows (one copy per user); it holds the process id.
+/// Lock file of the desktop windows (one copy per user); it holds the process id. In the
+/// user's private runtime folder, or the settings folder — never a shared /tmp.
 fn lock_path() -> PathBuf {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_dir()).unwrap_or_else(crate::util::app_dir);
     dir.join(format!("frigate-pip-{}.lock", unsafe { libc::getuid() }))
+}
+
+/// The camera another start (`--test`) wants the running copy to show.
+fn request_path() -> PathBuf {
+    lock_path().with_extension("camera")
 }
 
 /// Takes the lock for this copy (`None` when no lock file can be used);
@@ -449,7 +458,10 @@ fn lock_path() -> PathBuf {
 fn single_instance() -> Result<Option<std::fs::File>, i32> {
     use std::io::{Read, Write};
     use std::os::fd::AsRawFd;
-    let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(lock_path()) else {
+    use std::os::unix::fs::OpenOptionsExt;
+    let open =
+        std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(lock_path());
+    let Ok(mut f) = open else {
         return Ok(None);
     };
     if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
@@ -459,6 +471,70 @@ fn single_instance() -> Result<Option<std::fs::File>, i32> {
     }
     let _ = f.set_len(0).and_then(|_| f.write_all(std::process::id().to_string().as_bytes()));
     Ok(Some(f))
+}
+
+/// Hands this start over to the running copy (`pid`): `--test CAMERA` shows the camera
+/// there, anything else opens its settings.
+fn hand_over(pid: i32, args: &[String]) {
+    if pid <= 0 {
+        return;
+    }
+    let sig = match arg(args, "--test") {
+        Some(camera) if std::fs::write(request_path(), &camera).is_ok() => libc::SIGUSR2,
+        _ => libc::SIGUSR1,
+    };
+    unsafe {
+        libc::kill(pid, sig);
+    }
+}
+
+/// `--output auto` (or an unknown value).
+fn output_auto(output: &str) -> bool {
+    !matches!(output, "window" | "desktop" | "tmux" | "framebuffer" | "fb" | "terminal")
+}
+
+/// Desktop windows started from a terminal continue in the background, like a start from
+/// the menu: the terminal is free again and may be closed. `true` = this process is done
+/// (the copy in the background runs, or one was already running).
+fn start_in_background(args: &[String], c: &ConsoleCfg) -> bool {
+    use std::os::unix::process::CommandExt;
+    let output = c.output.as_str();
+    let window = matches!(output, "window" | "desktop") || (output_auto(output) && std::env::var_os("DISPLAY").is_some());
+    if !window || !is_tty(libc::STDIN_FILENO) || args.iter().any(|a| a == "--detached" || a == "--view") {
+        return false;
+    }
+    // Without a usable desktop the normal start reports it (or uses the console).
+    if x11::X11::connect(|_| {}).is_err() {
+        return false;
+    }
+    match single_instance() {
+        Err(pid) => {
+            hand_over(pid, args);
+            println!("{}", t().console_already_running);
+            return true;
+        }
+        Ok(lock) => drop(lock),
+    }
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args).arg("--detached").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // Its own session: closing the terminal does not end it.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    match cmd.spawn() {
+        Ok(_) => {
+            println!("FrigatePiP {} - {}", env!("CARGO_PKG_VERSION"), t().console_window_running);
+            true
+        }
+        Err(e) => {
+            crate::log!("Cannot continue in the background: {e}");
+            false
+        }
+    }
 }
 
 /// The desktop entry in ~/.config/autostart that starts the desktop windows with the session.
@@ -492,18 +568,19 @@ fn autostart_entry(exe: &str) -> String {
 
 fn install_signals() {
     unsafe {
-        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGUSR1] {
+        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGUSR1, libc::SIGUSR2] {
             libc::signal(sig, on_signal as *const () as libc::sighandler_t);
         }
     }
 }
 
 /// Desktop windows on a desktop, tmux popups when asked for, otherwise the framebuffer on
-/// a console without graphics and the terminal elsewhere.
-fn open_output(c: &ConsoleCfg, cfg: &Config, tx: &Sender<Ev>) -> Result<(Box<dyn Output>, Mode), String> {
+/// a console without graphics and the terminal elsewhere. `detached` = the copy started in
+/// the background for desktop windows (no terminal to fall back to).
+fn open_output(c: &ConsoleCfg, cfg: &Config, tx: &Sender<Ev>, detached: bool) -> Result<(Box<dyn Output>, Mode), String> {
     let output = c.output.as_str();
-    let auto = !matches!(output, "window" | "desktop" | "tmux" | "framebuffer" | "fb" | "terminal");
-    if matches!(output, "window" | "desktop") || (auto && std::env::var_os("DISPLAY").is_some()) {
+    let auto = output_auto(output) && !detached;
+    if matches!(output, "window" | "desktop") || detached || (auto && std::env::var_os("DISPLAY").is_some()) {
         let tx = tx.clone();
         let font = canvas::Font::load(c.font.as_deref());
         match desktop::Desktop::open(cfg, font, move |e| {
@@ -607,7 +684,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         let frame = shared.frame.lock().unwrap().clone();
         if let Some(frame) = frame {
             let text = with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed));
-            out.draw(1, rect, &frame, &text, shared.live.load(Ordering::Relaxed));
+            out.draw(1, rect, frame, &text, shared.live.load(Ordering::Relaxed));
             last = Some(Instant::now());
         }
     }
@@ -920,6 +997,12 @@ impl App {
             }
             if OPEN_SETTINGS.swap(false, Ordering::Relaxed) {
                 self.open_settings();
+            }
+            if SHOW_CAMERA.swap(false, Ordering::Relaxed) {
+                if let Ok(camera) = std::fs::read_to_string(request_path()) {
+                    let _ = std::fs::remove_file(request_path());
+                    self.test(camera.trim());
+                }
             }
         }
         for i in (0..self.wins.len()).rev() {
@@ -1236,7 +1319,7 @@ impl App {
             } else {
                 String::new()
             };
-            self.out.draw(w.id, rect, &frame, &caption, w.shared.live.load(Ordering::Relaxed));
+            self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).
@@ -1245,6 +1328,10 @@ impl App {
     fn tick(&mut self) {
         if matches!(self.pause, Pause::Until(until) if Instant::now() >= until) {
             self.set_pause(Pause::Off);
+        }
+        if matches!(self.pause, Pause::Until(_)) {
+            // The minutes left in the tray (sent only when the text changes).
+            self.update_tray();
         }
         // Windows closed by the user in another process (tmux popups).
         let gone: Vec<usize> = (0..self.wins.len()).filter(|&i| !self.out.alive(self.wins[i].id)).collect();
@@ -1267,6 +1354,7 @@ impl App {
             self.restart_video(i);
         }
         if self.out.refresh() {
+            self.info.lock().unwrap().monitors = self.out.monitors();
             for w in &mut self.wins {
                 w.rect = None;
                 w.user_moved = false;

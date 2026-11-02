@@ -366,6 +366,9 @@ pub struct Strings {
     /// Settings page: shown after saving.
     #[cfg_attr(windows, allow(dead_code))]
     pub linux_settings_saved: &'static str,
+    /// Settings page: saving failed, {0} = the reason.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_settings_not_saved: &'static str,
     /// Settings page: the automatic language (from LANG).
     #[cfg_attr(windows, allow(dead_code))]
     pub linux_language_auto: &'static str,
@@ -450,6 +453,7 @@ mod tests {
                 (en.test_rtsp_fail, s.test_rtsp_fail),
                 (en.console_list_title, s.console_list_title),
                 (en.console_autostart_on, s.console_autostart_on),
+                (en.linux_settings_not_saved, s.linux_settings_not_saved),
                 (en.status_connected, s.status_connected),
                 (en.status_disconnected, s.status_disconnected),
                 (en.menu_update, s.menu_update),

@@ -439,35 +439,16 @@ fn connect_address(address: &str) -> std::io::Result<UnixStream> {
         let Some(params) = part.strip_prefix("unix:") else { continue };
         for kv in params.split(',') {
             if let Some(path) = kv.strip_prefix("path=") {
-                return UnixStream::connect(unescape(path));
+                return UnixStream::connect(crate::net::percent_decode(path));
             }
             if let Some(name) = kv.strip_prefix("abstract=") {
                 use std::os::linux::net::SocketAddrExt;
-                let addr = std::os::unix::net::SocketAddr::from_abstract_name(unescape(name).as_bytes())?;
+                let addr = std::os::unix::net::SocketAddr::from_abstract_name(crate::net::percent_decode(name).as_bytes())?;
                 return UnixStream::connect_addr(&addr);
             }
         }
     }
     Err(std::io::Error::other(format!("unsupported D-Bus address {address}")))
-}
-
-/// %xx escapes of D-Bus addresses.
-fn unescape(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 pub struct Bus {
@@ -697,7 +678,7 @@ mod tests {
 
     #[test]
     fn address_escapes() {
-        assert_eq!(unescape("/run/user/1000/bus"), "/run/user/1000/bus");
-        assert_eq!(unescape("/tmp/dbus%2dx"), "/tmp/dbus-x");
+        assert_eq!(crate::net::percent_decode("/run/user/1000/bus"), "/run/user/1000/bus");
+        assert_eq!(crate::net::percent_decode("/tmp/dbus%2dx"), "/tmp/dbus-x");
     }
 }

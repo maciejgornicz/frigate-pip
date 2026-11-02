@@ -16,7 +16,8 @@ pub struct Url {
     pub path: String,
 }
 
-fn percent_decode(s: &str) -> String {
+/// `%xx` escapes (URLs, D-Bus addresses, form fields).
+pub fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

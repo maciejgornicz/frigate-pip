@@ -17,7 +17,7 @@ use std::time::Duration;
 #[derive(Clone, Default)]
 pub struct Info {
     pub cameras: Vec<CameraInfo>,
-    /// Monitors: (x, width, height, primary).
+    /// Monitors in the order of their numbers in the `monitor` setting: (x, width, height, primary).
     pub monitors: Vec<(i32, u32, u32, bool)>,
     /// The program starts with the desktop session.
     pub autostart: bool,
@@ -127,9 +127,7 @@ fn handle(mut s: TcpStream, port: u16, token: &str, path: &Path, info: &Mutex<In
     let (route, query) = rest.split_once('?').unwrap_or((rest, ""));
     match (req.method.as_str(), route) {
         ("GET", "") => {
-            let (cfg, _) =
-                config::load(&path.to_path_buf()).unwrap_or_else(|_| (Config::from_ini(&IniDoc::parse(config::DEFAULT_INI)), IniDoc::default()));
-            let html = page(&cfg, &info.lock().unwrap(), query.contains("saved=1"));
+            let html = page(&current(path), &info.lock().unwrap(), query.contains("saved=1").then_some(Ok(())));
             respond(&mut s, "200 OK", "text/html; charset=utf-8", "", html.as_bytes())
         }
         ("POST", "save") => {
@@ -138,15 +136,28 @@ fn handle(mut s: TcpStream, port: u16, token: &str, path: &Path, info: &Mutex<In
                 return respond(&mut s, "403 Forbidden", "text/plain", "", b"forbidden");
             }
             let form = parse_form(&String::from_utf8_lossy(&req.body));
-            let (_, mut doc) = config::load(&path.to_path_buf())?;
             let known = info.lock().unwrap().cameras.clone();
-            let autostart = apply(&form, &mut doc, &known);
-            config::save(&path.to_path_buf(), &doc);
-            crate::log!("Settings saved from the settings page");
-            if let Some(on) = autostart {
-                on_autostart(on);
+            let saved = config::load(&path.to_path_buf()).and_then(|(_, mut doc)| {
+                let autostart = apply(&form, &mut doc, &known);
+                std::fs::write(path, doc.to_text())?;
+                Ok(autostart)
+            });
+            match saved {
+                Ok(autostart) => {
+                    crate::log!("Settings saved from the settings page");
+                    if let Some(on) = autostart {
+                        on_autostart(on);
+                    }
+                    respond(&mut s, "303 See Other", "text/plain", "Location: ./?saved=1\r\n", b"")
+                }
+                Err(e) => {
+                    // The page again, with the reason (what was entered is not lost: Back).
+                    let why = format!("{}: {e}", path.display());
+                    crate::log!("Cannot save settings: {why}");
+                    let html = page(&current(path), &info.lock().unwrap(), Some(Err(why)));
+                    respond(&mut s, "500 Internal Server Error", "text/html; charset=utf-8", "", html.as_bytes())
+                }
             }
-            respond(&mut s, "303 See Other", "text/plain", "Location: ./?saved=1\r\n", b"")
         }
         ("GET", "test") => {
             // Like on Windows: the values from the form, nothing is saved.
@@ -163,28 +174,14 @@ fn handle(mut s: TcpStream, port: u16, token: &str, path: &Path, info: &Mutex<In
     }
 }
 
+/// The settings as saved (the defaults when the file cannot be read).
+fn current(path: &Path) -> Config {
+    config::load(&path.to_path_buf()).map(|(c, _)| c).unwrap_or_else(|_| Config::from_ini(&IniDoc::parse(config::DEFAULT_INI)))
+}
+
 /// `application/x-www-form-urlencoded` (also a query string).
 fn parse_form(s: &str) -> Vec<(String, String)> {
-    let decode = |v: &str| {
-        let b = v.as_bytes();
-        let mut out = Vec::with_capacity(b.len());
-        let mut i = 0;
-        while i < b.len() {
-            match b[i] {
-                b'+' => out.push(b' '),
-                b'%' if i + 2 < b.len() => match std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                    Some(x) => {
-                        out.push(x);
-                        i += 2;
-                    }
-                    None => out.push(b'%'),
-                },
-                c => out.push(c),
-            }
-            i += 1;
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    };
+    let decode = |v: &str| crate::net::percent_decode(&v.replace('+', " "));
     s.split('&').filter(|p| !p.is_empty()).map(|p| p.split_once('=').unwrap_or((p, ""))).map(|(k, v)| (decode(k), decode(v))).collect()
 }
 
@@ -313,8 +310,8 @@ fn opts(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
     pairs.iter().map(|(v, l)| (v.to_string(), l.to_string())).collect()
 }
 
-/// The settings page.
-fn page(c: &Config, info: &Info, saved: bool) -> String {
+/// The settings page; `saved` = the result of the last save, shown above the form.
+fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
     let s = t();
     let lang = i18n::current();
     let all = |list: &[String], name: &str| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(name));
@@ -332,9 +329,7 @@ fn page(c: &Config, info: &Info, saved: bool) -> String {
     let mut languages = vec![("auto".to_string(), s.linux_language_auto.to_string())];
     languages.extend(Lang::ALL.iter().map(|l| (l.code().to_string(), l.native_name().to_string())));
     let mut monitors = vec![("primary".to_string(), s.monitor_primary.to_string())];
-    let mut sorted = info.monitors.clone();
-    sorted.sort_by_key(|m| m.0);
-    for (i, (_, w, h, primary)) in sorted.iter().enumerate() {
+    for (i, (_, w, h, primary)) in info.monitors.iter().enumerate() {
         let text = i18n::fmt(s.monitor_item, &[&(i + 1), w, h]) + if *primary { s.monitor_primary_suffix } else { "" };
         monitors.push(((i + 1).to_string(), text));
     }
@@ -474,7 +469,11 @@ fn page(c: &Config, info: &Info, saved: bool) -> String {
     video += &row("video.prebuffer", "", checkbox("video.prebuffer", c.prebuffer, s.prebuffer), s.tip_prebuffer);
     video += &row("video.camera_audio", "", checkbox("video.camera_audio", c.camera_audio, s.camera_audio), s.tip_camera_audio);
 
-    let saved = if saved { format!("<p class=\"saved\">{}</p>", esc(s.linux_settings_saved)) } else { String::new() };
+    let saved = match saved {
+        Some(Ok(())) => format!("<p class=\"saved\">{}</p>", esc(s.linux_settings_saved)),
+        Some(Err(why)) => format!("<p class=\"error\">{}</p>", esc(&i18n::fmt(s.linux_settings_not_saved, &[&why]))),
+        None => String::new(),
+    };
     let help = format!("https://github.com/maciejgornicz/frigate-pip/blob/main/docs/{}/user-guide.md", lang.code());
     format!(
         r#"<!doctype html>
@@ -484,8 +483,8 @@ fn page(c: &Config, info: &Info, saved: bool) -> String {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <style>
-:root {{ color-scheme: light dark; --bg: #f6f7f9; --card: #ffffff; --text: #1f2933; --muted: #5f6b7a; --line: #dde2e8; --accent: #2563eb; --ok: #15803d; }}
-@media (prefers-color-scheme: dark) {{ :root {{ --bg: #111418; --card: #1a1f25; --text: #e6e9ed; --muted: #9aa5b1; --line: #2c333b; --accent: #60a5fa; --ok: #4ade80; }} }}
+:root {{ color-scheme: light dark; --bg: #f6f7f9; --card: #ffffff; --text: #1f2933; --muted: #5f6b7a; --line: #dde2e8; --accent: #2563eb; --ok: #15803d; --bad: #b91c1c; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg: #111418; --card: #1a1f25; --text: #e6e9ed; --muted: #9aa5b1; --line: #2c333b; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171; }} }}
 * {{ box-sizing: border-box; }}
 body {{ margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif; }}
 main {{ max-width: 860px; margin: 0 auto; padding: 24px 16px 96px; }}
@@ -510,6 +509,7 @@ button.primary {{ background: var(--accent); border-color: var(--accent); color:
 pre {{ white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 8px 0 0; font-size: 13px; }}
 .bar {{ position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 12px 16px; text-align: center; }}
 .saved {{ color: var(--ok); font-weight: 600; margin: 0 0 12px; }}
+.error {{ color: var(--bad); font-weight: 600; margin: 0 0 12px; }}
 @media (max-width: 640px) {{ .row {{ grid-template-columns: 1fr; }} .row > label {{ padding-top: 0; }} }}
 </style>
 </head>
@@ -614,15 +614,18 @@ mod tests {
         let c = Config::from_ini(&doc);
         let info = Info {
             cameras: vec![cam("front_door", &["person"])],
-            monitors: vec![(0, 1920, 1080, true), (-1920, 1280, 1024, false)],
+            // Numbered by the output (from the left).
+            monitors: vec![(-1920, 1280, 1024, false), (0, 1920, 1080, true)],
             autostart: true,
         };
-        let html = page(&c, &info, true);
+        let html = page(&c, &info, Some(Ok(())));
         assert!(html.contains("&lt;script&gt;") && !html.contains("\"<script>"));
         assert!(html.contains("name=\"trigger.cameras\" value=\"front_door\" checked"));
         // Monitors are numbered from the left.
         assert!(html.contains("<option value=\"1\">Monitor 1 – 1280×1024</option>"));
         assert!(html.contains("Monitor 2 – 1920×1080 (primary)"));
         assert!(html.contains("id=\"autostart\" name=\"autostart\" value=\"true\" checked"));
+        let failed = page(&c, &info, Some(Err("/x/config.ini: <denied>".into())));
+        assert!(failed.contains("class=\"error\">Not saved: /x/config.ini: &lt;denied&gt;</p>"));
     }
 }

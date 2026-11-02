@@ -212,7 +212,7 @@ impl Output for Framebuffer {
         (self.width, self.height)
     }
 
-    fn draw(&mut self, id: u64, rect: Rect, img: &Image, caption: &str, live: bool) {
+    fn draw(&mut self, id: u64, rect: Rect, img: Image, caption: &str, live: bool) {
         // A window that moved: put back what was under its old place first.
         if self.saved.get(&id).is_some_and(|(r, _)| *r != rect) {
             self.restore(id);
@@ -226,7 +226,7 @@ impl Output for Framebuffer {
             }
             self.saved.insert(id, (rect, saved));
         }
-        let mut pic = if (img.w, img.h) == (rect.w, rect.h) { img.clone() } else { img.resized(rect.w, rect.h) };
+        let mut pic = if (img.w, img.h) == (rect.w, rect.h) { img } else { img.resized(rect.w, rect.h) };
         if let (Some(font), false) = (&self.font, caption.is_empty()) {
             font.caption(&mut pic, caption, live, 0.0);
         }

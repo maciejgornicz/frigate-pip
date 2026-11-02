@@ -291,12 +291,16 @@ fn rtsp_live(p: &Arc<Params>, ff: &Arc<Ffmpeg>, shared: &Arc<Shared>, wake: &Wak
                     .ok()
             };
             let result = direct(url, p, ff, shared, wake, Role::Takeover, handover);
-            // The wanted stream failed: the prebuffer's picture stays while it lasts.
-            if result.is_err() && shared.live.load(Ordering::Relaxed) {
+            // The wanted stream failed: the prebuffer's picture stays while it lasts. It may
+            // still be on its way (the wanted stream can fail within milliseconds), so the
+            // bridge decides — MJPEG only when it ends without a picture, never next to it.
+            if result.is_err() {
                 if let Some(b) = bridge {
                     let _ = b.join();
                 }
-                return Ok(());
+                if shared.live.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
             }
             result
         }

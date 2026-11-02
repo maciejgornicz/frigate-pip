@@ -52,6 +52,8 @@ pub struct Desktop {
     changed: bool,
     /// Calls of `refresh` (every 0.5 s).
     ticks: u32,
+    /// One of our windows was covered: check at the next `refresh` whether to raise it.
+    recheck: bool,
     font: Option<Font>,
     wins: HashMap<u64, Win>,
 }
@@ -72,13 +74,19 @@ fn inside((x0, y0, x1, y1): Area, x: i32, y: i32) -> bool {
     x >= x0 && x < x1 && y >= y0 && y < y1
 }
 
-/// The monitor from the `monitor` setting: "primary" or a number counted from the left.
+/// Monitors in the order of their numbers in the `monitor` setting: from the left, then
+/// from the top (like on Windows).
+fn numbered(monitors: &[Monitor]) -> Vec<Monitor> {
+    let mut sorted = monitors.to_vec();
+    sorted.sort_by_key(|m| (m.x, m.y));
+    sorted
+}
+
+/// The monitor from the `monitor` setting: "primary" or a number (see `numbered`).
 fn pick_monitor(monitors: &[Monitor], setting: &str) -> Option<Monitor> {
     if let Ok(n) = setting.trim().parse::<usize>() {
-        let mut sorted = monitors.to_vec();
-        sorted.sort_by_key(|m| (m.x, m.y));
-        if let Some(m) = n.checked_sub(1).and_then(|i| sorted.get(i)) {
-            return Some(*m);
+        if let Some(m) = n.checked_sub(1).and_then(|i| numbered(monitors).get(i).copied()) {
+            return Some(m);
         }
     }
     monitors.iter().find(|m| m.primary).or(monitors.first()).copied()
@@ -109,6 +117,7 @@ impl Desktop {
             topmost: cfg.topmost,
             changed: false,
             ticks: 0,
+            recheck: false,
             font,
             wins: HashMap::new(),
         };
@@ -171,10 +180,10 @@ impl Output for Desktop {
     }
 
     fn monitors(&self) -> Vec<(i32, u32, u32, bool)> {
-        self.monitors.iter().map(|m| (m.x, m.w, m.h, m.primary)).collect()
+        numbered(&self.monitors).iter().map(|m| (m.x, m.w, m.h, m.primary)).collect()
     }
 
-    fn draw(&mut self, id: u64, rect: Rect, img: &Image, caption: &str, live: bool) {
+    fn draw(&mut self, id: u64, rect: Rect, img: Image, caption: &str, live: bool) {
         let r = Rect { x: self.area.x + rect.x, y: self.area.y + rect.y, w: rect.w, h: rect.h };
         let Desktop { x, wins, topmost, .. } = self;
         let w = wins.entry(id).or_insert_with(|| Win {
@@ -193,7 +202,7 @@ impl Output for Desktop {
             x.configure(w.xid, r.x, r.y, r.w, r.h, w.on_top);
             w.rect = r;
         }
-        w.last = Some((img.clone(), caption.to_string(), live));
+        w.last = Some((img, caption.to_string(), live));
         self.paint(id);
     }
 
@@ -205,12 +214,16 @@ impl Output for Desktop {
 
     fn refresh(&mut self) -> bool {
         // Window managers of plain X11 desktops (Xfce, Openbox…) may stack a clicked window
-        // above ours; GNOME and KDE keep such windows on top themselves.
+        // above ours; GNOME and KDE keep such windows on top themselves. Ours go back on top
+        // when covered (checked at once, and every 2 s in case the event was missed), but
+        // never above an open menu or popup.
         self.ticks += 1;
-        if self.ticks.is_multiple_of(4) {
+        if std::mem::take(&mut self.recheck) || self.ticks.is_multiple_of(4) {
             let xids: Vec<u32> = self.wins.values().filter(|w| w.on_top && w.press.is_none()).map(|w| w.xid).collect();
-            for xid in xids {
-                self.x.raise(xid);
+            if !xids.is_empty() && self.x.should_raise(&xids) {
+                for xid in xids {
+                    self.x.raise(xid);
+                }
             }
         }
         std::mem::take(&mut self.changed)
@@ -243,6 +256,19 @@ impl Output for Desktop {
         let window = match *e {
             Event::Press { window, .. } | Event::Release { window, .. } | Event::Motion { window, .. } => window,
             Event::Enter { window } | Event::Leave { window } | Event::Expose { window } => window,
+            Event::Obscured { .. } => {
+                self.recheck = true;
+                return Vec::new();
+            }
+            // A monitor was added or removed, the resolution, the panels or the scaling
+            // changed: the windows are placed again.
+            Event::Screen { atom } => {
+                if atom == 0 || self.x.is_screen_property(atom) {
+                    self.find_area();
+                    self.changed = true;
+                }
+                return Vec::new();
+            }
             Event::Closed => return Vec::new(),
         };
         let Some(id) = self.wins.iter().find(|(_, w)| w.xid == window).map(|(id, _)| *id) else { return Vec::new() };
@@ -300,6 +326,12 @@ impl Output for Desktop {
                         actions.push(Action::Open);
                     } else {
                         w.last_click = Some((time, root_x, root_y));
+                        // Ordinary windows may have been placed elsewhere by the window manager.
+                        if !w.on_top {
+                            if let Some((px, py)) = self.x.position(w.xid) {
+                                (w.rect.x, w.rect.y) = (px, py);
+                            }
+                        }
                         w.press = Some(Press { root: (root_x, root_y), start: (w.rect.x, w.rect.y), moved: false });
                     }
                 }
@@ -360,6 +392,10 @@ mod tests {
         assert_eq!(pick_monitor(&mons, "2").map(|m| m.x), Some(0));
         assert_eq!(pick_monitor(&mons, "9").map(|m| m.x), Some(0));
         assert_eq!(pick_monitor(&[], "primary"), None);
+        // One above the other (same x): numbered from the top, whatever order RandR gives.
+        let stacked = [Monitor { x: 0, y: 1080, w: 1920, h: 1080, primary: false }, Monitor { x: 0, y: 0, w: 1920, h: 1080, primary: true }];
+        assert_eq!(pick_monitor(&stacked, "1").map(|m| m.y), Some(0));
+        assert_eq!(numbered(&stacked)[1].y, 1080);
         // A 32 px top bar on the primary monitor.
         assert_eq!(usable(mons[0], Some((0, 32, 2560, 1408))), Rect { x: 0, y: 32, w: 2560, h: 1408 });
         assert_eq!(usable(mons[0], None), Rect { x: 0, y: 0, w: 2560, h: 1440 });

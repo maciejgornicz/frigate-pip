@@ -374,7 +374,7 @@ impl Output for Terminal {
         Duration::from_millis(if self.graphics == Graphics::Blocks { 66 } else { 100 })
     }
 
-    fn draw(&mut self, id: u64, rect: Rect, img: &Image, caption: &str, live: bool) {
+    fn draw(&mut self, id: u64, rect: Rect, img: Image, caption: &str, live: bool) {
         let c = self.cells(rect);
         let mut buf = String::new();
         if let Some(old) = self.shown.get(&id).copied() {

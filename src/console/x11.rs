@@ -50,6 +50,14 @@ pub enum Event {
     Expose {
         window: u32,
     },
+    /// Another window now covers part of ours.
+    Obscured {
+        window: u32,
+    },
+    /// The screen changed: its size (`atom` 0), or a property of the root window.
+    Screen {
+        atom: u32,
+    },
     /// The connection to the X server ended (e.g. the user logged out).
     Closed,
 }
@@ -261,7 +269,7 @@ fn parse_setup(b: &[u8]) -> Result<Setup, String> {
     Ok(Setup { id_base: u32le(b, 4), id_mask: u32le(b, 8), max_request, root, root_size: (w as u32, h as u32) })
 }
 
-fn parse_event(code: u8, b: &[u8; 32]) -> Option<Event> {
+fn parse_event(code: u8, b: &[u8; 32], root: u32) -> Option<Event> {
     let (window, x, y, rx, ry) = (u32le(b, 12), i16le(b, 24), i16le(b, 26), i16le(b, 20), i16le(b, 22));
     // Crossing events caused by grabs (e.g. while a button is held) are not real.
     let normal = b[30] == 0;
@@ -273,12 +281,18 @@ fn parse_event(code: u8, b: &[u8; 32]) -> Option<Event> {
         8 if normal => Event::Leave { window },
         // The last of a series of exposed areas.
         12 if u16le(b, 16) == 0 => Event::Expose { window: u32le(b, 4) },
+        // VisibilityNotify: partially or fully obscured.
+        15 if b[8] != 0 => Event::Obscured { window: u32le(b, 4) },
+        // ConfigureNotify of the root window: the screen size changed (RandR).
+        22 if u32le(b, 4) == root && u32le(b, 8) == root => Event::Screen { atom: 0 },
+        // PropertyNotify of the root window (work area, X resources…).
+        28 if u32le(b, 4) == root => Event::Screen { atom: u32le(b, 8) },
         _ => return None,
     })
 }
 
 /// Reads answers and events until the connection ends.
-fn read_loop(mut r: UnixStream, replies: Sender<Reply>, on_event: impl Fn(Event)) {
+fn read_loop(mut r: UnixStream, root: u32, replies: Sender<Reply>, on_event: impl Fn(Event)) {
     let mut errors = 0;
     loop {
         let mut b = [0u8; 32];
@@ -313,7 +327,7 @@ fn read_loop(mut r: UnixStream, replies: Sender<Reply>, on_event: impl Fn(Event)
                         on_event(Event::Closed);
                         return;
                     }
-                } else if let Some(e) = parse_event(code, &b) {
+                } else if let Some(e) = parse_event(code, &b, root) {
                     on_event(e);
                 }
             }
@@ -347,7 +361,8 @@ impl X11 {
         };
         let (tx, replies) = mpsc::channel();
         let reader = s.try_clone().map_err(|e| e.to_string())?;
-        std::thread::Builder::new().name("x11".into()).spawn(move || read_loop(reader, tx, on_event)).map_err(|e| e.to_string())?;
+        let root = setup.root;
+        std::thread::Builder::new().name("x11".into()).spawn(move || read_loop(reader, root, tx, on_event)).map_err(|e| e.to_string())?;
         let mut x = X11 {
             out: s,
             seq: 0,
@@ -365,6 +380,10 @@ impl X11 {
         x.gc = x.new_id();
         let gc_req = Req::new(55, 0).u32(x.gc).u32(x.root).u32(0).done();
         x.send(&gc_req);
+        // Screen changes: StructureNotify (size) and PropertyChange (work area, Xft.dpi) of the root.
+        let root_events: u32 = (1 << 17) | (1 << 22);
+        let watch = Req::new(2, 0).u32(x.root).u32(1 << 11).u32(root_events).done();
+        x.send(&watch);
         crate::log!("X display {display}: {}x{} pixels", setup.root_size.0, setup.root_size.1);
         Ok(x)
     }
@@ -415,7 +434,8 @@ impl X11 {
 
     /// A property of a window: (format, value).
     fn property(&mut self, window: u32, property: u32, kind: u32) -> Option<(u8, Vec<u8>)> {
-        let s = self.send(&Req::new(20, 0).u32(window).u32(property).u32(kind).u32(0).u32(4096).done());
+        // Up to 1 MB: X resources (Xft.dpi) can be longer than a few kilobytes.
+        let s = self.send(&Req::new(20, 0).u32(window).u32(property).u32(kind).u32(0).u32(1 << 18).done());
         let r = self.reply(s)?;
         let (format, len) = (r[1], u32le(&r, 16) as usize);
         let bytes = len * (format as usize / 8).max(1);
@@ -470,8 +490,9 @@ impl X11 {
     /// window the desktop manages (without frame or taskbar entry), which others can cover.
     pub fn create_window(&mut self, x: i32, y: i32, w: u32, h: u32, on_top: bool) -> u32 {
         let id = self.new_id();
-        // Exposure, ButtonPress, ButtonRelease, EnterWindow, LeaveWindow, PointerMotion.
-        let events: u32 = (1 << 15) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6);
+        // Exposure, ButtonPress, ButtonRelease, EnterWindow, LeaveWindow, PointerMotion,
+        // and VisibilityChange for windows that stay on top.
+        let events: u32 = (1 << 15) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | if on_top { 1 << 16 } else { 0 };
         let req = Req::new(1, 0)
             .u32(id)
             .u32(self.root)
@@ -537,6 +558,38 @@ impl X11 {
     pub fn raise(&mut self, window: u32) {
         let req = Req::new(12, 0).u32(window).u16(64).pad(2).u32(0).done();
         self.send(&req);
+    }
+
+    /// Where a window really is on the screen (the window manager may have placed it).
+    pub fn position(&mut self, window: u32) -> Option<(i32, i32)> {
+        let s = self.send(&Req::new(40, 0).u32(window).u32(self.root).i16(0).i16(0).done());
+        let r = self.reply(s)?;
+        Some((i16le(&r, 12), i16le(&r, 14)))
+    }
+
+    /// Our windows (`ours`) should be raised: an ordinary window was put above them, and no
+    /// menu or popup (an override-redirect window like ours) is open above them.
+    pub fn should_raise(&mut self, ours: &[u32]) -> bool {
+        let s = self.send(&Req::new(15, 0).u32(self.root).done());
+        let Some(r) = self.reply(s) else { return false };
+        let n = u16le(&r, 16) as usize;
+        // Children of the root, bottom to top.
+        let children: Vec<u32> = (0..n).filter(|i| 32 + i * 4 + 4 <= r.len()).map(|i| u32le(&r, 32 + i * 4)).collect();
+        let Some(lowest) = children.iter().position(|w| ours.contains(w)) else { return false };
+        let above: Vec<u32> = children[lowest..].iter().copied().filter(|w| !ours.contains(w)).collect();
+        for w in &above {
+            let s = self.send(&Req::new(3, 0).u32(*w).done());
+            // Viewable and override-redirect: a menu, a tooltip, a notification.
+            if self.reply(s).is_some_and(|a| a.len() > 27 && a[26] == 2 && a[27] != 0) {
+                return false;
+            }
+        }
+        !above.is_empty()
+    }
+
+    /// A property of the root window that the screen layout depends on.
+    pub fn is_screen_property(&mut self, atom: u32) -> bool {
+        atom == RESOURCE_MANAGER || atom == self.atom("_NET_WORKAREA")
     }
 
     /// Moves a window (dragging).

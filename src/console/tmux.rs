@@ -122,7 +122,7 @@ impl Output for Tmux {
         (u32::MAX / 4, u32::MAX / 4)
     }
 
-    fn draw(&mut self, _id: u64, _rect: Rect, _img: &Image, _caption: &str, _live: bool) {}
+    fn draw(&mut self, _id: u64, _rect: Rect, _img: Image, _caption: &str, _live: bool) {}
 
     fn clear(&mut self, id: u64) {
         if let Some(p) = self.popups.remove(&id) {
