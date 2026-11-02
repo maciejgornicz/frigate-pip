@@ -372,7 +372,16 @@ O vídeo é descodificado pelo programa **ffmpeg**; o próprio cliente RTSP do F
 ### Instalação
 
 1. Instale o programa:
-   - **Debian, Ubuntu, Raspberry Pi OS (64 bits)** — transfira `frigate-pip_<version>_amd64.deb` (ou `frigate-pip_<version>_arm64.deb` para um Raspberry Pi) da página [Releases](https://github.com/maciejgornicz/frigate-pip/releases) e instale-o com o apt, que também instala o ffmpeg:
+   - **Debian, Ubuntu, Raspberry Pi OS (64 bits), a partir do repositório do FrigatePiP** (recomendado — assim o `sudo apt upgrade` também atualiza o FrigatePiP): adicione o repositório uma vez e instale o programa; o apt também instala o ffmpeg:
+
+     ```
+     sudo wget -qO /usr/share/keyrings/frigate-pip.gpg https://maciejgornicz.github.io/frigate-pip/apt/frigate-pip.gpg
+     echo "deb [signed-by=/usr/share/keyrings/frigate-pip.gpg] https://maciejgornicz.github.io/frigate-pip/apt stable main" | sudo tee /etc/apt/sources.list.d/frigate-pip.list
+     sudo apt update
+     sudo apt install frigate-pip
+     ```
+
+   - **Debian, Ubuntu, Raspberry Pi OS (64 bits), um único ficheiro de pacote** — transfira `frigate-pip_<version>_amd64.deb` (ou `frigate-pip_<version>_arm64.deb` para um Raspberry Pi) da página [Releases](https://github.com/maciejgornicz/frigate-pip/releases) e instale-o com o apt, que também instala o ffmpeg:
 
      ```
      sudo apt install ./frigate-pip_*.deb
@@ -389,7 +398,7 @@ O vídeo é descodificado pelo programa **ffmpeg**; o próprio cliente RTSP do F
 3. Verifique a conexão: `frigate-pip --test-connection`.
 4. Inicie o `frigate-pip`. Com `--test <camera>` (ou as teclas **1–9**) pode ver uma câmara de imediato.
 
-O programa é um único ficheiro, sem outras bibliotecas. Para o atualizar, instale o pacote mais recente da mesma forma (ou substitua o ficheiro); para o remover, execute `sudo apt remove frigate-pip` (ou elimine o ficheiro) e elimine `~/.config/frigate-pip`.
+O programa é um único ficheiro, sem outras bibliotecas. Para o atualizar, execute `sudo apt update && sudo apt upgrade` (repositório), instale o pacote mais recente da mesma forma ou substitua o ficheiro; para o remover, execute `sudo apt remove frigate-pip` (ou elimine o ficheiro) e elimine `~/.config/frigate-pip` e, se adicionou o repositório, também `/etc/apt/sources.list.d/frigate-pip.list` e `/usr/share/keyrings/frigate-pip.gpg`.
 
 ### Onde aparecem as janelas
 
@@ -451,7 +460,7 @@ O idioma segue a configuração regional do sistema (`LANG`), a não ser que `la
 
 Para um monitor que mostra a consola (p. ex. um Raspberry Pi sem ambiente gráfico), o FrigatePiP pode arrancar como serviço quando o computador é ligado.
 
-**Instalado a partir do pacote `.deb`:** o serviço já vem incluído — basta ativá-lo para o seu utilizador (substitua `pi` pelo seu nome de utilizador): `sudo systemctl enable --now frigate-pip@pi`. O seu registo: `journalctl -u frigate-pip@pi`.
+**Instalado com o apt (repositório ou ficheiro `.deb`):** o serviço já vem incluído — basta ativá-lo para o seu utilizador (substitua `pi` pelo seu nome de utilizador): `sudo systemctl enable --now frigate-pip@pi`. O seu registo: `journalctl -u frigate-pip@pi`.
 
 **Instalado a partir do arquivo:** crie `/etc/systemd/system/frigate-pip.service` (substitua `pi` pelo seu nome de utilizador):
 

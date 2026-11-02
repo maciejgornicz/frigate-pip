@@ -1,0 +1,111 @@
+name: APT repository
+
+# Rebuilds the signed APT repository on GitHub Pages from the .deb files of all
+# releases, then installs FrigatePiP from it the way the user guide describes.
+# The Build workflow calls it after each release; it can also be run by hand.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Packages from the releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site/apt/pool/main
+          for tag in $(gh release list --limit 100 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName'); do
+            # Releases before the first Debian package have none.
+            gh release download "$tag" --pattern '*.deb' --dir site/apt/pool/main 2>/dev/null || true
+          done
+          ls -l site/apt/pool/main
+
+      - name: Indexes
+        working-directory: site/apt
+        run: |
+          for arch in amd64 arm64; do
+            mkdir -p dists/stable/main/binary-$arch
+            apt-ftparchive --arch $arch packages pool > dists/stable/main/binary-$arch/Packages
+            gzip -9kn dists/stable/main/binary-$arch/Packages
+          done
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin=FrigatePiP \
+            -o APT::FTPArchive::Release::Label=FrigatePiP \
+            -o APT::FTPArchive::Release::Suite=stable \
+            -o APT::FTPArchive::Release::Codename=stable \
+            -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+            -o APT::FTPArchive::Release::Components=main \
+            release dists/stable > dists/stable/Release
+          cat dists/stable/Release
+
+      - name: Sign
+        working-directory: site/apt
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          export GNUPGHOME=$(mktemp -d)
+          echo "$APT_SIGNING_KEY" | gpg --batch --quiet --import
+          gpg --batch --yes --clearsign -o dists/stable/InRelease dists/stable/Release
+          gpg --batch --yes --armor --detach-sign -o dists/stable/Release.gpg dists/stable/Release
+          rm -rf "$GNUPGHOME"
+          # The published key is the one in the repository; the signature must match it.
+          cp ../../packaging/frigate-pip-archive-keyring.asc frigate-pip.asc
+          gpg --dearmor < frigate-pip.asc > frigate-pip.gpg
+          gpgv --keyring ./frigate-pip.gpg dists/stable/InRelease
+          cp ../../packaging/pages-index.html ../index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  test:
+    needs: deploy
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Install from the repository (as in the user guide)
+        run: |
+          sudo wget -qO /usr/share/keyrings/frigate-pip.gpg https://maciejgornicz.github.io/frigate-pip/apt/frigate-pip.gpg
+          echo "deb [signed-by=/usr/share/keyrings/frigate-pip.gpg] https://maciejgornicz.github.io/frigate-pip/apt stable main" | sudo tee /etc/apt/sources.list.d/frigate-pip.list
+          # After a release the new version must be offered; GitHub Pages may serve
+          # the previous files for a few minutes.
+          want=""
+          case "$GITHUB_REF" in refs/tags/v*) want="${GITHUB_REF_NAME#v}" ;; esac
+          for i in $(seq 12); do
+            sudo apt-get update -qq --error-on=any
+            have=$(apt-cache policy frigate-pip | sed -n 's/^ *Candidate: //p')
+            [ "$have" = "${want:-$have}" ] && break
+            echo "offered: '$have', expected: '$want'"
+            sleep 30
+          done
+          if [ -n "$have" ] && [ "$have" != "(none)" ]; then
+            sudo apt-get install -y -qq frigate-pip > /dev/null
+            frigate-pip --version
+          else
+            echo "The repository has no package yet"
+          fi
+          [ "$have" = "${want:-$have}" ]

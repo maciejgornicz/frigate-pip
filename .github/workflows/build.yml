@@ -109,7 +109,7 @@ jobs:
           # Upgrade path (postinst), then removal must disable the service (prerm).
           sudo apt-get install -y -qq --reinstall ./dist/frigate-pip_*.deb > /dev/null
           sudo apt-get remove -y -qq frigate-pip > /dev/null
-          if command -v frigate-pip || ls /etc/systemd/system/*.wants/frigate-pip@* 2>/dev/null; then
+          if [ -e /usr/bin/frigate-pip ] || ls /etc/systemd/system/*.wants/frigate-pip@* 2>/dev/null; then
             echo "frigate-pip was left behind"
             exit 1
           fi
@@ -153,3 +153,12 @@ jobs:
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
             gh release create "$GITHUB_REF_NAME" --title "FrigatePiP ${GITHUB_REF_NAME#v}" --generate-notes
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  apt:
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/apt.yml
+    secrets: inherit

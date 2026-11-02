@@ -34,15 +34,17 @@ Prefer no installer? Download `FrigatePiP-<version>-portable.exe` from the same 
 
 ## Linux console
 
-Debian, Ubuntu and Raspberry Pi OS (64-bit): download `frigate-pip_<version>_amd64.deb` (or `_arm64.deb` for a Raspberry Pi) from [Releases](https://github.com/maciejgornicz/frigate-pip/releases/latest) — apt installs ffmpeg with it:
+Debian, Ubuntu and Raspberry Pi OS (64-bit), from the FrigatePiP APT repository — apt installs ffmpeg with it, and `sudo apt upgrade` keeps FrigatePiP up to date:
 
 ```
-sudo apt install ./frigate-pip_*.deb
+sudo wget -qO /usr/share/keyrings/frigate-pip.gpg https://maciejgornicz.github.io/frigate-pip/apt/frigate-pip.gpg
+echo "deb [signed-by=/usr/share/keyrings/frigate-pip.gpg] https://maciejgornicz.github.io/frigate-pip/apt stable main" | sudo tee /etc/apt/sources.list.d/frigate-pip.list
+sudo apt update && sudo apt install frigate-pip
 frigate-pip --test-connection                # after setting url in ~/.config/frigate-pip/config.ini
 frigate-pip
 ```
 
-Other distributions: install ffmpeg, unpack `FrigatePiP-<version>-linux-x86_64.tar.gz` (or `…-arm64.tar.gz`) and copy `frigate-pip` to `/usr/local/bin`.
+Every [release](https://github.com/maciejgornicz/frigate-pip/releases/latest) also has the single package files `frigate-pip_<version>_amd64.deb` and `_arm64.deb` (`sudo apt install ./frigate-pip_*.deb`). Other distributions: install ffmpeg, unpack `FrigatePiP-<version>-linux-x86_64.tar.gz` (or `…-arm64.tar.gz`) and copy `frigate-pip` to `/usr/local/bin`.
 
 Three ways to run it:
 

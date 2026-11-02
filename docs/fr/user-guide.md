@@ -372,7 +372,16 @@ La vidéo est décodée par le programme **ffmpeg** ; le client RTSP intégré 
 ### Installation
 
 1. Installez le programme :
-   - **Debian, Ubuntu, Raspberry Pi OS (64 bits)** — téléchargez `frigate-pip_<version>_amd64.deb` (ou `frigate-pip_<version>_arm64.deb` pour un Raspberry Pi) depuis la page [Releases](https://github.com/maciejgornicz/frigate-pip/releases) et installez-le avec apt, qui installe aussi ffmpeg :
+   - **Debian, Ubuntu, Raspberry Pi OS (64 bits), depuis le dépôt FrigatePiP** (recommandé — `sudo apt upgrade` met alors aussi FrigatePiP à jour) : ajoutez le dépôt une fois et installez le programme ; apt installe aussi ffmpeg :
+
+     ```
+     sudo wget -qO /usr/share/keyrings/frigate-pip.gpg https://maciejgornicz.github.io/frigate-pip/apt/frigate-pip.gpg
+     echo "deb [signed-by=/usr/share/keyrings/frigate-pip.gpg] https://maciejgornicz.github.io/frigate-pip/apt stable main" | sudo tee /etc/apt/sources.list.d/frigate-pip.list
+     sudo apt update
+     sudo apt install frigate-pip
+     ```
+
+   - **Debian, Ubuntu, Raspberry Pi OS (64 bits), fichier de paquet unique** — téléchargez `frigate-pip_<version>_amd64.deb` (ou `frigate-pip_<version>_arm64.deb` pour un Raspberry Pi) depuis la page [Releases](https://github.com/maciejgornicz/frigate-pip/releases) et installez-le avec apt, qui installe aussi ffmpeg :
 
      ```
      sudo apt install ./frigate-pip_*.deb
@@ -389,7 +398,7 @@ La vidéo est décodée par le programme **ffmpeg** ; le client RTSP intégré 
 3. Vérifiez la connexion : `frigate-pip --test-connection`.
 4. Lancez `frigate-pip`. Avec `--test <camera>` (ou les touches **1–9**), vous pouvez afficher une caméra immédiatement.
 
-Le programme est un fichier unique, sans autres bibliothèques. Pour le mettre à jour, installez le paquet plus récent de la même façon (ou remplacez le fichier) ; pour le désinstaller, exécutez `sudo apt remove frigate-pip` (ou supprimez le fichier) et supprimez `~/.config/frigate-pip`.
+Le programme est un fichier unique, sans autres bibliothèques. Pour le mettre à jour, exécutez `sudo apt update && sudo apt upgrade` (dépôt), installez le paquet plus récent de la même façon ou remplacez le fichier ; pour le désinstaller, exécutez `sudo apt remove frigate-pip` (ou supprimez le fichier) et supprimez `~/.config/frigate-pip` et, si vous avez ajouté le dépôt, `/etc/apt/sources.list.d/frigate-pip.list` et `/usr/share/keyrings/frigate-pip.gpg`.
 
 ### Où apparaissent les fenêtres
 
@@ -451,7 +460,7 @@ La langue suit les paramètres régionaux du système (`LANG`), sauf si `languag
 
 Pour un écran qui affiche la console (p. ex. un Raspberry Pi sans bureau), FrigatePiP peut démarrer comme service au démarrage de l’ordinateur.
 
-**Installé depuis le paquet `.deb` :** le service est inclus — il suffit de l’activer pour votre utilisateur (remplacez `pi` par votre nom d’utilisateur) : `sudo systemctl enable --now frigate-pip@pi`. Son journal : `journalctl -u frigate-pip@pi`.
+**Installé avec apt (dépôt ou fichier `.deb`) :** le service est inclus — il suffit de l’activer pour votre utilisateur (remplacez `pi` par votre nom d’utilisateur) : `sudo systemctl enable --now frigate-pip@pi`. Son journal : `journalctl -u frigate-pip@pi`.
 
 **Installé depuis l’archive :** créez `/etc/systemd/system/frigate-pip.service` (remplacez `pi` par votre nom d’utilisateur) :
 
