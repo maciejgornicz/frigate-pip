@@ -44,6 +44,8 @@ pub struct Terminal {
     cell_known: bool,
     saved: Option<libc::termios>,
     shown: HashMap<u64, Cells>,
+    /// The bottom row is a status line (not in a popup viewer).
+    status_line: bool,
 }
 
 fn winsize() -> Option<libc::winsize> {
@@ -96,8 +98,8 @@ fn has_sixel(reply: &[u8]) -> bool {
 
 impl Terminal {
     /// Takes over the terminal: raw keys, alternate screen, hidden cursor.
-    /// `pref` = auto, kitty, sixel or blocks.
-    pub fn open(pref: &str) -> Result<Terminal, String> {
+    /// `pref` = auto, kitty, sixel or blocks; `status_line` reserves the bottom row.
+    pub fn open(pref: &str, status_line: bool) -> Result<Terminal, String> {
         if unsafe { libc::isatty(libc::STDOUT_FILENO) } != 1 {
             return Err("standard output is not a terminal".into());
         }
@@ -132,7 +134,9 @@ impl Terminal {
         if !cell_known {
             cell = (9, 18);
         }
-        let kitty = std::env::var_os("KITTY_WINDOW_ID").is_some()
+        // Inside tmux the outer terminal's Kitty graphics cannot be used.
+        let in_tmux = std::env::var_os("TMUX").is_some();
+        let kitty = !in_tmux && std::env::var_os("KITTY_WINDOW_ID").is_some()
             || std::env::var("TERM").is_ok_and(|t| t.contains("kitty") || t.contains("ghostty"))
             || std::env::var("TERM_PROGRAM").is_ok_and(|t| t == "WezTerm" || t == "ghostty");
         let graphics = match pref {
@@ -163,7 +167,16 @@ impl Terminal {
             cell_known,
             saved: have_tty.then_some(saved),
             shown: HashMap::new(),
+            status_line,
         })
+    }
+
+    fn usable_rows(&self) -> u32 {
+        if self.status_line {
+            self.rows.saturating_sub(1)
+        } else {
+            self.rows
+        }
     }
 
     /// Window rectangle (pixels) → character cells; the bottom row is the status line.
@@ -172,7 +185,7 @@ impl Terminal {
         let col = (r.x.max(0) as u32 / cw).min(self.cols.saturating_sub(4));
         let row = (r.y.max(0) as u32 / ch).min(self.rows.saturating_sub(4));
         let cols = r.w.div_ceil(cw).clamp(4, self.cols - col);
-        let rows = r.h.div_ceil(ch).clamp(3, self.rows.saturating_sub(1) - row);
+        let rows = r.h.div_ceil(ch).clamp(3, self.usable_rows() - row);
         Cells { col, row, cols, rows }
     }
 
@@ -349,7 +362,7 @@ fn sixel(img: &Image) -> String {
 
 impl Output for Terminal {
     fn size(&self) -> (u32, u32) {
-        (self.cols * self.cell.0, self.rows.saturating_sub(1) * self.cell.1)
+        (self.cols * self.cell.0, self.usable_rows() * self.cell.1)
     }
 
     fn caption_height(&self) -> u32 {
@@ -399,6 +412,9 @@ impl Output for Terminal {
     }
 
     fn status(&mut self, text: &str) {
+        if !self.status_line {
+            return;
+        }
         let text: String = text.chars().take(self.cols as usize).collect();
         let pad = (self.cols as usize).saturating_sub(text.chars().count());
         let mut out = std::io::stdout().lock();
@@ -454,7 +470,16 @@ mod tests {
 
     #[test]
     fn kitty_transmits_rgb_with_the_window_id() {
-        let t = Terminal { graphics: Graphics::Kitty, cols: 80, rows: 24, cell: (10, 20), cell_known: true, saved: None, shown: HashMap::new() };
+        let t = Terminal {
+            graphics: Graphics::Kitty,
+            cols: 80,
+            rows: 24,
+            cell: (10, 20),
+            cell_known: true,
+            saved: None,
+            shown: HashMap::new(),
+            status_line: true,
+        };
         let mut img = Image::new(1, 1);
         img.data = vec![30, 20, 10, 255];
         let mut buf = String::new();

@@ -6,6 +6,7 @@ mod canvas;
 mod fb;
 mod ffmpeg;
 mod term;
+mod tmux;
 mod video;
 
 use crate::config::{self, Config, Corner, IniDoc};
@@ -52,6 +53,38 @@ pub trait Output {
     fn min_interval(&self) -> Duration {
         Duration::ZERO
     }
+    /// At most this many windows at once (tmux: one popup per client).
+    fn max_windows(&self) -> Option<usize> {
+        None
+    }
+    /// Outputs that show a window in another process (tmux popups) open it here and
+    /// return `Some(opened)`; `None` = this process decodes and draws the window.
+    fn open_external(&mut self, _id: u64, _view: &View) -> Option<bool> {
+        None
+    }
+    /// Windows shown by another process: `false` once closed (e.g. by the user).
+    fn alive(&mut self, _id: u64) -> bool {
+        true
+    }
+    /// The settings changed.
+    fn configure(&mut self, _cfg: &Config) {}
+}
+
+/// A window shown by another process (see `Output::open_external`).
+pub struct View {
+    pub camera: String,
+    /// go2rtc stream.
+    pub stream: Option<String>,
+    pub aspect: f32,
+    pub caption: String,
+}
+
+/// How the console version shows its windows.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Framebuffer,
+    Terminal,
+    Tmux,
 }
 
 /// Settings of the console version (`[console]` in config.ini, overridable on the command line).
@@ -98,18 +131,29 @@ const HELP: &str = "FrigatePiP for the Linux console: instant picture-in-picture
 
 Usage: frigate-pip [options]
 
-  --output auto|framebuffer|terminal   where to draw (default: auto)
-  --graphics auto|kitty|sixel|blocks   pictures in a terminal (default: auto)
-  --framebuffer /dev/fb0               framebuffer device
-  --test CAMERA                        show a camera right after the start
-  --test-connection                    check the connection to Frigate and exit
-  --version                            print the version
-  --help                               this help
+Where the windows appear (--output):
+  framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
+               with a monitor). Runs in the background, e.g. as a systemd service.
+  terminal     Inside this terminal window (Kitty graphics, Sixel or half blocks).
+               Runs in the foreground: the terminal shows FrigatePiP while it runs.
+  tmux         Runs in the background; each window opens as a tmux popup over what
+               you are doing in tmux, e.g.: tmux new -d -s frigate-pip 'frigate-pip --output tmux'
+  auto         framebuffer on a console (TERM=linux) or without a terminal,
+               terminal otherwise (default).
+
+Options:
+  --output auto|framebuffer|terminal|tmux   see above
+  --graphics auto|kitty|sixel|blocks        pictures in a terminal (default: auto)
+  --framebuffer /dev/fb0                    framebuffer device
+  --test CAMERA                             show a camera right after the start
+  --test-connection                         check the connection to Frigate and exit
+  --version                                 print the version
+  --help                                    this help
 
 Keys (when started in a terminal or on a console): q quit, x close windows,
-p pause / resume, 1-9 show camera 1-9.
+p pause / resume, 1-9 show camera 1-9. In a tmux popup: q, x or Esc close it.
 Settings: ~/.config/frigate-pip/config.ini - user guide:
-https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md";
+https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md#12-linux-console-version";
 
 enum Ev {
     Notice(Notice),
@@ -164,23 +208,27 @@ pub fn main() {
             std::process::exit(1);
         }
     };
-    let (out, terminal) = match open_output(&console) {
+    install_signals();
+    // Viewer inside a tmux popup (started by the background process).
+    if let Some(camera) = arg(&args, "--view") {
+        run_view(&camera, &args, &cfg, &console, ff);
+        return;
+    }
+    let (out, mode) = match open_output(&console, &cfg) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("FrigatePiP: {e}");
             std::process::exit(1);
         }
     };
-    unsafe {
-        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
-            libc::signal(sig, on_signal as *const () as libc::sighandler_t);
-        }
+    if mode == Mode::Tmux && is_tty(libc::STDOUT_FILENO) {
+        println!("FrigatePiP {} - {}", env!("CARGO_PKG_VERSION"), t().console_tmux_running);
     }
     let (tx, rx) = mpsc::channel();
     let keys = is_tty(libc::STDIN_FILENO).then(|| {
         let tx = tx.clone();
         // The terminal output switches the terminal to raw mode itself.
-        term::Keys::start(!terminal, move |k| {
+        term::Keys::start(mode != Mode::Terminal, move |k| {
             let _ = tx.send(Ev::Key(k));
         })
     });
@@ -193,21 +241,103 @@ pub fn main() {
     crate::log!("Stopped");
 }
 
-/// Framebuffer on a console without graphics, terminal otherwise; `true` = terminal.
-fn open_output(c: &ConsoleCfg) -> Result<(Box<dyn Output>, bool), String> {
-    let on_console = std::env::var("TERM").is_ok_and(|t| t == "linux") || !is_tty(libc::STDOUT_FILENO);
-    let framebuffer = match c.output.as_str() {
-        "framebuffer" | "fb" => true,
-        "terminal" => false,
-        _ => on_console && std::path::Path::new(&c.framebuffer).exists(),
-    };
-    if framebuffer {
-        let font = canvas::Font::load(c.font.as_deref());
-        let fb = fb::Framebuffer::open(&c.framebuffer, c.framebuffer_size.as_deref(), font)?;
-        Ok((Box::new(fb), false))
-    } else {
-        Ok((Box::new(term::Terminal::open(&c.graphics)?), true))
+fn install_signals() {
+    unsafe {
+        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            libc::signal(sig, on_signal as *const () as libc::sighandler_t);
+        }
     }
+}
+
+/// tmux popups when asked for, otherwise the framebuffer on a console without graphics
+/// and the terminal elsewhere.
+fn open_output(c: &ConsoleCfg, cfg: &Config) -> Result<(Box<dyn Output>, Mode), String> {
+    let on_console = std::env::var("TERM").is_ok_and(|t| t == "linux") || !is_tty(libc::STDOUT_FILENO);
+    let mode = match c.output.as_str() {
+        "tmux" => Mode::Tmux,
+        "framebuffer" | "fb" => Mode::Framebuffer,
+        "terminal" => Mode::Terminal,
+        _ if on_console && std::path::Path::new(&c.framebuffer).exists() => Mode::Framebuffer,
+        _ => Mode::Terminal,
+    };
+    crate::log!(
+        "Output: {}",
+        match mode {
+            Mode::Framebuffer => "framebuffer",
+            Mode::Terminal => "terminal",
+            Mode::Tmux => "tmux popups",
+        }
+    );
+    let out: Box<dyn Output> = match mode {
+        Mode::Framebuffer => {
+            let font = canvas::Font::load(c.font.as_deref());
+            Box::new(fb::Framebuffer::open(&c.framebuffer, c.framebuffer_size.as_deref(), font)?)
+        }
+        Mode::Terminal => Box::new(term::Terminal::open(&c.graphics, true)?),
+        Mode::Tmux => Box::new(tmux::Tmux::new(cfg.width.max(64) as u32, cfg.position)?),
+    };
+    Ok((out, mode))
+}
+
+/// Viewer mode: one camera filling the terminal (a tmux popup) until it is closed
+/// (q, x, Esc) or the popup is closed by the background process.
+fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, ff: Arc<Ffmpeg>) {
+    // The lock tells the background process that this popup is still open.
+    let _lock = arg(args, "--view-lock").and_then(|p| tmux::hold_lock(&p));
+    let stream = arg(args, "--view-stream");
+    let aspect = arg(args, "--view-aspect").and_then(|a| a.parse::<f32>().ok()).filter(|a| *a > 0.1).unwrap_or(16.0 / 9.0);
+    let caption = arg(args, "--view-caption").unwrap_or_else(|| camera.to_string());
+    let mut out = match term::Terminal::open(&console.graphics, false) {
+        Ok(t) => t,
+        Err(e) => {
+            crate::log!("{camera}: viewer: {e}");
+            return;
+        }
+    };
+    let (tx, rx) = mpsc::channel();
+    let _keys = {
+        let tx = tx.clone();
+        term::Keys::start(false, move |k| {
+            let _ = tx.send(Ev::Key(k));
+        })
+    };
+    let (sw, sh) = out.size();
+    let size = ((sw & !1).max(2), (sh.saturating_sub(out.caption_height()) & !1).max(2));
+    crate::log!("{camera}: viewer {sw}x{sh} (aspect {aspect:.2})");
+    let params = video::Params {
+        camera: camera.to_string(),
+        frigate_url: cfg.url.clone(),
+        rtsp_url: stream.map(|s| cfg.rtsp_url(&s)),
+        live: cfg.live,
+        size,
+        audio: cfg.camera_audio,
+        t0: Instant::now(),
+    };
+    let wake = tx.clone();
+    let shared = video::start(
+        params,
+        ff,
+        Arc::new(move || {
+            let _ = wake.send(Ev::Wake);
+        }),
+    );
+    let rect = Rect { x: 0, y: 0, w: sw, h: sh };
+    let mut last: Option<Instant> = None;
+    while !QUIT.load(Ordering::Relaxed) {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(Ev::Key(b'q' | b'Q' | b'x' | b'X' | 27 | 3)) | Err(RecvTimeoutError::Disconnected) => break,
+            _ => {}
+        }
+        if last.is_some_and(|t| t.elapsed() < out.min_interval()) || !shared.dirty.swap(false, Ordering::Relaxed) {
+            continue;
+        }
+        let frame = shared.frame.lock().unwrap().clone();
+        if let Some(frame) = frame {
+            out.draw(1, rect, &frame, &caption, shared.live.load(Ordering::Relaxed));
+            last = Some(Instant::now());
+        }
+    }
+    shared.cancel.cancel();
 }
 
 struct Win {
@@ -366,7 +496,8 @@ impl App {
             return;
         }
         let states: Vec<(bool, bool)> = self.wins.iter().map(|_| (false, false)).collect();
-        let replace_at = match choose_slot(&states, self.cfg.max_popups, self.cfg.replace) {
+        let max_windows = self.out.max_windows().map_or(self.cfg.max_popups, |m| m.min(self.cfg.max_popups));
+        let replace_at = match choose_slot(&states, max_windows, self.cfg.replace) {
             Slot::New => None,
             Slot::Skip => {
                 crate::log!("{}: skipped (all windows in use)", d.camera);
@@ -377,33 +508,44 @@ impl App {
         let aspect = info.as_ref().map(|c| c.aspect).filter(|a| *a > 0.1).unwrap_or(16.0 / 9.0);
         let size = self.picture_size(aspect);
         let stream = choose_stream(&self.cfg, info.as_ref(), &d.camera, size.0 as i32);
-        let params = video::Params {
-            camera: d.camera.clone(),
-            frigate_url: self.cfg.url.clone(),
-            rtsp_url: stream.map(|s| self.cfg.rtsp_url(&s)),
-            live: self.cfg.live,
-            size,
-            audio: self.cfg.camera_audio,
-            t0,
-        };
-        let tx = self.tx.clone();
-        let shared = video::start(
-            params,
-            self.ff.clone(),
-            Arc::new(move || {
-                let _ = tx.send(Ev::Wake);
-            }),
-        );
-        crate::log!("{}: window after {} ms", d.camera, t0.elapsed().as_millis());
-        let win =
-            Win { id: self.next_id, camera: d.camera, caption, deadline: now + dur, hard: now + max, shared, rect: None, size, last_draw: None };
+        // The replaced window goes first (tmux shows only one popup at a time).
+        if let Some(i) = replace_at {
+            crate::log!("{}: replaces window {}", d.camera, self.wins[i].camera);
+            self.close_quiet(i);
+        }
+        let id = self.next_id;
         self.next_id += 1;
-        match replace_at {
-            Some(i) => {
-                crate::log!("{}: replaces window {}", win.camera, self.wins[i].camera);
-                self.close_quiet(i);
-                self.wins.insert(i, win);
+        let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone() };
+        let shared = match self.out.open_external(id, &view) {
+            Some(true) => Arc::new(video::Shared::default()),
+            Some(false) => {
+                self.layout();
+                return;
             }
+            None => {
+                let params = video::Params {
+                    camera: d.camera.clone(),
+                    frigate_url: self.cfg.url.clone(),
+                    rtsp_url: stream.map(|s| self.cfg.rtsp_url(&s)),
+                    live: self.cfg.live,
+                    size,
+                    audio: self.cfg.camera_audio,
+                    t0,
+                };
+                let tx = self.tx.clone();
+                video::start(
+                    params,
+                    self.ff.clone(),
+                    Arc::new(move || {
+                        let _ = tx.send(Ev::Wake);
+                    }),
+                )
+            }
+        };
+        crate::log!("{}: window after {} ms", d.camera, t0.elapsed().as_millis());
+        let win = Win { id, camera: d.camera, caption, deadline: now + dur, hard: now + max, shared, rect: None, size, last_draw: None };
+        match replace_at {
+            Some(i) => self.wins.insert(i, win),
             None => self.wins.push(win),
         }
         self.layout();
@@ -459,6 +601,12 @@ impl App {
     }
 
     fn tick(&mut self) {
+        // Windows closed by the user in another process (tmux popups).
+        let gone: Vec<usize> = (0..self.wins.len()).filter(|&i| !self.out.alive(self.wins[i].id)).collect();
+        for i in gone.into_iter().rev() {
+            let w = self.wins.remove(i);
+            w.shared.cancel.cancel();
+        }
         let now = Instant::now();
         let expired: Vec<usize> = (0..self.wins.len()).filter(|&i| now >= self.wins[i].deadline).collect();
         for i in expired.into_iter().rev() {
@@ -541,6 +689,7 @@ impl App {
         crate::log!("Settings reloaded");
         i18n::set(i18n::resolve(&cfg.language));
         self.cfg = cfg;
+        self.out.configure(&self.cfg);
         // The listener also applies the filters (cameras, objects, zones…).
         self.start_listener();
         self.layout();

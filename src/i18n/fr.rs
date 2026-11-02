@@ -170,6 +170,7 @@ pub static STRINGS: Strings = Strings {
     tip_update: "Recherche immédiatement une nouvelle version, ou télécharge et installe celle qui a été trouvée. Vos paramètres sont conservés.",
 
     console_keys: "q quitter · x fermer les fenêtres · p pause · 1–9 afficher une caméra",
+    console_tmux_running: "s’exécute en arrière-plan : les fenêtres des caméras s’ouvrent en fenêtres contextuelles tmux (Ctrl+C l’arrête).",
 
     labels: &[
         ("person", "personne"),

@@ -347,10 +347,17 @@ Zacznij od **Testuj połączenie** w ustawieniach i od **Pokaż log** w menu w z
 
 ## 12. Wersja konsolowa dla Linuksa
 
-FrigatePiP działa także w Linuksie **bez pulpitu** — na przykład na Raspberry Pi z monitorem na ścianie albo na serwerze, z którym łączysz się przez SSH. Pokazuje te same okna podglądu, na jeden z dwóch sposobów:
+FrigatePiP działa także w Linuksie **bez pulpitu** — na przykład na Raspberry Pi z monitorem na ścianie albo na serwerze, z którym łączysz się przez SSH. Pokazuje te same okna podglądu, w jednym z trzech trybów:
 
-- **Framebuffer** — w konsoli Linuksa bez X ani Wayland okna są rysowane bezpośrednio na ekranie, w wybranym rogu, nad tekstem konsoli. Gdy okno się zamyka, to, co było pod nim, wraca na ekran.
-- **Terminal** — w oknie terminala (także przez SSH): wiersz z napisem i obraz, rysowany za pomocą **grafiki Kitty** (Kitty, WezTerm, Ghostty), **Sixel** (foot, Konsole, xterm, Windows Terminal 1.22+) lub — w każdym terminalu z 24-bitowym kolorem — kolorowymi znakami półbloku (niska rozdzielczość). Wiersz stanu na dole pokazuje stan połączenia i klawisze.
+| Tryb | Gdzie pojawiają się okna | Działa w tle? | Typowe zastosowanie | Jak uruchomić |
+|---|---|---|---|---|
+| **Framebuffer** | Na ekranie konsoli Linuksa bez X ani Wayland, w wybranym rogu, nad tekstem konsoli | **Tak** — jako usługa systemd | Raspberry Pi lub inny komputer z monitorem i bez pulpitu (wyświetlacz na ścianie) | `frigate-pip --output framebuffer`, jako usługa: zob. [Automatyczne uruchamianie](#automatyczne-uruchamianie-systemd) |
+| **Terminal** | W oknie terminala, w którym działa FrigatePiP: wiersz z napisem, obraz i wiersz stanu | **Nie** — terminal pokazuje FrigatePiP, dopóki program działa (jak `top`) | Okno terminala lub panel tmux pozostawiony otwarty jako monitor kamer, także przez SSH | `frigate-pip` |
+| **Okienka tmux** | Jako wyskakujące okienko tmux nad tym, czym akurat zajmujesz się w tmux; zamyka się samo | **Tak** — w ukrytym oknie tmux | Praca w tmux (lokalnie lub przez SSH), gdy chcesz, żeby kamery same wyskakiwały | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` — zob. [Okienka tmux](#okienka-tmux) |
+
+**Na komputerze z Windows — także gdy pracujesz w WSL — używaj aplikacji dla Windows:** działa w obszarze powiadomień, a jej okna pojawiają się nad wszystkim, także nad terminalami. Wersja dla Linuksa w WSL przydaje się tylko do wypróbowania.
+
+Gdy okno na framebufferze się zamyka, to, co było pod nim, wraca na ekran. W terminalu i w okienkach tmux obraz jest rysowany za pomocą **grafiki Kitty** (Kitty, WezTerm, Ghostty), **Sixel** (foot, Konsole, xterm, Windows Terminal 1.22+) lub — w każdym terminalu z 24-bitowym kolorem — kolorowymi znakami półbloku (niska rozdzielczość; okienka tmux zawsze używają półbloków).
 
 Wideo dekoduje program **ffmpeg**; dane dostarcza mu własny klient RTSP FrigatePiP, dzięki czemu obraz pojawia się kilka milisekund po najbliższej klatce kluczowej kamery.
 
@@ -380,7 +387,17 @@ Program to pojedynczy plik bez dodatkowych bibliotek. Aby go zaktualizować, pod
 
 ### Gdzie pojawiają się okna
 
-Przy `--output auto` (domyślnie) FrigatePiP używa **framebuffera**, gdy działa w konsoli Linuksa (`TERM=linux`) lub bez terminala (jako usługa), a w pozostałych przypadkach — **terminala**. W terminalu tryb obrazu jest wybierany automatycznie: grafika Kitty, jeśli jest dostępna, w przeciwnym razie Sixel, jeśli terminal go zgłasza, a w ostateczności półbloki. Oba ustawienia można zmienić w pliku ustawień lub w wierszu poleceń.
+Przy `--output auto` (domyślnie) FrigatePiP używa **framebuffera**, gdy działa w konsoli Linuksa (`TERM=linux`) lub bez terminala (jako usługa), a w pozostałych przypadkach — **terminala**. Tryb **okienek tmux** jest używany tylko wtedy, gdy go wybierzesz (`--output tmux` lub `output = tmux`). W terminalu tryb obrazu jest wybierany automatycznie: grafika Kitty, jeśli jest dostępna, w przeciwnym razie Sixel, jeśli terminal go zgłasza, a w ostateczności półbloki. Oba ustawienia można zmienić w pliku ustawień lub w wierszu poleceń.
+
+### Okienka tmux
+
+W tym trybie FrigatePiP nie ma własnego okna: czeka na wykrycia w tle i przy każdym z nich otwiera wyskakujące okienko [tmux](https://github.com/tmux/tmux) z kamerą nad panelami ostatnio używanego klienta tmux. Wymaga tmux 3.2 lub nowszego.
+
+- Uruchom go raz, w ukrytej sesji tmux: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`. Aby go zatrzymać: `tmux kill-session -t frigate-pip`. Aby używać klawiszy (wstrzymanie, pokazanie kamery): `tmux attach -t frigate-pip`.
+- Okienko pojawia się w wybranym **rogu ekranu** (`position`), a jego rozmiar zależy od **szerokości okna** (`width`). Zamyka się samo po zwykłym czasie (`duration`, `max_duration`) albo od razu po naciśnięciu **q**, **x** lub **Esc**.
+- tmux pokazuje jedno okienko naraz: wykrycie na innej kamerze zastępuje otwarte okienko (lub jest pomijane, gdy `replace = false`).
+- Aby obraz miał pełne kolory, tmux musi przekazywać dalej 24-bitowy kolor: dodaj `set -as terminal-features ",xterm-256color:RGB"` do `~/.tmux.conf` (użyj swojej wartości `$TERM` spoza tmux) i uruchom tmux ponownie. Gdy brakuje kolorów, FrigatePiP zapisuje tę wskazówkę w logu.
+- Jeśli żaden klient tmux nie jest podłączony, wykrycia są tylko zapisywane w logu.
 
 ### Klawisze
 
@@ -397,7 +414,7 @@ Gdy FrigatePiP działa w terminalu lub w konsoli:
 
 | Opcja | Efekt |
 |---|---|
-| `--output auto\|framebuffer\|terminal` | Gdzie rysować okna. |
+| `--output auto\|framebuffer\|terminal\|tmux` | Gdzie rysować okna (zob. tabelę trybów powyżej). |
 | `--graphics auto\|kitty\|sixel\|blocks` | Jak rysować obrazy w terminalu. |
 | `--framebuffer /dev/fb0` | Urządzenie framebuffera. |
 | `--test <camera>` | Pokazuje kamerę zaraz po uruchomieniu. |
@@ -412,7 +429,7 @@ Dodatkowe ustawienia w sekcji `[console]`:
 
 | Klucz | Domyślnie | Znaczenie |
 |---|---|---|
-| `output` | `auto` | `auto`, `framebuffer` lub `terminal`. |
+| `output` | `auto` | `auto`, `framebuffer`, `terminal` lub `tmux`. |
 | `graphics` | `auto` | `auto`, `kitty`, `sixel` lub `blocks` (obrazy w terminalu). |
 | `framebuffer` | `/dev/fb0` | Urządzenie framebuffera. |
 | `ffmpeg` | `ffmpeg` | Program ffmpeg (nazwa lub pełna ścieżka). |
@@ -448,5 +465,7 @@ Następnie: `sudo systemctl enable --now frigate-pip`. Log trafia do dziennika s
 - **„/dev/fb0: Permission denied”** — dodaj użytkownika do grupy `video` i zaloguj się ponownie (dla usługi: `SupplementaryGroups=video`).
 - **Brak napisu na framebufferze** — zainstaluj `fonts-dejavu-core` lub ustaw `font` w `[console]`.
 - **Obraz w terminalu jest mocno rozpikselowany** — to tryb półbloków; użyj terminala z grafiką Kitty lub Sixel (zob. wyżej) albo ustaw `graphics`.
+- **Nie pojawia się okienko tmux** — sprawdź, czy klient tmux jest podłączony (`tmux list-clients`), czy tmux jest w wersji 3.2 lub nowszej (`tmux -V`) i czy proces w tle działa (`tmux ls` pokazuje sesję `frigate-pip`); w logu jest zapisane, dlaczego okienko nie zostało pokazane.
+- **Blade kolory w okienkach tmux** — włącz 24-bitowy kolor w tmux (zob. [Okienka tmux](#okienka-tmux)).
 - **Brak dźwięku** — dźwięk z kamery wymaga PulseAudio/PipeWire lub ALSA; użytkownik usługi musi należeć do grupy `audio`.
 - **Aby uzyskać szczegółowy raport**, uruchom FrigatePiP poleceniem `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` i dołącz do zgłoszenia koniec tego pliku oraz logu.

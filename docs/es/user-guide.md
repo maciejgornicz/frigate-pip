@@ -347,10 +347,17 @@ Empiece con **Probar conexión** en la configuración y con **Mostrar registro**
 
 ## 12. Versión para la consola de Linux
 
-FrigatePiP también funciona en Linux **sin escritorio**, por ejemplo, en una Raspberry Pi con un monitor en la pared o en un servidor al que se accede por SSH. Muestra las mismas ventanas de vista previa, de una de estas dos formas:
+FrigatePiP también funciona en Linux **sin escritorio**, por ejemplo, en una Raspberry Pi con un monitor en la pared o en un servidor al que se accede por SSH. Muestra las mismas ventanas de vista previa, en uno de estos tres modos:
 
-- **Framebuffer** — en una consola de Linux sin X ni Wayland, las ventanas se dibujan directamente en la pantalla, en la esquina elegida, sobre el texto de la consola. Cuando una ventana se cierra, vuelve a aparecer lo que había debajo.
-- **Terminal** — dentro de una ventana de terminal (también por SSH): una línea con el texto y la imagen, dibujada con **gráficos de Kitty** (Kitty, WezTerm, Ghostty), **Sixel** (foot, Konsole, xterm, Windows Terminal 1.22+) o, en cualquier terminal con color de 24 bits, con medios bloques de colores (baja resolución). Una línea de estado en la parte inferior muestra el estado de la conexión y las teclas.
+| Modo | Dónde aparecen las ventanas | ¿Se ejecuta en segundo plano? | Uso típico | Cómo iniciarlo |
+|---|---|---|---|---|
+| **Framebuffer** | En la pantalla de una consola de Linux sin X ni Wayland, en la esquina elegida, sobre el texto de la consola | **Sí** — como servicio de systemd | Una Raspberry Pi u otro equipo con monitor y sin escritorio (una pantalla de pared) | `frigate-pip --output framebuffer`; como servicio: consulte [Inicio automático](#inicio-automático-systemd) |
+| **Terminal** | Dentro de la ventana de terminal en la que se ejecuta FrigatePiP: una línea con el texto, la imagen y una línea de estado | **No** — la ventana de terminal muestra FrigatePiP mientras se ejecuta (como `top`) | Una ventana de terminal o un panel de tmux que se deja abierto como monitor de cámaras, también por SSH | `frigate-pip` |
+| **Ventanas emergentes de tmux** | Como ventana emergente de tmux sobre lo que esté haciendo en tmux; se cierra sola | **Sí** — en una ventana oculta de tmux | Trabajar en tmux (en local o por SSH) y querer que las cámaras aparezcan en ventanas emergentes | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` — consulte [Ventanas emergentes de tmux](#ventanas-emergentes-de-tmux) |
+
+**En un equipo con Windows — también si trabaja en WSL — use la aplicación de Windows:** se ejecuta en el área de notificación y sus ventanas aparecen por encima de todo, incluidas las ventanas de terminal. La versión de Linux en WSL solo es útil para probarla.
+
+Cuando una ventana se cierra en el framebuffer, vuelve a aparecer lo que había debajo. En una ventana de terminal y en las ventanas emergentes de tmux, la imagen se dibuja con **gráficos de Kitty** (Kitty, WezTerm, Ghostty), **Sixel** (foot, Konsole, xterm, Windows Terminal 1.22+) o, en cualquier terminal con color de 24 bits, con medios bloques de colores (baja resolución; las ventanas emergentes de tmux siempre usan medios bloques).
 
 El video lo decodifica el programa **ffmpeg**; el propio cliente RTSP de FrigatePiP le suministra los datos, por lo que la imagen aparece a los pocos milisegundos del siguiente fotograma clave de la cámara.
 
@@ -380,7 +387,17 @@ El programa es un único archivo sin otras bibliotecas. Para actualizarlo, reemp
 
 ### Dónde aparecen las ventanas
 
-Con `--output auto` (el valor predeterminado), FrigatePiP usa el modo **framebuffer** cuando se ejecuta en una consola de Linux (`TERM=linux`) o sin terminal (como servicio), y el modo **terminal** en los demás casos. En una ventana de terminal, el modo de imagen se elige automáticamente: gráficos de Kitty si están disponibles; si no, Sixel, cuando el terminal indica que lo admite; y si no, medios bloques. Ambos se pueden definir en el archivo de configuración o en la línea de comandos.
+Con `--output auto` (el valor predeterminado), FrigatePiP usa el modo **framebuffer** cuando se ejecuta en una consola de Linux (`TERM=linux`) o sin terminal (como servicio), y el modo **terminal** en los demás casos. El modo **ventanas emergentes de tmux** solo se usa si usted lo elige (`--output tmux` u `output = tmux`). En una ventana de terminal, el modo de imagen se elige automáticamente: gráficos de Kitty si están disponibles; si no, Sixel, cuando el terminal indica que lo admite; y si no, medios bloques. Ambos se pueden definir en el archivo de configuración o en la línea de comandos.
+
+### Ventanas emergentes de tmux
+
+En este modo, FrigatePiP no tiene ventana propia: espera detecciones en segundo plano y, por cada una, abre una ventana emergente de [tmux](https://github.com/tmux/tmux) con la cámara sobre los paneles del cliente de tmux que usó por última vez. Requiere tmux 3.2 o posterior.
+
+- Inícielo una vez, en una sesión oculta de tmux: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`. Para detenerlo: `tmux kill-session -t frigate-pip`. Para usar las teclas (pausa, mostrar una cámara): `tmux attach -t frigate-pip`.
+- La ventana emergente aparece en la **esquina** elegida (`position`) y su tamaño sigue el **ancho de la ventana** (`width`). Se cierra sola tras el tiempo habitual (`duration`, `max_duration`) o al instante con **q**, **x** o **Esc**.
+- tmux muestra una sola ventana emergente a la vez: una detección en otra cámara reemplaza la ventana emergente abierta (o se omite si `replace = false`).
+- Para ver la imagen con todos sus colores, tmux debe transmitir el color de 24 bits: agregue `set -as terminal-features ",xterm-256color:RGB"` a `~/.tmux.conf` (use su `$TERM` de fuera de tmux) y reinicie tmux. FrigatePiP escribe esta sugerencia en su registro cuando faltan los colores.
+- Si no hay ningún cliente de tmux conectado, las detecciones solo se escriben en el registro.
 
 ### Teclas
 
@@ -397,7 +414,7 @@ Cuando FrigatePiP se ejecuta en una ventana de terminal o en una consola:
 
 | Opción | Efecto |
 |---|---|
-| `--output auto\|framebuffer\|terminal` | Dónde se dibujan las ventanas. |
+| `--output auto\|framebuffer\|terminal\|tmux` | Dónde se dibujan las ventanas (consulte la tabla de modos más arriba). |
 | `--graphics auto\|kitty\|sixel\|blocks` | Cómo se dibujan las imágenes en una ventana de terminal. |
 | `--framebuffer /dev/fb0` | Dispositivo framebuffer. |
 | `--test <camera>` | Mostrar una cámara justo después del inicio. |
@@ -412,7 +429,7 @@ Opciones adicionales de la sección `[console]`:
 
 | Clave | Predeterminado | Significado |
 |---|---|---|
-| `output` | `auto` | `auto`, `framebuffer` o `terminal`. |
+| `output` | `auto` | `auto`, `framebuffer`, `terminal` o `tmux`. |
 | `graphics` | `auto` | `auto`, `kitty`, `sixel` o `blocks` (imágenes en una ventana de terminal). |
 | `framebuffer` | `/dev/fb0` | Dispositivo framebuffer. |
 | `ffmpeg` | `ffmpeg` | Programa ffmpeg (nombre o ruta completa). |
@@ -448,5 +465,7 @@ Después: `sudo systemctl enable --now frigate-pip`. El registro se envía al jo
 - **"/dev/fb0: Permission denied"** — agregue el usuario al grupo `video` y vuelva a iniciar sesión (para el servicio: `SupplementaryGroups=video`).
 - **No aparece el texto en el framebuffer** — instale `fonts-dejavu-core` o configure `font` en `[console]`.
 - **La imagen en la ventana de terminal se ve pixelada** — es el modo de medios bloques; use un emulador de terminal compatible con gráficos de Kitty o Sixel (consulte más arriba) o configure `graphics`.
+- **No aparece ninguna ventana emergente de tmux** — compruebe que hay un cliente de tmux conectado (`tmux list-clients`), que la versión de tmux es la 3.2 o posterior (`tmux -V`) y que el proceso en segundo plano se está ejecutando (`tmux ls` muestra la sesión `frigate-pip`); el registro indica por qué no se mostró una ventana emergente.
+- **Colores pálidos en las ventanas emergentes de tmux** — active el color de 24 bits en tmux (consulte [Ventanas emergentes de tmux](#ventanas-emergentes-de-tmux)).
 - **No hay sonido** — el audio de la cámara necesita PulseAudio/PipeWire o ALSA; el usuario del servicio debe pertenecer al grupo `audio`.
 - **Para obtener un informe detallado**, inicie FrigatePiP con `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` y adjunte a su issue el final de ese archivo y del registro.

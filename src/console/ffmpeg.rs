@@ -5,6 +5,7 @@
 
 use super::canvas::Image;
 use std::io::Read;
+use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdout, Command, Stdio};
 
 pub struct Ffmpeg {
@@ -60,6 +61,14 @@ impl Ffmpeg {
         let log = std::env::var_os("FRIGATEPIP_FFMPEG_LOG").and_then(|p| std::fs::OpenOptions::new().create(true).append(true).open(p).ok());
         c.args(["-hide_banner", "-loglevel", if log.is_some() { "info" } else { "error" }]);
         c.stderr(log.map_or_else(Stdio::null, Stdio::from));
+        // ffmpeg is killed together with the thread that started it, also when
+        // FrigatePiP itself ends (e.g. a tmux popup is closed).
+        unsafe {
+            c.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                Ok(())
+            });
+        }
         c
     }
 

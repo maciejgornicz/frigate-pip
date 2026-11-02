@@ -538,7 +538,7 @@ camera_audio = false
 
 [console]
 ; Linux console version only (not used on Windows):
-; output = auto, framebuffer or terminal
+; output = auto, framebuffer, terminal or tmux
 ; graphics = auto, kitty, sixel or blocks (pictures in a terminal)
 ; framebuffer = /dev/fb0
 ; ffmpeg = ffmpeg

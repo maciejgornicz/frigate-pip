@@ -19,7 +19,7 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Updates itself:** checks GitHub once a day and installs a new version with one click (can be switched off).
 - **Six languages** — English, Polski, Deutsch, Español, Português, Français — chosen automatically from Windows.
 - A single small executable (~0.7 MB) with no runtime dependencies; per-user installer, no administrator rights.
-- **Linux console version** (x86_64 and ARM64): windows drawn on the framebuffer of a console without a desktop — e.g. a Raspberry Pi with a monitor on the wall — or inside a terminal (Kitty graphics, Sixel or coloured half blocks), video decoded by ffmpeg.
+- **Linux console version** (x86_64 and ARM64): windows drawn on the framebuffer of a console without a desktop — e.g. a Raspberry Pi with a monitor on the wall — inside a terminal (Kitty graphics, Sixel or coloured half blocks) or as tmux popups while you work in tmux; video decoded by ffmpeg.
 
 ## Installation
 
@@ -42,7 +42,15 @@ frigate-pip --test-connection                # after setting url in ~/.config/fr
 frigate-pip
 ```
 
-On a console without a desktop the windows appear on the screen (framebuffer; the user needs the `video` group), in a terminal they appear inside it. Keys: **q** quit, **x** close windows, **p** pause, **1–9** show a camera. Running it as a systemd service, all options and troubleshooting: [user guide → Linux console version](docs/en/user-guide.md#12-linux-console-version).
+Three ways to run it:
+
+| Mode | Windows appear | In the background? |
+|---|---|---|
+| `--output framebuffer` | on the screen of a console without a desktop (Raspberry Pi with a monitor; user in the `video` group) | yes, as a systemd service |
+| `--output terminal` (default in a terminal) | inside the terminal window FrigatePiP runs in | no — it occupies the terminal |
+| `--output tmux` | as tmux popups over your work in tmux | yes: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` |
+
+On a Windows PC (also in WSL) use the Windows application — it runs in the background and shows its windows over everything. Keys: **q** quit, **x** close windows, **p** pause, **1–9** show a camera. Running it as a systemd service, all options and troubleshooting: [user guide → Linux console version](docs/en/user-guide.md#12-linux-console-version).
 
 ## Usage in short
 

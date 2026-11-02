@@ -330,6 +330,9 @@ pub struct Strings {
     /// Keys shown in the status line.
     #[cfg_attr(windows, allow(dead_code))]
     pub console_keys: &'static str,
+    /// Printed when the tmux mode starts.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_tmux_running: &'static str,
 
     /// Frigate labels: (label, translation)
     pub labels: &'static [(&'static str, &'static str)],
