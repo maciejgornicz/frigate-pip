@@ -1,5 +1,5 @@
-//! Translations. The language follows the Windows display language; when it is
-//! not supported, English is used. Every language is a `Strings` value, so the
+//! Translations. The language follows the Windows display language (on Linux: the
+//! locale, `LC_ALL` / `LC_MESSAGES` / `LANG`); when it is not supported, English is used. Every language is a `Strings` value, so the
 //! compiler rejects a translation with a missing text.
 //!
 //! Adding a language: copy `en.rs`, translate every value, add a `Lang` variant
@@ -97,7 +97,7 @@ pub fn detect() -> Lang {
     Lang::from_primary_langid(id & 0x3FF)
 }
 
-/// `auto` (or empty) = Windows language, otherwise a language code.
+/// `auto` (or empty) = system language, otherwise a language code.
 pub fn resolve(setting: &str) -> Lang {
     Lang::from_code(setting).unwrap_or_else(detect)
 }

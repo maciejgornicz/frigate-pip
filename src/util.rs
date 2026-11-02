@@ -188,8 +188,11 @@ pub fn init_log(to_stderr: bool) {
     LOG_STDERR.store(to_stderr, Ordering::Relaxed);
 }
 
+/// Line ending of the files FrigatePiP writes (log, settings): CRLF for Notepad on Windows.
+pub const NEWLINE: &str = if cfg!(windows) { "\r\n" } else { "\n" };
+
 pub fn log_line(msg: &str) {
-    let line = format!("{} {}\r\n", local_time(true), msg);
+    let line = format!("{} {}{NEWLINE}", local_time(true), msg);
     if LOG_STDERR.load(Ordering::Relaxed) {
         eprint!("{line}");
     }

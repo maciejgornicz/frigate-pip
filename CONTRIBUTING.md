@@ -6,18 +6,20 @@ Thank you for helping! Bug reports, translations, documentation fixes and code a
 
 Open an [issue](https://github.com/maciejgornicz/frigate-pip/issues) and include:
 
-- the FrigatePiP version (first line of the log: `FrigatePiP x.y.z - start`), Windows version and Frigate version;
+- the FrigatePiP version (first line of the log: `FrigatePiP x.y.z - start`), the Frigate version and your system: the Windows version, or for the Linux console version the distribution and the output (`framebuffer`, `terminal` or `tmux`);
 - what you did, what you expected and what happened;
-- the relevant part of the log (**tray menu → Show log**, or `%APPDATA%\FrigatePiP\frigate-pip.log`) and, for connection problems, the output of **Test connection**.
+- the relevant part of the log — Windows: **tray menu → Show log** or `%APPDATA%\FrigatePiP\frigate-pip.log`; Linux: `~/.config/frigate-pip/frigate-pip.log` — and, for connection problems, the output of **Test connection** (Linux: `frigate-pip --test-connection`).
 
 The log contains your Frigate address and camera names — remove anything you do not want to share. Please check existing issues first.
 
 ## Development setup
 
-- Windows 10 or 11, 64-bit, for the Windows application; Linux (or WSL on Windows) with `ffmpeg` for the console version.
-- [Rust](https://rustup.rs) stable, 1.87 or later, with either the MSVC (`x86_64-pc-windows-msvc`, default) or the GNU (`x86_64-pc-windows-gnu`) toolchain. The only dependency is the [`windows`](https://crates.io/crates/windows) crate.
-- Optional: [Inno Setup 6](https://jrsoftware.org/isinfo.php) to build the installer.
+- [Rust](https://rustup.rs) stable, 1.87 or later.
+- **Windows application:** Windows 10 or 11, 64-bit, with either the MSVC (`x86_64-pc-windows-msvc`, default) or the GNU (`x86_64-pc-windows-gnu`) toolchain. Its only dependency is the [`windows`](https://crates.io/crates/windows) crate. Optional: [Inno Setup 6](https://jrsoftware.org/isinfo.php) to build the installer.
+- **Linux console version:** Linux (or WSL on Windows) with `ffmpeg`; its dependencies are the `libc` and `fontdue` crates. Optional: `musl-tools` for a static binary and [cargo-deb](https://crates.io/crates/cargo-deb) for the Debian package — see [Testing the Linux console version](#testing-the-linux-console-version).
 - Optional: a Frigate server with go2rtc to try things for real.
+
+The Windows application:
 
 ```
 cargo build --release          # target\release\frigate-pip.exe
@@ -30,7 +32,7 @@ Run the freshly built exe directly. Only one copy runs at a time, so exit the in
 
 ### Tests that need real hardware or a Frigate server
 
-Some tests are marked `#[ignore]`: they need Media Foundation decoders or a live go2rtc server. Point them at your own server with environment variables:
+Some tests are marked `#[ignore]`: they need Media Foundation decoders (Windows) or a live go2rtc server. Point them at your own server with environment variables (Windows `cmd` syntax; on Linux use `export`):
 
 ```
 set FRIGATE_RTSP=rtsp://192.168.1.10:8554
@@ -39,6 +41,12 @@ cargo test --release -- --ignored --nocapture
 ```
 
 `FRIGATE_STREAMS` is a comma-separated list of go2rtc stream names. Without these variables the live tests print a hint and pass. Never commit real addresses, camera names, credentials or footage.
+
+### Testing Windows-only behaviour
+
+To try the behaviour of Windows "N" editions without Media Foundation, start the app with the environment variable `FRIGATEPIP_NO_MF=1`: live video then falls back to MJPEG.
+
+To try the update path, start the installed app with `FRIGATEPIP_FAKE_VERSION=1.0.0`: it then treats the latest GitHub release as newer and offers to install it (**Settings → Connection → Check now**).
 
 ### Testing the Linux console version
 
@@ -59,45 +67,71 @@ ffmpeg -f rawvideo -pix_fmt bgra -s 1280x720 -i /tmp/fakefb screen.png
 
 Note that the window's background is put back when FrigatePiP exits, so copy the file while it runs. `FRIGATEPIP_FFMPEG_LOG=/tmp/ff.log` collects ffmpeg's messages; `FRIGATEPIP_AUDIO_OUT=wav:/tmp/a.wav` records the camera audio to a file instead of playing it.
 
-To try the behaviour of Windows "N" editions without Media Foundation, start the app with the environment variable `FRIGATEPIP_NO_MF=1`: live video then falls back to MJPEG.
+tmux popups need a tmux client: start tmux in a terminal, then `./target/release/frigate-pip --output tmux --test front_door` from another tmux window.
 
-To try the update path, start the installed app with `FRIGATEPIP_FAKE_VERSION=1.0.0`: it then treats the latest GitHub release as newer and offers to install it (**Settings → Connection → Check now**).
+The static binary and the Debian package, as CI builds them (the package's contents are set in `[package.metadata.deb]` in `Cargo.toml` and in `packaging/`):
 
-### Building the installer
+```
+cargo build --release --target x86_64-unknown-linux-musl
+cargo deb --target x86_64-unknown-linux-musl --no-build
+```
+
+### Building the Windows installer
 
 ```
 cargo build --release
 "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" /DAppVersion=1.0.0 installer\frigate-pip.iss
 ```
 
-The installer is written to `target\installer`. GitHub Actions runs `cargo fmt --check`, clippy and the tests for every push and pull request, and builds the exe and the installer.
+The installer is written to `target\installer`.
 
 ## Project layout
+
+Shared by both versions:
 
 | Path | Contents |
 |---|---|
 | `src/main.rs` | Entry point: modules per platform; Windows: command line, single instance, start-up. |
-| `src/view.rs` | Shared window decisions: where a new window goes (replacing), its caption, which stream it plays. |
-| `src/console/` | Linux console version: `mod.rs` (main loop, windows, keys), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `canvas.rs` (pictures and captions). |
-| `src/app.rs` | UI thread: tray icon, menu, preview windows and their placement, settings logic. |
-| `src/settings.rs` | The settings window (Win32 controls, tooltips, live preview, connection test output). |
 | `src/config.rs` | Settings in `config.ini` (INI parser that keeps comments, defaults). |
+| `src/view.rs` | Window decisions: where a new window goes (replacing), its caption, which stream it plays. |
 | `src/frigate.rs` | Event listener (WebSocket or MQTT), camera list from `/api/config`, connection test. |
 | `src/filter.rs` | Decides whether a Frigate `events` / `reviews` message opens a window. |
+| `src/rtsp.rs`, `src/rtp.rs` | RTSP client (TCP interleaved, Basic/Digest auth), SDP and RTP depacketizing. |
+| `src/audio.rs` | Camera audio: AAC / G.711 depacketizing and decoding; WASAPI playback on Windows. |
+| `src/ws.rs`, `src/mqtt.rs`, `src/net.rs` | Minimal WebSocket, MQTT and HTTP clients. |
+| `src/json.rs`, `src/util.rs` | JSON parser, small utilities and logging. |
+| `src/i18n/` | Translations: `mod.rs` (the `Strings` struct and language selection) and one file per language. |
+
+Windows application:
+
+| Path | Contents |
+|---|---|
+| `src/app.rs` | UI thread: tray icon, menu, preview windows and their placement, settings logic. |
+| `src/settings.rs` | The settings window (Win32 controls, tooltips, live preview, connection test output). |
 | `src/player.rs` | Preview window thread: snapshot first, then live video (RTSP, MJPEG or snapshots). |
 | `src/render.rs` | Drawing: Direct3D 11 swap chain, video processor, Direct2D/DirectWrite caption, GDI quick paint. |
 | `src/decoder.rs` | H.264 / H.265 decoding with Media Foundation (hardware or software). |
-| `src/h264.rs` | Rewrites the H.264 SPS so the decoder outputs frames without delay. |
-| `src/rtsp.rs`, `src/rtp.rs` | RTSP client (TCP interleaved, Basic/Digest auth), SDP and RTP depacketizing. |
+| `src/h264.rs` | Rewrites the H.264 SPS so the Windows decoder outputs frames without delay. |
 | `src/hub.rs` | Prebuffer: persistent RTSP connections that keep the last GOP. |
-| `src/audio.rs` | Camera audio: AAC / G.711 depacketizing and decoding, WASAPI playback. |
-| `src/ws.rs`, `src/mqtt.rs`, `src/net.rs` | Minimal WebSocket, MQTT and HTTP clients. |
-| `src/json.rs`, `src/util.rs`, `src/icon.rs` | JSON parser, small utilities and logging, tray icon drawn in code. |
+| `src/icon.rs` | Tray icon drawn in code. |
 | `src/update.rs` | Update check on GitHub (HTTPS via WinHTTP), download with SHA-256 check, silent installer run. |
-| `src/i18n/` | Translations: `mod.rs` (the `Strings` struct and language selection) and one file per language. |
-| `docs/<lang>/user-guide.md` | The user guide in every language. |
 | `installer/frigate-pip.iss` | Inno Setup script. |
 | `build.rs`, `.cargo/config.toml` | MSVC builds: delay-loaded `mfplat.dll` and a statically linked C runtime, so the exe starts on any Windows 10/11 PC. |
+
+Linux console version:
+
+| Path | Contents |
+|---|---|
+| `src/console/` | `mod.rs` (main loop, windows, keys, viewer mode for tmux popups), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `tmux.rs` (tmux popups), `canvas.rs` (pictures and captions). |
+| `packaging/` | Debian package: `frigate-pip@.service` and the maintainer scripts; the APT repository's public key and the GitHub Pages start page. |
+
+Everything else:
+
+| Path | Contents |
+|---|---|
+| `docs/<lang>/user-guide.md` | The user guide in every language: sections 1–11 for Windows, section 12 for the Linux console version. |
+| `.github/workflows/build.yml` | CI for every push and pull request; releases. |
+| `.github/workflows/apt.yml` | The APT repository on GitHub Pages. |
 
 ## Design principles
 
@@ -132,4 +166,6 @@ To add a language:
 
 ## Releases
 
-Maintainers bump `version` in `Cargo.toml` and push a matching `vX.Y.Z` tag. The workflow then builds the exe, the installer and the static Linux archives (x86_64 and ARM64) and publishes them with their SHA-256 checksums on the Releases page (it fails if the tag and the version differ).
+For every push and pull request, GitHub Actions runs `cargo fmt --check`, clippy and the tests on Windows and on Linux (x86_64 and ARM64). It builds the exe and the installer on Windows, and the static Linux binaries and the Debian packages on Linux; each package is installed, upgraded and removed once as a test.
+
+Maintainers bump `version` in `Cargo.toml` and push a matching `vX.Y.Z` tag. The workflow then publishes the exe, the installer, the Linux archives and the Debian packages with their SHA-256 checksums on the Releases page (it fails if the tag and the version differ). After that it rebuilds the signed APT repository on GitHub Pages from the packages of all releases and installs FrigatePiP from it on x86_64 and ARM64; the signing key is the `APT_SIGNING_KEY` secret.

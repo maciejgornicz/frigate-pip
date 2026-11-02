@@ -4,7 +4,7 @@
 
 FrigatePiP es una pequeña aplicación de la bandeja del sistema de Windows para [Frigate NVR](https://frigate.video). Cuando Frigate detecta una persona, un automóvil o cualquier otro objeto, FrigatePiP muestra de inmediato una pequeña ventana flotante (picture-in-picture) con el video en vivo de esa cámara en una esquina de la pantalla. Cuando ya no hay movimiento, la ventana se cierra sola.
 
-También existe una versión para la consola de Linux, sin escritorio — consulte [Versión para la consola de Linux](#12-versión-para-la-consola-de-linux).
+Las secciones 1–11 describen la aplicación para Windows. También existe una versión para la consola de Linux, sin escritorio, que se describe por separado en la sección 12, [Versión para la consola de Linux](#12-versión-para-la-consola-de-linux).
 
 ## Contenido
 
@@ -367,7 +367,7 @@ El video lo decodifica el programa **ffmpeg**; el propio cliente RTSP de Frigate
 - **ffmpeg**: se instala junto con el paquete `.deb`; si no, `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) o el paquete de su distribución.
 - Para el texto en el framebuffer: la fuente DejaVu (`fonts-dejavu-core`, que normalmente se instala junto con ffmpeg).
 - Para el framebuffer: pertenecer al grupo `video` (`sudo usermod -aG video $USER` y, después, volver a iniciar sesión).
-- Frigate accesible igual que para la versión de Windows (puerto 5000 de la API, puerto RTSP 8554).
+- Frigate accesible desde el equipo mediante `http://` simple en su puerto 5000 de la API y, para el video en vivo, el puerto RTSP 8554 de go2rtc (detalles en [Requisitos](#1-requisitos)).
 
 ### Instalación
 

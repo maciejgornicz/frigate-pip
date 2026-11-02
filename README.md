@@ -2,11 +2,16 @@
 
 **Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows — and on the Linux console.**
 
-When Frigate detects a person, a car or any other object, FrigatePiP pops up a small always-on-top window with that camera's live video in a corner of your screen — within milliseconds — and closes it again when nothing moves any more. It lives in the notification area, takes about 5–10 MB of memory and practically no CPU while waiting.
+When Frigate detects a person, a car or any other object, FrigatePiP pops up a small window with that camera's live video in a corner of your screen — within milliseconds — and closes it again when nothing moves any more.
+
+- **[Windows](#windows):** a tray application whose windows appear over everything; it takes about 5–10 MB of memory and practically no CPU while waiting.
+- **[Linux console](#linux-console):** the same windows on a computer without a desktop (e.g. a Raspberry Pi with a monitor), inside a terminal or as tmux popups.
 
 **User guide:** [English](docs/en/user-guide.md) · [Polski](docs/pl/user-guide.md) · [Deutsch](docs/de/user-guide.md) · [Español](docs/es/user-guide.md) · [Português](docs/pt/user-guide.md) · [Français](docs/fr/user-guide.md)
 
-## Features
+## Windows
+
+### Features
 
 - **Fast:** the window appears ~5 ms after Frigate's message, Frigate's snapshot is shown ~35 ms later, and smooth live video follows (well under a second; almost instantly with the optional prebuffer).
 - **Live video from go2rtc (RTSP)** with hardware decoding of H.264 and H.265 (Media Foundation + Direct3D 11), up to 4K, or MJPEG / snapshots when RTSP is not available.
@@ -17,11 +22,10 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Settings window** with a live preview of your changes, a connection test and a description of every option.
 - **Events via the Frigate WebSocket** (nothing else needed) or via **MQTT**.
 - **Updates itself:** checks GitHub once a day and installs a new version with one click (can be switched off).
-- **Six languages** — English, Polski, Deutsch, Español, Português, Français — chosen automatically from Windows.
+- **Six languages** — English, Polski, Deutsch, Español, Português, Français — chosen automatically from the Windows display language.
 - A single small executable (~0.7 MB) with no runtime dependencies; per-user installer, no administrator rights.
-- **Linux console version** (x86_64 and ARM64): windows drawn on the framebuffer of a console without a desktop — e.g. a Raspberry Pi with a monitor on the wall — inside a terminal (Kitty graphics, Sixel or coloured half blocks) or as tmux popups while you work in tmux; video decoded by ffmpeg.
 
-## Installation
+### Installation
 
 1. Download **`FrigatePiP-<version>-installer.exe`** from [Releases](https://github.com/maciejgornicz/frigate-pip/releases/latest).
 2. Run it (no administrator rights needed). If Windows SmartScreen says *“Windows protected your PC”*, click **More info → Run anyway** — the program is not code-signed.
@@ -32,7 +36,34 @@ Prefer no installer? Download `FrigatePiP-<version>-portable.exe` from the same 
 
 **Requirements:** Windows 10 (1809+) or 11, 64-bit; Frigate reachable over plain `http://` on its API port **5000** (the unauthenticated port; 8971 and HTTPS are not supported — in the Home Assistant add-on, enable port 5000 in the add-on's network settings) and, for live video, go2rtc's RTSP port **8554**. On Windows N editions without the Media Feature Pack, live video falls back to MJPEG. Details, updating and uninstalling: [user guide → Installation](docs/en/user-guide.md#2-installation).
 
+### Usage in short
+
+- **Left-click** the tray icon to open the settings; **right-click** for the menu (show a camera, pause notifications, open Frigate, help, log, exit).
+- Hover over any option in the settings window to see what it does; **F1** opens the guide.
+- Settings are stored in `%APPDATA%\FrigatePiP\config.ini`; the log in `%APPDATA%\FrigatePiP\frigate-pip.log`.
+- Command line: `frigate-pip.exe --settings`, `--test <camera>`, `--quit`.
+
+Everything is described in the [user guide](docs/en/user-guide.md).
+
+### How it is so fast
+
+1. Detections arrive over Frigate's WebSocket (`/ws`); other messages are discarded after reading only their topic.
+2. The window is created at once (~5 ms). In parallel:
+   - Frigate's `latest.jpg` is decoded with WIC and painted with GDI (~35 ms),
+   - Direct3D 11 / Direct2D start up and take over drawing,
+   - the RTSP client connects to go2rtc (~20 ms) and waits for a key frame.
+3. The H.264 SPS is rewritten (`max_num_reorder_frames = 0`); without it the Windows decoder holds frames until the next IDR (up to ~1 s of delay).
+4. Only the newest decoded frame is drawn; late frames are dropped.
+5. Camera audio uses the same RTSP connection; AAC decoding and WASAPI playback run on their own thread with a ~100–250 ms buffer.
+6. Optional: the *prebuffer* keeps the sub streams connected so video starts without waiting for a key frame, and *Ready GPU* keeps the graphics device initialised.
+
 ## Linux console
+
+> **On a Windows PC — also when you work in WSL — use the [Windows application](#windows):** its windows appear over everything, terminals included. The Linux version is meant for Linux computers.
+
+The Linux version (x86_64 and ARM64) shares the Frigate connection (WebSocket or MQTT), the filters, the window corner, size and timing, live video, MJPEG / snapshots and camera audio with the Windows application; video and audio are decoded by **ffmpeg**, fed by FrigatePiP's own RTSP client. It has no tray icon and no settings window: its settings are in `~/.config/frigate-pip/config.ini`.
+
+### Installation
 
 Debian, Ubuntu and Raspberry Pi OS (64-bit), from the FrigatePiP APT repository — apt installs ffmpeg with it, and `sudo apt upgrade` keeps FrigatePiP up to date:
 
@@ -46,7 +77,7 @@ frigate-pip
 
 Every [release](https://github.com/maciejgornicz/frigate-pip/releases/latest) also has the single package files `frigate-pip_<version>_amd64.deb` and `_arm64.deb` (`sudo apt install ./frigate-pip_*.deb`). Other distributions: install ffmpeg, unpack `FrigatePiP-<version>-linux-x86_64.tar.gz` (or `…-arm64.tar.gz`) and copy `frigate-pip` to `/usr/local/bin`.
 
-Three ways to run it:
+### Three ways to run it
 
 | Mode | Windows appear | In the background? |
 |---|---|---|
@@ -54,30 +85,13 @@ Three ways to run it:
 | `--output terminal` (default in a terminal) | inside the terminal window FrigatePiP runs in | no — it occupies the terminal |
 | `--output tmux` | as tmux popups over your work in tmux — only while you work inside tmux | yes: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, then work in tmux (`tmux`) |
 
-On a Windows PC (also in WSL) use the Windows application — it runs in the background and shows its windows over everything. Keys: **q** quit, **x** close windows, **p** pause, **1–9** show a camera. Running it as a systemd service, all options and troubleshooting: [user guide → Linux console version](docs/en/user-guide.md#12-linux-console-version).
+Keys in the terminal or on the console: **q** quit, **x** close windows, **p** pause, **1–9** show a camera; a tmux popup closes with **q**, **x** or **Esc**.
 
-## Usage in short
-
-- **Left-click** the tray icon to open the settings; **right-click** for the menu (show a camera, pause notifications, open Frigate, help, log, exit).
-- Hover over any option in the settings window to see what it does; **F1** opens the guide.
-- Settings are stored in `%APPDATA%\FrigatePiP\config.ini`; the log in `%APPDATA%\FrigatePiP\frigate-pip.log`.
-- Command line: `frigate-pip.exe --settings`, `--test <camera>`, `--quit`.
-
-Everything is described in the [user guide](docs/en/user-guide.md).
-
-## How it is so fast
-
-1. Detections arrive over Frigate's WebSocket (`/ws`); other messages are discarded after reading only their topic.
-2. The window is created at once (~5 ms). In parallel:
-   - Frigate's `latest.jpg` is decoded with WIC and painted with GDI (~35 ms),
-   - Direct3D 11 / Direct2D start up and take over drawing,
-   - the RTSP client connects to go2rtc (~20 ms) and waits for a key frame.
-3. The H.264 SPS is rewritten (`max_num_reorder_frames = 0`); without it the Windows decoder holds frames until the next IDR (up to ~1 s of delay).
-4. Only the newest decoded frame is drawn; late frames are dropped.
-5. Camera audio uses the same RTSP connection; AAC decoding and WASAPI playback run on their own thread with a ~100–250 ms buffer.
-6. Optional: the *prebuffer* keeps the sub streams connected so video starts without waiting for a key frame, and *Ready GPU* keeps the graphics device initialised.
+Running it as a systemd service, all options and troubleshooting: [user guide → Linux console version](docs/en/user-guide.md#12-linux-console-version).
 
 ## Building from source
+
+Windows application:
 
 ```
 rustup default stable            # MSVC or GNU toolchain, x86_64
@@ -85,7 +99,11 @@ cargo build --release            # target\release\frigate-pip.exe
 cargo test --release
 ```
 
-The Linux console version builds the same way on Linux (`cargo build --release`; a static binary with `--target x86_64-unknown-linux-musl`). The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php): `ISCC.exe /DAppVersion=1.0.0 installer\frigate-pip.iss`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout, live tests and how to add a language.
+The installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php): `ISCC.exe /DAppVersion=1.0.0 installer\frigate-pip.iss`.
+
+Linux console version: the same `cargo build --release` on Linux (a static binary with `--target x86_64-unknown-linux-musl`; the Debian package with [cargo-deb](https://crates.io/crates/cargo-deb)).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout, live tests and how to add a language.
 
 ## Contributing
 

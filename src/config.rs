@@ -53,8 +53,8 @@ impl IniDoc {
     }
 
     pub fn to_text(&self) -> String {
-        let mut s = self.lines.join("\r\n");
-        s.push_str("\r\n");
+        let mut s = self.lines.join(crate::util::NEWLINE);
+        s.push_str(crate::util::NEWLINE);
         s
     }
 
@@ -226,7 +226,7 @@ pub struct Config {
     pub prebuffer: bool,
     pub gpu_warm: bool,
     pub camera_audio: bool,
-    /// Interface language: `auto` (Windows) or a language code.
+    /// Interface language: `auto` (system language) or a language code.
     pub language: String,
     /// Once a day ask GitHub whether a new version exists.
     pub check_updates: bool,
@@ -432,7 +432,7 @@ pub fn load(path: &PathBuf) -> std::io::Result<(Config, IniDoc)> {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let _ = std::fs::create_dir_all(path.parent().unwrap_or(path));
-            let _ = std::fs::write(path, DEFAULT_INI.replace('\n', "\r\n"));
+            let _ = std::fs::write(path, DEFAULT_INI.replace('\n', crate::util::NEWLINE));
             DEFAULT_INI.to_string()
         }
         Err(e) => return Err(e),
@@ -453,9 +453,10 @@ pub const DEFAULT_INI: &str = "\
 ; (left-click the tray icon). Changes saved in this file are applied automatically.
 
 [app]
-; auto = Windows display language (English if not supported), or: en, pl, de, es, pt, fr
+; auto = system language - Windows display language, or LANG on Linux
+; (English if not supported) - or: en, pl, de, es, pt, fr
 language = auto
-; Once a day, ask GitHub whether a new version exists (true / false)
+; Windows only: once a day, ask GitHub whether a new version exists (true / false)
 check_updates = true
 
 [frigate]
@@ -490,7 +491,7 @@ ignore_stationary = true
 min_score = 0
 
 [display]
-; primary = primary monitor, 1, 2, 3... = monitor number from the left
+; Windows only: primary = primary monitor, 1, 2, 3... = monitor number from the left
 monitor = primary
 ; top-left, top-right, bottom-left, bottom-right
 position = bottom-right
@@ -502,9 +503,9 @@ width = 480
 duration = 15
 ; Maximum time (s) a window is shown, even if the object keeps moving
 max_duration = 120
-; Keep windows above all other windows
+; Windows only: keep windows above all other windows
 topmost = true
-; Short system sound when a window appears (not the camera audio)
+; Windows only: short system sound when a window appears (not the camera audio)
 sound = false
 ; Camera, object and time caption on the picture
 overlay = true
@@ -513,11 +514,11 @@ max_popups = 4
 ; When all windows are in use: true = the new event replaces the oldest window
 ; (same place on the screen), false = the new event is skipped
 replace = true
-; Do not show windows while a full-screen game or presentation is running
+; Windows only: do not show windows while a full-screen game or presentation is running
 skip_fullscreen = false
 
 [video]
-; rtsp     = smooth video from go2rtc (hardware decoding)
+; rtsp     = smooth video from go2rtc (Windows: hardware decoding; Linux: ffmpeg)
 ; mjpeg    = MJPEG from Frigate (about 5 fps, detect resolution)
 ; snapshot = refreshed snapshots only
 live = rtsp
@@ -525,11 +526,11 @@ live = rtsp
 ; sub / main = always this stream
 stream = auto
 auto_main_width = 800
-; Prebuffer: keeps a connection to every camera's sub stream so live video
+; Windows only - prebuffer: keeps a connection to every camera's sub stream so live video
 ; starts at once (~0.15 s) instead of at the next key frame (up to ~1 s).
 ; Cost: about 0.1-0.5 Mbit/s of local network traffic per camera, all the time.
 prebuffer = false
-; Keep the graphics device ready: video starts ~130 ms sooner,
+; Windows only: keep the graphics device ready - video starts ~130 ms sooner,
 ; at the cost of ~1% of one CPU core while idle (GPU driver thread).
 gpu_warm = false
 ; Camera audio in the preview window (AAC / G.711 from the RTSP stream).
