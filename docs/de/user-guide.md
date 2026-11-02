@@ -411,10 +411,11 @@ Mit `--output auto` (Standard) öffnet FrigatePiP **Desktop-Fenster**, wenn es a
 
 Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rahmenlose Fenster über allen anderen, in der gewählten Ecke (`position`) des gewählten Monitors (`monitor`: `primary` oder eine von links gezählte Nummer), so breit wie `width` (multipliziert mit der Desktop-Skalierung). Sie brauchen X11 oder Wayland mit XWayland — GNOME, KDE Plasma und die meisten anderen Desktops starten XWayland für solche Programme. Reines Wayland genügt nicht: Es erlaubt einem Programm nicht, ein Fenster in eine Ecke zu setzen oder im Vordergrund zu halten.
 
-- **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie.
+- **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie. Ein zweiter Start (oder `frigate-pip --settings`) öffnet die Einstellungen der laufenden Kopie.
 - **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
+- **Symbol im Infobereich:** mit demselben Menü wie unter Windows (siehe [Das Tray-Symbol](#4-das-tray-symbol)); seine Farbe zeigt den Zustand: blau — verbunden, grau — nicht verbunden, orange — pausiert. Es erscheint unter KDE Plasma, Xfce, Cinnamon, MATE und Budgie sowie unter GNOME mit der Erweiterung AppIndicator (in Ubuntu enthalten).
 - **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, Ziehen verschiebt das Fenster, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
-- **Einstellungen:** in `~/.config/frigate-pip/config.ini`, unten beschrieben; ein Symbol im Infobereich oder ein Einstellungsfenster gibt es noch nicht.
+- **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben).
 
 ### tmux-Popups
 
@@ -454,6 +455,7 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 | `--list` | Listet die Kameras mit ihren Objekten und Zonen auf — die Namen für `cameras`, `labels` und `zones` in `[trigger]` — und beendet sich. |
 | `--autostart on\|off` | Startet die Desktop-Fenster mit der Desktop-Sitzung (ein Eintrag in `~/.config/autostart`) oder nicht mehr. |
 | `--quit` | Beendet die laufenden Desktop-Fenster. |
+| `--settings` | Öffnet die Einstellungen der laufenden Desktop-Fenster (oder startet sie mit geöffneten Einstellungen). |
 | `--version`, `--help` | Version, Kurzhilfe. |
 
 ### Einstellungen
@@ -510,3 +512,4 @@ Danach: `sudo systemctl enable --now frigate-pip`. Das Protokoll wird ins Journa
 - **Für einen ausführlichen Bericht** starten Sie FrigatePiP mit `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` und hängen Sie das Ende dieser Datei und des Protokolls an Ihr Issue an.
 - **Keine Desktop-Fenster** — sie brauchen X11 oder XWayland: `echo $DISPLAY` muss etwas wie `:0` anzeigen. Ohne das verwendet FrigatePiP die Konsolenmodi; das Protokoll nennt den Grund (`No desktop windows`).
 - **FrigatePiP meldet, dass es bereits läuft** — pro Benutzer läuft eine Kopie, zum Beispiel die mit der Desktop-Sitzung gestartete; `frigate-pip --quit` beendet sie.
+- **Kein Symbol im Infobereich unter GNOME** — GNOME zeigt solche Symbole nur mit der Erweiterung „AppIndicator and KStatusNotifierItem Support“ (Paket `gnome-shell-extension-appindicator`; in Ubuntu enthalten). Ohne sie starten Sie FrigatePiP erneut aus dem Anwendungsmenü, um die Einstellungen zu öffnen.

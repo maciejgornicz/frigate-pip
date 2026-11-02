@@ -56,6 +56,34 @@ pub fn choose_stream(cfg: &Config, info: Option<&CameraInfo>, camera: &str, phys
     }
 }
 
+/// List entries: cameras (name, title), objects and zones — those known to Frigate
+/// plus those from the settings (so nothing is lost while Frigate is unreachable).
+pub fn choices(cams: &[CameraInfo], cfg: &Config) -> (Vec<(String, String)>, Vec<String>, Vec<String>) {
+    let mut cameras: Vec<(String, String)> = cams.iter().map(|c| (c.name.clone(), c.title.clone())).collect();
+    for c in &cfg.cameras {
+        if !cameras.iter().any(|(n, _)| n.eq_ignore_ascii_case(c)) {
+            cameras.push((c.clone(), c.clone()));
+        }
+    }
+    let mut known: Vec<String> = cams.iter().flat_map(|c| c.labels.iter().cloned()).collect();
+    if known.is_empty() {
+        known = vec!["person".into(), "car".into()];
+    }
+    let labels = union(known.iter(), &cfg.labels);
+    let zones = union(cams.iter().flat_map(|c| c.zones.iter()), &cfg.zones);
+    (cameras, labels, zones)
+}
+
+fn union<'a>(base: impl Iterator<Item = &'a String>, extra: &'a [String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for s in base.chain(extra.iter()) {
+        if !out.iter().any(|o| o.eq_ignore_ascii_case(s)) {
+            out.push(s.clone());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -411,10 +411,11 @@ Con `--output auto` (el valor predeterminado), FrigatePiP abre **ventanas en el 
 
 En un escritorio Linux, las ventanas de vista previa funcionan como en Windows: ventanas sin bordes por encima de todas las demás, en la esquina elegida (`position`) del monitor elegido (`monitor`: `primary` o un número contado desde la izquierda), con el ancho de `width` (multiplicado por la escala del escritorio). Necesitan X11, o Wayland con XWayland: GNOME, KDE Plasma y la mayoría de los demás escritorios inician XWayland para estos programas. Wayland por sí solo no basta: no permite que un programa coloque una ventana en una esquina ni la mantenga encima.
 
-- **Inicio:** menú de aplicaciones → **FrigatePiP** (instalado con apt) o `frigate-pip` en un terminal del escritorio. Se ejecuta en segundo plano sin terminal; se ejecuta una copia por usuario.
+- **Inicio:** menú de aplicaciones → **FrigatePiP** (instalado con apt) o `frigate-pip` en un terminal del escritorio. Se ejecuta en segundo plano sin terminal; se ejecuta una copia por usuario. Un segundo inicio (o `frigate-pip --settings`) abre la configuración de la copia en ejecución.
 - **Con la sesión del escritorio:** `frigate-pip --autostart on` (para desactivarlo: `frigate-pip --autostart off`). Para detenerlo: `frigate-pip --quit`.
+- **Icono en la bandeja:** con el mismo menú que en Windows (consulte [El icono de la bandeja](#4-el-icono-de-la-bandeja)); su color muestra el estado: azul — conectado, gris — sin conexión, ámbar — en pausa. Aparece en KDE Plasma, Xfce, Cinnamon, MATE y Budgie, y en GNOME con la extensión AppIndicator (incluida en Ubuntu).
 - **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, arrastrar mueve la ventana, un clic la fija, un doble clic abre la cámara en Frigate y una ventana bajo el puntero no se cierra.
-- **Configuración:** en `~/.config/frigate-pip/config.ini`, descrita más abajo; todavía no hay icono en la bandeja ni ventana de configuración.
+- **Configuración:** un clic en el icono (o **Configuración…** en su menú) la abre en el navegador, con las mismas opciones, descripciones y prueba de conexión que en Windows; la página solo se abre en este equipo. En el primer inicio se abre sola. Se guarda en `~/.config/frigate-pip/config.ini` (descrito más abajo).
 
 ### Ventanas emergentes de tmux
 
@@ -454,6 +455,7 @@ Cuando FrigatePiP se ejecuta en una ventana de terminal o en una consola:
 | `--list` | Muestra las cámaras con sus objetos y zonas — los nombres para `cameras`, `labels` y `zones` en `[trigger]` — y termina. |
 | `--autostart on\|off` | Inicia las ventanas en el escritorio con la sesión del escritorio (una entrada en `~/.config/autostart`) o deja de hacerlo. |
 | `--quit` | Detiene las ventanas en el escritorio en ejecución. |
+| `--settings` | Abre la configuración de las ventanas en el escritorio en ejecución (o las inicia con la configuración abierta). |
 | `--version`, `--help` | Versión, ayuda breve. |
 
 ### Opciones de configuración
@@ -510,3 +512,4 @@ Después: `sudo systemctl enable --now frigate-pip`. El registro se envía al jo
 - **Para obtener un informe detallado**, inicie FrigatePiP con `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` y adjunte a su issue el final de ese archivo y del registro.
 - **No aparecen ventanas en el escritorio** — necesitan X11 o XWayland: `echo $DISPLAY` debe mostrar algo como `:0`. Sin ello, FrigatePiP usa los modos de consola; el registro indica el motivo (`No desktop windows`).
 - **FrigatePiP indica que ya se está ejecutando** — se ejecuta una copia por usuario, por ejemplo la iniciada con la sesión del escritorio; `frigate-pip --quit` la detiene.
+- **No hay icono en la bandeja en GNOME** — GNOME solo muestra estos iconos con la extensión «AppIndicator and KStatusNotifierItem Support» (paquete `gnome-shell-extension-appindicator`; incluida en Ubuntu). Sin ella, inicie FrigatePiP de nuevo desde el menú de aplicaciones para abrir la configuración.

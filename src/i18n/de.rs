@@ -181,6 +181,17 @@ pub static STRINGS: Strings = Strings {
     console_not_running: "FrigatePiP läuft nicht.",
     console_autostart_on: "FrigatePiP startet mit der Desktop-Sitzung: {0}",
     console_autostart_off: "FrigatePiP startet nicht mehr mit der Desktop-Sitzung.",
+    linux_settings_saved: "Gespeichert. FrigatePiP übernimmt die Änderungen innerhalb weniger Sekunden.",
+    linux_language_auto: "Automatisch (Systemsprache)",
+    linux_autostart: "FrigatePiP mit der Desktop-Sitzung starten",
+    linux_tip_autostart: "Startet FrigatePiP automatisch nach der Anmeldung am Desktop.",
+    linux_tip_language: "Sprache der Anwendung. „Automatisch“ folgt der Systemsprache (LANG; Englisch, falls diese nicht unterstützt wird).",
+    linux_live_rtsp: "RTSP von go2rtc – flüssig, von ffmpeg decodiert",
+    linux_tip_live: "Wie das Livebild empfangen wird: RTSP von go2rtc (flüssig, von ffmpeg decodiert), MJPEG von Frigate (ca. 5 fps) oder nur aktualisierte Schnappschüsse.",
+    linux_window_hint: "Im Fenster: Ziehen – verschieben, Klick – anheften, × oder Rechtsklick – schließen, Lautsprecher – Ton ein/aus, Doppelklick – Kamera in Frigate.",
+    linux_tip_width: "Breite eines Vorschaufensters in Pixeln (multipliziert mit der Desktop-Skalierung); die Höhe ergibt sich aus dem Seitenverhältnis der Kamera.",
+    linux_notify_setup: "Geben Sie in den Einstellungen die Adresse Ihres Frigate-Servers ein.",
+    linux_notify_no_tray: "FrigatePiP läuft im Hintergrund. Dieser Desktop hat keinen Infobereich für sein Symbol: Starten Sie FrigatePiP erneut aus dem Anwendungsmenü, um die Einstellungen zu öffnen.",
 
     labels: &[
         ("person", "Person"),

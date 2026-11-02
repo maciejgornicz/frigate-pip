@@ -181,6 +181,17 @@ pub static STRINGS: Strings = Strings {
     console_not_running: "O FrigatePiP não está a ser executado.",
     console_autostart_on: "O FrigatePiP vai iniciar com a sessão do ambiente de trabalho: {0}",
     console_autostart_off: "O FrigatePiP deixa de iniciar com a sessão do ambiente de trabalho.",
+    linux_settings_saved: "Guardado. O FrigatePiP aplica as alterações dentro de alguns segundos.",
+    linux_language_auto: "Automático (idioma do sistema)",
+    linux_autostart: "Iniciar o FrigatePiP com a sessão do ambiente de trabalho",
+    linux_tip_autostart: "Inicia o FrigatePiP automaticamente após o início de sessão no ambiente de trabalho.",
+    linux_tip_language: "Idioma da aplicação. «Automático» segue o idioma do sistema (LANG; inglês, se não for suportado).",
+    linux_live_rtsp: "RTSP do go2rtc – fluido, descodificado pelo ffmpeg",
+    linux_tip_live: "Como é recebida a imagem ao vivo: RTSP do go2rtc (fluido, descodificado pelo ffmpeg), MJPEG do Frigate (cerca de 5 fps) ou apenas instantâneos atualizados.",
+    linux_window_hint: "Na janela: arrastar – mover, clique – fixar, × ou clique direito – fechar, altifalante – som sim/não, duplo clique – câmara no Frigate.",
+    linux_tip_width: "Largura da janela de pré-visualização em pixels (multiplicada pela escala do ambiente de trabalho); a altura segue a proporção da câmara.",
+    linux_notify_setup: "Introduza nas configurações o endereço do seu servidor Frigate.",
+    linux_notify_no_tray: "O FrigatePiP funciona em segundo plano. Este ambiente de trabalho não tem área de notificação para o seu ícone: inicie o FrigatePiP de novo a partir do menu de aplicações para abrir as configurações.",
 
     labels: &[
         ("person", "pessoa"),

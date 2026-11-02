@@ -44,6 +44,7 @@ pub struct Desktop {
     area: Rect,
     scale: f32,
     monitor: String,
+    monitors: Vec<Monitor>,
     changed: bool,
     /// Calls of `refresh` (every 0.5 s).
     ticks: u32,
@@ -100,6 +101,7 @@ impl Desktop {
             area: Rect { x: 0, y: 0, w: 0, h: 0 },
             scale: 1.0,
             monitor: monitor.to_string(),
+            monitors: Vec::new(),
             changed: false,
             ticks: 0,
             font,
@@ -115,6 +117,7 @@ impl Desktop {
         let m = pick_monitor(&monitors, &self.monitor).unwrap_or(Monitor { x: 0, y: 0, w, h, primary: true });
         self.area = usable(m, self.x.work_area());
         self.scale = self.x.scale();
+        self.monitors = monitors.clone();
         let a = self.area;
         crate::log!("Desktop: {} monitor(s), windows in {}x{} at {},{}, scale {:.2}", monitors.len().max(1), a.w, a.h, a.x, a.y, self.scale);
     }
@@ -160,6 +163,10 @@ impl Output for Desktop {
 
     fn buttons(&self) -> bool {
         true
+    }
+
+    fn monitors(&self) -> Vec<(i32, u32, u32, bool)> {
+        self.monitors.iter().map(|m| (m.x, m.w, m.h, m.primary)).collect()
     }
 
     fn draw(&mut self, id: u64, rect: Rect, img: &Image, caption: &str, live: bool) {

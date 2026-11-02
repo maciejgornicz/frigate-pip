@@ -411,10 +411,11 @@ Avec `--output auto` (par défaut), FrigatePiP ouvre des **fenêtres sur le bure
 
 Sur un bureau Linux, les fenêtres d’aperçu fonctionnent comme sous Windows : des fenêtres sans bordure au-dessus de toutes les autres, dans le coin choisi (`position`) de l’écran choisi (`monitor` : `primary` ou un numéro compté depuis la gauche), de la largeur `width` (multipliée par la mise à l’échelle du bureau). Elles nécessitent X11, ou Wayland avec XWayland — GNOME, KDE Plasma et la plupart des autres bureaux lancent XWayland pour ces programmes. Wayland seul ne suffit pas : il ne permet pas à un programme de placer une fenêtre dans un coin ni de la garder au premier plan.
 
-- **Lancement :** menu des applications → **FrigatePiP** (installé avec apt), ou `frigate-pip` dans un terminal du bureau. Il s’exécute en arrière-plan sans terminal ; une seule copie s’exécute par utilisateur.
+- **Lancement :** menu des applications → **FrigatePiP** (installé avec apt), ou `frigate-pip` dans un terminal du bureau. Il s’exécute en arrière-plan sans terminal ; une seule copie s’exécute par utilisateur. Un second lancement (ou `frigate-pip --settings`) ouvre les paramètres de la copie en cours d’exécution.
 - **Avec la session du bureau :** `frigate-pip --autostart on` (pour désactiver : `frigate-pip --autostart off`). Pour l’arrêter : `frigate-pip --quit`.
+- **Icône dans la zone de notification :** avec le même menu que sous Windows (voir [Icône de la zone de notification](#4-icône-de-la-zone-de-notification)) ; sa couleur indique l’état : bleu — connecté, gris — non connecté, orange — en pause. Elle apparaît sous KDE Plasma, Xfce, Cinnamon, MATE et Budgie, ainsi que sous GNOME avec l’extension AppIndicator (incluse dans Ubuntu).
 - **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, un glisser déplace la fenêtre, un clic l’épingle, un double clic ouvre la caméra dans Frigate, et une fenêtre sous la souris ne se ferme pas.
-- **Paramètres :** dans `~/.config/frigate-pip/config.ini`, décrits plus bas ; il n’y a pas encore d’icône dans la zone de notification ni de fenêtre de paramètres.
+- **Paramètres :** un clic sur l’icône (ou **Paramètres…** dans son menu) les ouvre dans le navigateur, avec les mêmes options, descriptions et le même test de connexion que sous Windows ; la page ne s’ouvre que sur cet ordinateur. Au premier lancement, elle s’ouvre d’elle-même. Ils sont enregistrés dans `~/.config/frigate-pip/config.ini` (décrit plus bas).
 
 ### Popups tmux
 
@@ -454,6 +455,7 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 | `--list` | Affiche les caméras avec leurs objets et zones — les noms pour `cameras`, `labels` et `zones` dans `[trigger]` — puis quitte. |
 | `--autostart on\|off` | Lance les fenêtres sur le bureau avec la session du bureau (une entrée dans `~/.config/autostart`), ou arrête de le faire. |
 | `--quit` | Arrête les fenêtres sur le bureau en cours d’exécution. |
+| `--settings` | Ouvre les paramètres des fenêtres sur le bureau en cours d’exécution (ou les lance avec les paramètres ouverts). |
 | `--version`, `--help` | Version, aide succincte. |
 
 ### Paramètres
@@ -510,3 +512,4 @@ Ensuite : `sudo systemctl enable --now frigate-pip`. Le journal est écrit dans
 - **Pour un rapport détaillé**, démarrez FrigatePiP avec `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` et joignez à votre ticket la fin de ce fichier ainsi que celle du journal.
 - **Aucune fenêtre sur le bureau** — elles nécessitent X11 ou XWayland : `echo $DISPLAY` doit afficher quelque chose comme `:0`. Sinon, FrigatePiP utilise les modes console ; le journal en indique la raison (`No desktop windows`).
 - **FrigatePiP indique qu’il est déjà lancé** — une seule copie s’exécute par utilisateur, par exemple celle lancée avec la session du bureau ; `frigate-pip --quit` l’arrête.
+- **Pas d’icône dans la zone de notification sous GNOME** — GNOME n’affiche ces icônes qu’avec l’extension « AppIndicator and KStatusNotifierItem Support » (paquet `gnome-shell-extension-appindicator` ; incluse dans Ubuntu). Sans elle, relancez FrigatePiP depuis le menu des applications pour ouvrir les paramètres.

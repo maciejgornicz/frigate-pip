@@ -4,12 +4,15 @@
 //! Video is decoded by the `ffmpeg` program.
 
 mod canvas;
+mod dbus;
 mod desktop;
 mod fb;
 mod ffmpeg;
 mod term;
 mod tmux;
+mod tray;
 mod video;
+mod web;
 mod x11;
 
 use crate::config::{self, Config, Corner, IniDoc};
@@ -85,6 +88,10 @@ pub trait Output {
     /// Desktop scaling: the window width and the margin from the settings are multiplied by it.
     fn scale(&self) -> f32 {
         1.0
+    }
+    /// The monitors (desktop windows): (x, width, height, primary).
+    fn monitors(&self) -> Vec<(i32, u32, u32, bool)> {
+        Vec::new()
     }
 }
 
@@ -171,7 +178,8 @@ Where the windows appear (--output):
   window       On the desktop (X11, or Wayland with XWayland): borderless windows above
                the others in a corner of the screen; runs in the background. Mouse: x
                closes, the speaker mutes, drag moves, a click pins, a double click
-               opens the camera in Frigate, the right button closes.
+               opens the camera in Frigate, the right button closes. A tray icon has
+               the menu known from Windows; the settings open in the browser.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
                with a monitor). Runs in the background, e.g. as a systemd service.
   terminal     Inside this terminal window (Kitty graphics, Sixel or half blocks).
@@ -189,6 +197,7 @@ Options:
   --test-connection                         check the connection to Frigate and exit
   --list                                    list the cameras with their objects and zones
                                             (the names for cameras, labels, zones in config.ini)
+  --settings                                open the settings of the desktop windows
   --autostart on|off                        start the desktop windows with the desktop session
   --quit                                    stop the running desktop windows
   --version                                 print the version
@@ -207,13 +216,46 @@ enum Ev {
     Wake,
     /// Mouse on a desktop window, or the desktop went away.
     Pointer(x11::Event),
+    /// Tray menu item (or `tray::ACTIVATE`, `tray::NOTIFICATION`).
+    Tray(i32),
 }
 
 static QUIT: AtomicBool = AtomicBool::new(false);
+/// Another start (or `--settings`) asked the running copy to open its settings (SIGUSR1).
+static OPEN_SETTINGS: AtomicBool = AtomicBool::new(false);
 
-extern "C" fn on_signal(_: libc::c_int) {
-    QUIT.store(true, Ordering::Relaxed);
+extern "C" fn on_signal(sig: libc::c_int) {
+    if sig == libc::SIGUSR1 {
+        OPEN_SETTINGS.store(true, Ordering::Relaxed);
+    } else {
+        QUIT.store(true, Ordering::Relaxed);
+    }
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum Pause {
+    Off,
+    Until(Instant),
+    Forever,
+}
+
+// Tray menu items.
+const M_STATUS: i32 = 1;
+const M_SETTINGS: i32 = 3;
+const M_CAMERAS: i32 = 4;
+const M_PAUSE: i32 = 5;
+const M_CLOSE_ALL: i32 = 6;
+const M_OPEN_FRIGATE: i32 = 8;
+const M_HELP: i32 = 9;
+const M_LOG: i32 = 10;
+const M_CONFIG: i32 = 11;
+const M_EXIT: i32 = 13;
+const M_PAUSE_15: i32 = 51;
+const M_PAUSE_60: i32 = 52;
+const M_PAUSE_FOREVER: i32 = 53;
+const M_RESUME: i32 = 55;
+const M_NO_CAMERAS: i32 = 99;
+const M_CAMERA: i32 = 100;
 
 fn is_tty(fd: libc::c_int) -> bool {
     unsafe { libc::isatty(fd) == 1 }
@@ -268,6 +310,18 @@ pub fn main() {
         }
         return;
     }
+    let open_settings = args.iter().any(|a| a == "--settings");
+    if open_settings {
+        // The running desktop windows open their settings; otherwise start with them.
+        if let Err(pid) = single_instance() {
+            if pid > 0 {
+                unsafe {
+                    libc::kill(pid, libc::SIGUSR1);
+                }
+                return;
+            }
+        }
+    }
     if let Some(v) = arg(&args, "--autostart") {
         match set_autostart(v != "off") {
             Ok(msg) => println!("{msg}"),
@@ -300,11 +354,17 @@ pub fn main() {
             std::process::exit(1);
         }
     };
-    // One copy of the desktop windows per user (autostart and a manual start).
+    // One copy of the desktop windows per user (autostart and a manual start); a second
+    // start (e.g. from the applications menu) opens the settings of the running one.
     let _instance = match mode {
         Mode::Window => match single_instance() {
             Ok(lock) => lock,
-            Err(_) => {
+            Err(pid) => {
+                if pid > 0 {
+                    unsafe {
+                        libc::kill(pid, libc::SIGUSR1);
+                    }
+                }
                 println!("{}", t().console_already_running);
                 return;
             }
@@ -328,6 +388,9 @@ pub fn main() {
     let mut app = App::new(cfg, path, out, ff, tx);
     app.pending_test = arg(&args, "--test");
     app.start_listener();
+    if mode == Mode::Window {
+        app.start_desktop(first_start, open_settings, args.iter().any(|a| a == "--session"));
+    }
     app.run(rx);
     drop(app);
     drop(keys);
@@ -381,11 +444,15 @@ fn single_instance() -> Result<Option<std::fs::File>, i32> {
     Ok(Some(f))
 }
 
-/// `--autostart on|off`: a desktop entry in ~/.config/autostart starts the desktop windows
-/// with the desktop session.
+/// The desktop entry in ~/.config/autostart that starts the desktop windows with the session.
+fn autostart_file() -> Option<PathBuf> {
+    crate::util::app_dir().parent().map(|p| p.join("autostart").join("frigate-pip.desktop"))
+}
+
+/// `--autostart on|off` (also the settings page).
 fn set_autostart(on: bool) -> Result<String, String> {
-    let dir = crate::util::app_dir().parent().map(|p| p.join("autostart")).ok_or("no configuration folder")?;
-    let file = dir.join("frigate-pip.desktop");
+    let file = autostart_file().ok_or("no configuration folder")?;
+    let dir = file.parent().map(PathBuf::from).unwrap_or_default();
     if !on {
         return match std::fs::remove_file(&file) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", file.display())),
@@ -402,13 +469,13 @@ fn set_autostart(on: bool) -> Result<String, String> {
 fn autostart_entry(exe: &str) -> String {
     let exec = if exe.contains(' ') { format!("\"{exe}\"") } else { exe.to_string() };
     format!(
-        "[Desktop Entry]\nType=Application\nName=FrigatePiP\nComment=Camera windows for Frigate NVR detections\nExec={exec} --output window\nIcon=frigate-pip\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+        "[Desktop Entry]\nType=Application\nName=FrigatePiP\nComment=Camera windows for Frigate NVR detections\nExec={exec} --output window --session\nIcon=frigate-pip\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
     )
 }
 
 fn install_signals() {
     unsafe {
-        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGUSR1] {
             libc::signal(sig, on_signal as *const () as libc::sighandler_t);
         }
     }
@@ -576,7 +643,7 @@ struct App {
     cameras: Vec<CameraInfo>,
     wins: Vec<Win>,
     next_id: u64,
-    paused: bool,
+    pause: Pause,
     /// Camera audio muted (key m), also for windows opened later.
     muted: bool,
     connected: bool,
@@ -584,6 +651,10 @@ struct App {
     listener: Cancel,
     pending_test: Option<String>,
     started: Instant,
+    /// Desktop windows: the tray icon, the settings page and what the page shows.
+    tray: Option<tray::Tray>,
+    web: Option<web::Web>,
+    info: Arc<std::sync::Mutex<web::Info>>,
 }
 
 impl App {
@@ -599,13 +670,176 @@ impl App {
             cameras: Vec::new(),
             wins: Vec::new(),
             next_id: 1,
-            paused: false,
+            pause: Pause::Off,
             muted: false,
             connected: false,
             status: t().status_connecting.to_string(),
             listener: Cancel::new(),
             pending_test: None,
             started: Instant::now(),
+            tray: None,
+            web: None,
+            info: Arc::default(),
+        }
+    }
+
+    /// Desktop windows: the settings page, the tray icon, and the settings at the first
+    /// start (or when asked). `session` = started with the desktop session.
+    fn start_desktop(&mut self, first_start: bool, open_settings: bool, session: bool) {
+        {
+            let mut info = self.info.lock().unwrap();
+            info.monitors = self.out.monitors();
+            info.autostart = autostart_file().is_some_and(|f| f.exists());
+        }
+        let info = self.info.clone();
+        let on_autostart: web::OnAutostart = Arc::new(move |on| {
+            match set_autostart(on) {
+                Ok(msg) => crate::log!("{msg}"),
+                Err(e) => crate::log!("Autostart: {e}"),
+            }
+            info.lock().unwrap().autostart = on;
+        });
+        match web::start(self.path.clone(), self.info.clone(), on_autostart) {
+            Ok(w) => {
+                crate::log!("Settings page ready");
+                self.web = Some(w);
+            }
+            Err(e) => crate::log!("No settings page: {e}"),
+        }
+        let tx = self.tx.clone();
+        match tray::Tray::start(move |id| {
+            let _ = tx.send(Ev::Tray(id));
+        }) {
+            Ok(tr) => self.tray = Some(tr),
+            Err(e) => crate::log!("No tray icon: {e}"),
+        }
+        self.update_tray();
+        let s = t();
+        let unset = first_start || self.cfg.url == Config::from_ini(&IniDoc::parse(config::DEFAULT_INI)).url;
+        if unset {
+            // Nothing to show yet: the Frigate address comes first.
+            if let Some(tr) = &self.tray {
+                tr.notify("FrigatePiP", s.linux_notify_setup, Some(s.menu_settings));
+            }
+            self.open_settings();
+        } else if open_settings {
+            self.open_settings();
+        } else if !session {
+            if let Some(tr) = self.tray.as_ref().filter(|tr| !tr.registered) {
+                tr.notify("FrigatePiP", s.linux_notify_no_tray, Some(s.menu_settings));
+            }
+        }
+    }
+
+    fn open_settings(&self) {
+        match &self.web {
+            Some(w) => open_url(&w.url),
+            None => crate::log!("The settings page is not available"),
+        }
+    }
+
+    fn paused(&self) -> bool {
+        match self.pause {
+            Pause::Off => false,
+            Pause::Forever => true,
+            Pause::Until(until) => Instant::now() < until,
+        }
+    }
+
+    fn set_pause(&mut self, pause: Pause) {
+        self.pause = pause;
+        crate::log!("{}", if self.paused() { "Paused" } else { "Resumed" });
+        self.show_status();
+    }
+
+    /// The state shown in the status line and the tray menu.
+    fn status_line(&self) -> String {
+        let s = t();
+        match self.pause {
+            Pause::Forever => s.status_paused_forever.to_string(),
+            Pause::Until(until) if Instant::now() < until => {
+                let minutes = until.saturating_duration_since(Instant::now()).as_secs().div_ceil(60);
+                i18n::fmt(s.status_paused_minutes, &[&minutes])
+            }
+            _ if self.connected => i18n::fmt(s.status_connected, &[&self.status]),
+            _ => i18n::fmt(s.status_disconnected, &[&self.status]),
+        }
+    }
+
+    /// The tray menu — the same as on Windows.
+    fn tray_menu(&self) -> Vec<tray::Item> {
+        use tray::Item;
+        let s = t();
+        let paused = self.paused();
+        let mut cams: Vec<Item> = self.cameras.iter().enumerate().take(100).map(|(i, c)| Item::action(M_CAMERA + i as i32, &c.title)).collect();
+        if cams.is_empty() {
+            cams.push(Item::disabled(M_NO_CAMERAS, s.menu_no_cameras));
+        }
+        let mut pause = vec![
+            Item::action(M_PAUSE_15, s.menu_pause_15),
+            Item::action(M_PAUSE_60, s.menu_pause_60),
+            Item::check(M_PAUSE_FOREVER, s.menu_pause_forever, self.pause == Pause::Forever),
+        ];
+        if paused {
+            pause.push(Item::separator(54));
+            pause.push(Item::action(M_RESUME, s.menu_resume));
+        }
+        vec![
+            Item::disabled(M_STATUS, &self.status_line()),
+            Item::separator(2),
+            Item::action(M_SETTINGS, s.menu_settings),
+            Item::submenu(M_CAMERAS, s.menu_show_camera, cams),
+            Item::submenu(M_PAUSE, if paused { s.menu_paused } else { s.menu_pause }, pause),
+            Item::action(M_CLOSE_ALL, s.menu_close_all),
+            Item::separator(7),
+            Item::action(M_OPEN_FRIGATE, s.menu_open_frigate),
+            Item::action(M_HELP, s.menu_help),
+            Item::action(M_LOG, s.menu_log),
+            Item::action(M_CONFIG, s.menu_config_file),
+            Item::separator(12),
+            Item::action(M_EXIT, s.menu_exit),
+        ]
+    }
+
+    fn update_tray(&self) {
+        let Some(tr) = &self.tray else { return };
+        // The colours of the Windows tray icon: paused, connected, not connected.
+        let color = if self.paused() {
+            (0xF5, 0x9E, 0x0B)
+        } else if self.connected {
+            (0x3B, 0x82, 0xF6)
+        } else {
+            (0x94, 0x94, 0x94)
+        };
+        tr.update(&self.status_line(), color, self.tray_menu());
+    }
+
+    fn on_tray(&mut self, id: i32) {
+        let now = Instant::now();
+        match id {
+            tray::ACTIVATE | tray::NOTIFICATION | M_SETTINGS => self.open_settings(),
+            M_PAUSE_15 => self.set_pause(Pause::Until(now + Duration::from_secs(15 * 60))),
+            M_PAUSE_60 => self.set_pause(Pause::Until(now + Duration::from_secs(60 * 60))),
+            M_PAUSE_FOREVER => self.set_pause(Pause::Forever),
+            M_RESUME => self.set_pause(Pause::Off),
+            M_CLOSE_ALL => {
+                for i in (0..self.wins.len()).rev() {
+                    self.close_quiet(i);
+                }
+                self.layout();
+            }
+            M_OPEN_FRIGATE => open_url(&self.cfg.url),
+            M_HELP => open_url(&format!("https://github.com/maciejgornicz/frigate-pip/blob/main/docs/{}/user-guide.md", i18n::current().code())),
+            M_LOG => open_url(&crate::util::log_path().to_string_lossy()),
+            M_CONFIG => open_url(&self.path.to_string_lossy()),
+            M_EXIT => QUIT.store(true, Ordering::Relaxed),
+            id if id >= M_CAMERA => {
+                if let Some(c) = self.cameras.get((id - M_CAMERA) as usize) {
+                    let name = c.name.clone();
+                    self.test(&name);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -642,6 +876,7 @@ impl App {
                         self.on_action(id, action);
                     }
                 }
+                Ok(Ev::Tray(id)) => self.on_tray(id),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
@@ -653,6 +888,9 @@ impl App {
             if last_reload.elapsed() >= Duration::from_secs(2) {
                 last_reload = Instant::now();
                 self.reload_if_changed();
+            }
+            if OPEN_SETTINGS.swap(false, Ordering::Relaxed) {
+                self.open_settings();
             }
         }
         for i in (0..self.wins.len()).rev() {
@@ -674,7 +912,9 @@ impl App {
                 self.show_status();
             }
             Notice::Cameras(list) => {
+                self.info.lock().unwrap().cameras = list.clone();
                 self.cameras = list;
+                self.update_tray();
                 if let Some(cam) = self.pending_test.take() {
                     self.test(&cam);
                 }
@@ -740,7 +980,7 @@ impl App {
     }
 
     fn on_detection(&mut self, d: Detection, t0: Instant, test: bool) {
-        if self.paused && !test {
+        if self.paused() && !test {
             crate::log!("{}: skipped (paused)", d.camera);
             return;
         }
@@ -905,6 +1145,9 @@ impl App {
     }
 
     fn tick(&mut self) {
+        if matches!(self.pause, Pause::Until(until) if Instant::now() >= until) {
+            self.set_pause(Pause::Off);
+        }
         // Windows closed by the user in another process (tmux popups).
         let gone: Vec<usize> = (0..self.wins.len()).filter(|&i| !self.out.alive(self.wins[i].id)).collect();
         for i in gone.into_iter().rev() {
@@ -955,9 +1198,7 @@ impl App {
                 self.layout();
             }
             b'p' | b'P' => {
-                self.paused = !self.paused;
-                crate::log!("{}", if self.paused { "Paused" } else { "Resumed" });
-                self.show_status();
+                self.set_pause(if self.paused() { Pause::Off } else { Pause::Forever });
             }
             b'm' | b'M' if self.cfg.camera_audio => {
                 // Open tmux popups have their own m; new ones start muted.
@@ -981,13 +1222,8 @@ impl App {
     }
 
     fn show_status(&mut self) {
-        let mut state = if self.paused {
-            t().status_paused_forever.to_string()
-        } else if self.connected {
-            i18n::fmt(t().status_connected, &[&self.status])
-        } else {
-            i18n::fmt(t().status_disconnected, &[&self.status])
-        };
+        self.update_tray();
+        let mut state = self.status_line();
         if self.muted && self.cfg.camera_audio {
             state = format!("{state} · {}", t().console_sound_off);
         }
@@ -1072,9 +1308,9 @@ mod tests {
     fn autostart_entry_starts_the_desktop_windows() {
         let e = autostart_entry("/usr/bin/frigate-pip");
         assert!(e.starts_with("[Desktop Entry]\n"));
-        assert!(e.contains("\nExec=/usr/bin/frigate-pip --output window\n"));
+        assert!(e.contains("\nExec=/usr/bin/frigate-pip --output window --session\n"));
         assert!(e.contains("\nIcon=frigate-pip\n") && e.contains("\nTerminal=false\n"));
-        assert!(autostart_entry("/opt/my apps/frigate-pip").contains("\nExec=\"/opt/my apps/frigate-pip\" --output window\n"));
+        assert!(autostart_entry("/opt/my apps/frigate-pip").contains("\nExec=\"/opt/my apps/frigate-pip\" --output window --session\n"));
     }
 
     #[test]

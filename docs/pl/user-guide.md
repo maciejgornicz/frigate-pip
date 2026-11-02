@@ -411,10 +411,11 @@ Przy `--output auto` (domyślnie) FrigatePiP otwiera **okna na pulpicie**, gdy d
 
 Na pulpicie Linuksa okna podglądu działają jak w Windows: okna bez ramek nad wszystkimi innymi, w wybranym rogu (`position`) wybranego monitora (`monitor`: `primary` albo numer liczony od lewej), o szerokości `width` (pomnożonej przez skalowanie pulpitu). Wymagają X11 albo Waylanda z XWayland — GNOME, KDE Plasma i większość innych pulpitów uruchamia XWayland dla takich programów. Sam Wayland nie wystarczy: nie pozwala programowi umieścić okna w rogu ani trzymać go na wierzchu.
 
-- **Uruchomienie:** menu aplikacji → **FrigatePiP** (po instalacji przez apt) albo `frigate-pip` w terminalu na pulpicie. Program działa w tle, bez terminala; na użytkownika działa jedna kopia.
+- **Uruchomienie:** menu aplikacji → **FrigatePiP** (po instalacji przez apt) albo `frigate-pip` w terminalu na pulpicie. Program działa w tle, bez terminala; na użytkownika działa jedna kopia. Ponowne uruchomienie (albo `frigate-pip --settings`) otwiera ustawienia działającej kopii.
 - **Razem z sesją pulpitu:** `frigate-pip --autostart on` (wyłączenie: `frigate-pip --autostart off`). Zatrzymanie: `frigate-pip --quit`.
+- **Ikona w zasobniku:** z tym samym menu co w Windows (zob. [Ikona w zasobniku](#4-ikona-w-zasobniku)); jej kolor pokazuje stan: niebieski — połączono, szary — brak połączenia, pomarańczowy — wstrzymano. Pojawia się w KDE Plasma, Xfce, Cinnamon, MATE i Budgie, a w GNOME z rozszerzeniem AppIndicator (jest w Ubuntu).
 - **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, przeciągnięcie przesuwa okno, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
-- **Ustawienia:** w `~/.config/frigate-pip/config.ini`, opisane niżej; ikony w zasobniku ani okna ustawień jeszcze nie ma.
+- **Ustawienia:** kliknięcie ikony (albo **Ustawienia…** w jej menu) otwiera je w przeglądarce — te same opcje, opisy i test połączenia co w Windows; strona otwiera się tylko na tym komputerze. Przy pierwszym uruchomieniu otwiera się sama. Zapisują się w `~/.config/frigate-pip/config.ini` (opisane niżej).
 
 ### Okienka tmux
 
@@ -454,6 +455,7 @@ Gdy FrigatePiP działa w terminalu lub w konsoli:
 | `--list` | Wypisuje kamery z ich obiektami i strefami — nazwy do `cameras`, `labels` i `zones` w `[trigger]` — i kończy działanie. |
 | `--autostart on\|off` | Włącza uruchamianie okien na pulpicie razem z sesją pulpitu (wpis w `~/.config/autostart`) albo je wyłącza. |
 | `--quit` | Zatrzymuje działające okna na pulpicie. |
+| `--settings` | Otwiera ustawienia działających okien na pulpicie (albo uruchamia je z otwartymi ustawieniami). |
 | `--version`, `--help` | Wersja, krótka pomoc. |
 
 ### Ustawienia
@@ -510,3 +512,4 @@ Następnie: `sudo systemctl enable --now frigate-pip`. Log trafia do dziennika s
 - **Aby uzyskać szczegółowy raport**, uruchom FrigatePiP poleceniem `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` i dołącz do zgłoszenia koniec tego pliku oraz logu.
 - **Nie ma okien na pulpicie** — wymagają X11 albo XWayland: `echo $DISPLAY` musi pokazać coś w rodzaju `:0`. Bez tego FrigatePiP używa trybów konsolowych; w logu jest napisane dlaczego (`No desktop windows`).
 - **FrigatePiP pisze, że już działa** — na użytkownika działa jedna kopia, na przykład ta uruchomiona razem z sesją pulpitu; `frigate-pip --quit` ją zatrzymuje.
+- **Brak ikony w zasobniku w GNOME** — GNOME pokazuje takie ikony tylko z rozszerzeniem „AppIndicator and KStatusNotifierItem Support” (pakiet `gnome-shell-extension-appindicator`; jest w Ubuntu). Bez niego uruchom FrigatePiP ponownie z menu aplikacji, aby otworzyć ustawienia.

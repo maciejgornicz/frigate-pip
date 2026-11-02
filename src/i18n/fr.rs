@@ -181,6 +181,17 @@ pub static STRINGS: Strings = Strings {
     console_not_running: "FrigatePiP n’est pas lancé.",
     console_autostart_on: "FrigatePiP démarrera avec la session du bureau : {0}",
     console_autostart_off: "FrigatePiP ne démarrera plus avec la session du bureau.",
+    linux_settings_saved: "Enregistré. FrigatePiP applique les modifications en quelques secondes.",
+    linux_language_auto: "Automatique (langue du système)",
+    linux_autostart: "Lancer FrigatePiP avec la session du bureau",
+    linux_tip_autostart: "Lance FrigatePiP automatiquement à l’ouverture de votre session de bureau.",
+    linux_tip_language: "Langue de l’application. « Automatique » suit la langue du système (LANG ; anglais si elle n’est pas prise en charge).",
+    linux_live_rtsp: "RTSP depuis go2rtc – fluide, décodé par ffmpeg",
+    linux_tip_live: "Mode de réception de l’image en direct : RTSP depuis go2rtc (fluide, décodé par ffmpeg), MJPEG depuis Frigate (environ 5 i/s) ou uniquement des instantanés actualisés.",
+    linux_window_hint: "Dans la fenêtre : glisser – déplacer, clic – épingler, × ou clic droit – fermer, haut-parleur – son oui/non, double-clic – caméra dans Frigate.",
+    linux_tip_width: "Largeur d’une fenêtre d’aperçu en pixels (multipliée par la mise à l’échelle du bureau). La hauteur suit les proportions de l’image de la caméra.",
+    linux_notify_setup: "Saisissez dans les paramètres l’adresse de votre serveur Frigate.",
+    linux_notify_no_tray: "FrigatePiP s’exécute en arrière-plan. Ce bureau n’a pas de zone de notification pour son icône : relancez FrigatePiP depuis le menu des applications pour ouvrir les paramètres.",
 
     labels: &[
         ("person", "personne"),

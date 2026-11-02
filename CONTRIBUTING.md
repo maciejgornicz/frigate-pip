@@ -69,6 +69,8 @@ Note that the window's background is put back when FrigatePiP exits, so copy the
 
 Desktop windows can be tested without a desktop on a virtual X server: `Xvfb :5 -screen 0 1600x900x24 -ac &`, then `DISPLAY=:5 ./target/release/frigate-pip --output window --test front_door`; a picture of the screen: `ffmpeg -f x11grab -video_size 1600x900 -i :5 -frames:v 1 screen.png`. Under WSLg the windows are created in the right place, but their picture does not appear on the Windows screen, so use Xvfb there.
 
+The tray icon can be checked without a panel: start a session bus with `dbus-launch`, run the desktop windows with that `DBUS_SESSION_BUS_ADDRESS`, and call them like a panel does, e.g. `busctl --user call <name> /MenuBar com.canonical.dbusmenu GetLayout iias 0 10 0` or `… Event isvu 53 clicked i 0 0`.
+
 tmux popups need a tmux client: start tmux in a terminal, then `./target/release/frigate-pip --output tmux --test front_door` from another tmux window.
 
 The static binary and the Debian package, as CI builds them (the package's contents are set in `[package.metadata.deb]` in `Cargo.toml` and in `packaging/`):
@@ -115,7 +117,7 @@ Windows application:
 | `src/decoder.rs` | H.264 / H.265 decoding with Media Foundation (hardware or software). |
 | `src/h264.rs` | Rewrites the H.264 SPS so the Windows decoder outputs frames without delay. |
 | `src/hub.rs` | Prebuffer: persistent RTSP connections that keep the last GOP. |
-| `src/icon.rs` | Tray icon drawn in code. |
+| `src/icon.rs` | Tray icon drawn in code (also the pixels of the Linux tray icon). |
 | `src/update.rs` | Update check on GitHub (HTTPS via WinHTTP), download with SHA-256 check, silent installer run. |
 | `installer/frigate-pip.iss` | Inno Setup script. |
 | `build.rs`, `.cargo/config.toml` | MSVC builds: delay-loaded `mfplat.dll` and a statically linked C runtime, so the exe starts on any Windows 10/11 PC. |
@@ -124,7 +126,7 @@ Linux console version:
 
 | Path | Contents |
 |---|---|
-| `src/console/` | `mod.rs` (main loop, windows, keys, mouse actions, viewer mode for tmux popups), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `desktop.rs` (desktop windows), `x11.rs` (a minimal X11 client: windows, pictures, mouse events, monitors), `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `tmux.rs` (tmux popups), `canvas.rs` (pictures, captions and buttons). |
+| `src/console/` | `mod.rs` (main loop, windows, keys, mouse actions, viewer mode for tmux popups), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `desktop.rs` (desktop windows), `x11.rs` (a minimal X11 client: windows, pictures, mouse events, monitors), `dbus.rs` (a minimal D-Bus client), `tray.rs` (tray icon with its menu, desktop notifications), `web.rs` (the settings page), `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `tmux.rs` (tmux popups), `canvas.rs` (pictures, captions and buttons). |
 | `packaging/` | Debian package: `frigate-pip@.service`, the menu entry and icon, and the maintainer scripts; the APT repository's public key and the GitHub Pages start page. |
 
 Everything else:

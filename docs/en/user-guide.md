@@ -411,10 +411,11 @@ With `--output auto` (the default) FrigatePiP opens **desktop windows** when it 
 
 On a Linux desktop the preview windows work like on Windows: borderless windows above all others, in the chosen corner (`position`) of the chosen monitor (`monitor`: `primary` or a number counted from the left), as wide as `width` (multiplied by the desktop scaling). They need X11, or Wayland with XWayland — GNOME, KDE Plasma and most other desktops start XWayland for such programs. Pure Wayland is not enough: it does not let a program put a window in a corner or keep it on top.
 
-- **Start:** applications menu → **FrigatePiP** (installed with apt), or `frigate-pip` in a terminal on the desktop. It runs in the background without a terminal; one copy runs per user.
+- **Start:** applications menu → **FrigatePiP** (installed with apt), or `frigate-pip` in a terminal on the desktop. It runs in the background without a terminal; one copy runs per user. A second start (or `frigate-pip --settings`) opens the settings of the running copy.
 - **With the desktop session:** `frigate-pip --autostart on` (off again: `frigate-pip --autostart off`). To stop it: `frigate-pip --quit`.
+- **Tray icon:** with the same menu as on Windows (see [The tray icon](#4-the-tray-icon)); its colour shows the state: blue — connected, grey — not connected, amber — paused. It appears on KDE Plasma, Xfce, Cinnamon, MATE and Budgie, and on GNOME with the AppIndicator extension (included in Ubuntu).
 - **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, dragging moves the window, a click pins it, a double click opens the camera in Frigate, and a window under the mouse does not close.
-- **Settings:** in `~/.config/frigate-pip/config.ini`, described below; there is no tray icon or settings window yet.
+- **Settings:** a click on the icon (or **Settings…** in its menu) opens them in the browser, with the same options, descriptions and connection test as on Windows; the page opens only on this computer. At the first start it opens by itself. They are saved in `~/.config/frigate-pip/config.ini` (described below).
 
 ### tmux popups
 
@@ -454,6 +455,7 @@ When FrigatePiP runs in a terminal or on a console:
 | `--list` | List the cameras with their objects and zones — the names for `cameras`, `labels` and `zones` in `[trigger]` — and exit. |
 | `--autostart on\|off` | Start the desktop windows with the desktop session (an entry in `~/.config/autostart`), or stop doing so. |
 | `--quit` | Stop the running desktop windows. |
+| `--settings` | Open the settings of the running desktop windows (or start them with the settings open). |
 | `--version`, `--help` | Version, short help. |
 
 ### Settings
@@ -510,3 +512,4 @@ Then: `sudo systemctl enable --now frigate-pip`. The log goes to the journal (`j
 - **For a detailed report**, start FrigatePiP with `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` and attach the end of that file and of the log to your issue.
 - **No desktop windows** — they need X11 or XWayland: `echo $DISPLAY` must show something like `:0`. Without it FrigatePiP uses the console modes; the log says why (`No desktop windows`).
 - **FrigatePiP says it is already running** — one copy runs per user, for example the one started with the desktop session; `frigate-pip --quit` stops it.
+- **No tray icon on GNOME** — GNOME shows such icons only with the extension “AppIndicator and KStatusNotifierItem Support” (package `gnome-shell-extension-appindicator`; included in Ubuntu). Without it, start FrigatePiP again from the applications menu to open the settings.
