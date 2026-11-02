@@ -1,11 +1,11 @@
 # FrigatePiP
 
-**Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows — and on the Linux console.**
+**Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows — and on Linux.**
 
 When Frigate detects a person, a car or any other object, FrigatePiP pops up a small window with that camera's live video in a corner of your screen — within milliseconds — and closes it again when nothing moves any more.
 
 - **[Windows](#windows):** a tray application whose windows appear over everything; it takes about 5–10 MB of memory and practically no CPU while waiting.
-- **[Linux console](#linux-console):** the same windows on a computer without a desktop (e.g. a Raspberry Pi with a monitor), inside a terminal or as tmux popups.
+- **[Linux](#linux):** the same windows on a Linux desktop (X11, or Wayland with XWayland), on a computer without a desktop (e.g. a Raspberry Pi with a monitor), inside a terminal or as tmux popups.
 
 **User guide:** [English](docs/en/user-guide.md) · [Polski](docs/pl/user-guide.md) · [Deutsch](docs/de/user-guide.md) · [Español](docs/es/user-guide.md) · [Português](docs/pt/user-guide.md) · [Français](docs/fr/user-guide.md)
 
@@ -57,11 +57,11 @@ Everything is described in the [user guide](docs/en/user-guide.md).
 5. Camera audio uses the same RTSP connection; AAC decoding and WASAPI playback run on their own thread with a ~100–250 ms buffer.
 6. Optional: the *prebuffer* keeps the sub streams connected so video starts without waiting for a key frame, and *Ready GPU* keeps the graphics device initialised.
 
-## Linux console
+## Linux
 
 > **On a Windows PC — also when you work in WSL — use the [Windows application](#windows):** its windows appear over everything, terminals included. The Linux version is meant for Linux computers.
 
-The Linux version (x86_64 and ARM64) shares the Frigate connection (WebSocket or MQTT), the filters, the window corner, size and timing, live video, MJPEG / snapshots and camera audio with the Windows application; video and audio are decoded by **ffmpeg**, fed by FrigatePiP's own RTSP client. It has no tray icon and no settings window: its settings are in `~/.config/frigate-pip/config.ini`.
+The Linux version (x86_64 and ARM64) shares the Frigate connection (WebSocket or MQTT), the filters, the window corner, size and timing, live video, MJPEG / snapshots and camera audio with the Windows application; video and audio are decoded by **ffmpeg**, fed by FrigatePiP's own RTSP client. On a desktop its windows work like on Windows, mouse included (× and the speaker button, drag to move, click to pin, double-click to open the camera in Frigate). It has no tray icon and no settings window yet: its settings are in `~/.config/frigate-pip/config.ini`.
 
 ### Installation
 
@@ -77,17 +77,18 @@ frigate-pip
 
 Every [release](https://github.com/maciejgornicz/frigate-pip/releases/latest) also has the single package files `frigate-pip_<version>_amd64.deb` and `_arm64.deb` (`sudo apt install ./frigate-pip_*.deb`). Other distributions: install ffmpeg, unpack `FrigatePiP-<version>-linux-x86_64.tar.gz` (or `…-arm64.tar.gz`) and copy `frigate-pip` to `/usr/local/bin`.
 
-### Three ways to run it
+### Four ways to run it
 
 | Mode | Windows appear | In the background? |
 |---|---|---|
+| `--output window` (default on a desktop) | on the desktop (X11, or Wayland with XWayland), borderless and above all other windows, in a corner — like on Windows | yes: from the applications menu, or with the desktop session after `frigate-pip --autostart on` (`frigate-pip --quit` stops it) |
 | `--output framebuffer` | on the screen of a console without a desktop (Raspberry Pi with a monitor; user in the `video` group) | yes, as a systemd service |
-| `--output terminal` (default in a terminal) | inside the terminal window FrigatePiP runs in | no — it occupies the terminal |
+| `--output terminal` (default in a terminal without a desktop) | inside the terminal window FrigatePiP runs in | no — it occupies the terminal |
 | `--output tmux` | as tmux popups over your work in tmux — only while you work inside tmux | yes: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, then work in tmux (`tmux`) |
 
 Keys in the terminal or on the console: **q** quit, **x** close windows, **p** pause, **m** sound off / on, **1–9** show a camera; a tmux popup closes with **q**, **x** or **Esc** (**m** mutes it). `frigate-pip --list` shows your cameras with their objects and zones — the names for the filters in `config.ini`.
 
-Running it as a systemd service, all options and troubleshooting: [user guide → Linux console version](docs/en/user-guide.md#12-linux-console-version).
+Running it as a systemd service, all options and troubleshooting: [user guide → Linux version](docs/en/user-guide.md#12-linux-version).
 
 ## Building from source
 

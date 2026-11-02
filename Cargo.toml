@@ -49,15 +49,16 @@ features = [
 libc = "0.2"
 fontdue = "0.9"
 
-# Debian package of the Linux console version (cargo deb --target <musl target> --no-build).
+# Debian package of the Linux version (cargo deb --target <musl target> --no-build).
 [package.metadata.deb]
 maintainer = "maciejgornicz <278948+maciejgornicz@users.noreply.github.com>"
 copyright = "2026 maciejgornicz"
 extended-description = """\
 Shows a camera window the moment Frigate detects a person, a car or another \
-object - on the framebuffer of a console without a desktop (e.g. a Raspberry Pi \
-with a monitor), inside a terminal (Kitty graphics, Sixel or coloured half \
-blocks) or as tmux popups. Video is decoded by ffmpeg."""
+object - on the desktop (X11, or Wayland with XWayland), on the framebuffer of \
+a console without a desktop (e.g. a Raspberry Pi with a monitor), inside a \
+terminal (Kitty graphics, Sixel or coloured half blocks) or as tmux popups. \
+Video is decoded by ffmpeg."""
 depends = "ffmpeg"
 recommends = "fonts-dejavu-core"
 suggests = "tmux"
@@ -68,6 +69,8 @@ maintainer-scripts = "packaging/debian/"
 assets = [
     ["target/release/frigate-pip", "usr/bin/", "755"],
     ["packaging/frigate-pip@.service", "usr/lib/systemd/system/", "644"],
+    ["packaging/frigate-pip.desktop", "usr/share/applications/", "644"],
+    ["packaging/frigate-pip.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
     ["README.md", "usr/share/doc/frigate-pip/", "644"],
 ]
 

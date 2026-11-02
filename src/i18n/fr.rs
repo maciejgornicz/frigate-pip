@@ -176,6 +176,11 @@ pub static STRINGS: Strings = Strings {
     console_list_objects: "objets",
     console_list_zones: "zones",
     console_list_hint: "Utilisez ces noms dans config.ini, section [trigger] : cameras = …, labels = … (objets), zones = … ; frigate-pip --test <caméra> affiche une caméra.",
+    console_window_running: "s’exécute en arrière-plan : les fenêtres des caméras apparaissent sur le bureau (frigate-pip --quit ou Ctrl+C l’arrête).",
+    console_already_running: "FrigatePiP est déjà lancé sur ce bureau (frigate-pip --quit l’arrête).",
+    console_not_running: "FrigatePiP n’est pas lancé.",
+    console_autostart_on: "FrigatePiP démarrera avec la session du bureau : {0}",
+    console_autostart_off: "FrigatePiP ne démarrera plus avec la session du bureau.",
 
     labels: &[
         ("person", "personne"),

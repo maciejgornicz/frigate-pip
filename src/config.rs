@@ -491,7 +491,8 @@ ignore_stationary = true
 min_score = 0
 
 [display]
-; Windows only: primary = primary monitor, 1, 2, 3... = monitor number from the left
+; primary = primary monitor, 1, 2, 3... = monitor number from the left
+; (Windows and Linux desktop windows)
 monitor = primary
 ; top-left, top-right, bottom-left, bottom-right
 position = bottom-right
@@ -538,8 +539,8 @@ gpu_warm = false
 camera_audio = false
 
 [console]
-; Linux console version only (not used on Windows):
-; output = auto, framebuffer, terminal or tmux
+; Linux version only (not used on Windows):
+; output = auto, window (desktop), framebuffer, terminal or tmux
 ; graphics = auto, kitty, sixel or blocks (pictures in a terminal)
 ; framebuffer = /dev/fb0
 ; ffmpeg = ffmpeg

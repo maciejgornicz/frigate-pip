@@ -4,7 +4,7 @@
 
 FrigatePiP ist eine kleine Windows-Anwendung im Infobereich der Taskleiste für [Frigate NVR](https://frigate.video). Erkennt Frigate eine Person, ein Auto oder ein anderes Objekt, zeigt FrigatePiP sofort in einer Bildschirmecke ein kleines Bild-in-Bild-Fenster mit dem Livevideo dieser Kamera. Bewegt sich nichts mehr, schließt sich das Fenster von selbst.
 
-Die Abschnitte 1–11 beschreiben die Windows-Anwendung. Es gibt auch eine Version für die Linux-Konsole, ohne Desktop — sie wird gesondert in Abschnitt 12 beschrieben, [Linux-Konsolenversion](#12-linux-konsolenversion).
+Die Abschnitte 1–11 beschreiben die Windows-Anwendung. FrigatePiP läuft auch unter Linux — auf dem Desktop und auf einer Konsole ohne Desktop; diese Version wird gesondert in Abschnitt 12 beschrieben, [Linux-Version](#12-linux-version).
 
 ## Inhalt
 
@@ -19,7 +19,7 @@ Die Abschnitte 1–11 beschreiben die Windows-Anwendung. Es gibt auch eine Versi
 9. [Sprache](#9-sprache)
 10. [Dateien, Datenschutz und Ressourcen](#10-dateien-datenschutz-und-ressourcen)
 11. [Fehlerbehebung](#11-fehlerbehebung)
-12. [Linux-Konsolenversion](#12-linux-konsolenversion)
+12. [Linux-Version](#12-linux-version)
 
 ---
 
@@ -346,12 +346,13 @@ Beginnen Sie mit **Verbindung testen** in den Einstellungen und mit **Protokoll 
 
 ---
 
-## 12. Linux-Konsolenversion
+## 12. Linux-Version
 
-FrigatePiP läuft auch unter Linux **ohne Desktop** — zum Beispiel auf einem Raspberry Pi mit einem Monitor an der Wand oder auf einem Server, den Sie per SSH erreichen. Es zeigt dieselben Vorschaufenster, in einem von drei Modi:
+FrigatePiP läuft auch unter Linux — auf einem **Desktop** (GNOME, KDE, Xfce…) wie unter Windows und **ohne Desktop**, zum Beispiel auf einem Raspberry Pi mit einem Monitor an der Wand oder auf einem Server, den Sie per SSH erreichen. Es zeigt dieselben Vorschaufenster, in einem von vier Modi:
 
 | Modus | Wo die Fenster erscheinen | Läuft im Hintergrund? | Typische Verwendung | Start |
 |---|---|---|---|---|
+| **Desktop-Fenster** | Auf dem Desktop (X11 oder Wayland mit XWayland): rahmenlose Fenster über allen anderen in der gewählten Ecke, wie unter Windows | **Ja** — ohne Terminal; aus dem Anwendungsmenü oder mit der Desktop-Sitzung | Ein Linux-PC oder -Laptop | Menü → **FrigatePiP** oder `frigate-pip` auf dem Desktop — siehe [Desktop-Fenster](#desktop-fenster) |
 | **Framebuffer** | Auf dem Bildschirm einer Linux-Konsole ohne X oder Wayland, in der gewählten Ecke, über dem Konsolentext | **Ja** — als systemd-Dienst | Ein Raspberry Pi oder ein anderer Computer mit Monitor und ohne Desktop (ein Wanddisplay) | `frigate-pip --output framebuffer`, als Dienst: siehe [Automatischer Start](#automatischer-start-systemd) |
 | **Terminal** | Im Terminalfenster, in dem FrigatePiP läuft: eine Beschriftungszeile, das Bild und eine Statuszeile | **Nein** — das Terminal zeigt FrigatePiP, solange es läuft (wie `top`) | Ein Terminalfenster oder tmux-Bereich, der als Kameramonitor geöffnet bleibt, auch per SSH | `frigate-pip` |
 | **tmux-Popups** | Als tmux-Popup über dem, woran Sie gerade in tmux arbeiten; es schließt sich von selbst | **Ja** — in einem verborgenen tmux-Fenster | Arbeit in tmux (lokal oder per SSH), wenn Kameras automatisch eingeblendet werden sollen | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, danach in tmux arbeiten — siehe [tmux-Popups](#tmux-popups) |
@@ -365,6 +366,7 @@ Das Video wird vom Programm **ffmpeg** decodiert; der eigene RTSP-Client von Fri
 ### Voraussetzungen
 
 - Linux auf **x86_64** oder **ARM64** (Raspberry Pi 3, 4 oder 5 mit 64-Bit-System).
+- Für Desktop-Fenster: ein Desktop mit X11 oder Wayland mit XWayland (GNOME, KDE Plasma, Xfce und die meisten anderen).
 - **ffmpeg**: wird mit dem `.deb`-Paket mitinstalliert; sonst `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) oder das entsprechende Paket Ihrer Distribution.
 - Für Beschriftungen im Framebuffer: die Schriftart DejaVu (`fonts-dejavu-core`, wird normalerweise zusammen mit ffmpeg installiert).
 - Für den Framebuffer: Mitgliedschaft in der Gruppe `video` (`sudo usermod -aG video $USER`, danach neu anmelden).
@@ -403,7 +405,16 @@ Das Programm ist eine einzelne Datei ohne weitere Bibliotheken. Zum Aktualisiere
 
 ### Wo die Fenster erscheinen
 
-Mit `--output auto` (Standard) verwendet FrigatePiP den **Framebuffer**, wenn es auf einer Linux-Konsole (`TERM=linux`) oder ohne Terminal (als Dienst) läuft, andernfalls das **Terminal**. Der Modus **tmux-Popups** wird nur verwendet, wenn Sie ihn auswählen (`--output tmux` oder `output = tmux`). Im Terminal wird der Bildmodus automatisch gewählt: Kitty-Grafik, wo verfügbar, sonst Sixel, wenn das Terminal es meldet, sonst Halbblöcke. Beides lässt sich in der Einstellungsdatei oder in der Befehlszeile festlegen.
+Mit `--output auto` (Standard) öffnet FrigatePiP **Desktop-Fenster**, wenn es auf einem Desktop läuft (`DISPLAY` ist gesetzt), verwendet den **Framebuffer** auf einer Linux-Konsole (`TERM=linux`) oder ohne Terminal (als Dienst) und andernfalls das **Terminal**. Der Modus **tmux-Popups** wird nur verwendet, wenn Sie ihn auswählen (`--output tmux` oder `output = tmux`). Im Terminal wird der Bildmodus automatisch gewählt: Kitty-Grafik, wo verfügbar, sonst Sixel, wenn das Terminal es meldet, sonst Halbblöcke. Beides lässt sich in der Einstellungsdatei oder in der Befehlszeile festlegen.
+
+### Desktop-Fenster
+
+Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rahmenlose Fenster über allen anderen, in der gewählten Ecke (`position`) des gewählten Monitors (`monitor`: `primary` oder eine von links gezählte Nummer), so breit wie `width` (multipliziert mit der Desktop-Skalierung). Sie brauchen X11 oder Wayland mit XWayland — GNOME, KDE Plasma und die meisten anderen Desktops starten XWayland für solche Programme. Reines Wayland genügt nicht: Es erlaubt einem Programm nicht, ein Fenster in eine Ecke zu setzen oder im Vordergrund zu halten.
+
+- **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie.
+- **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
+- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, Ziehen verschiebt das Fenster, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
+- **Einstellungen:** in `~/.config/frigate-pip/config.ini`, unten beschrieben; ein Symbol im Infobereich oder ein Einstellungsfenster gibt es noch nicht.
 
 ### tmux-Popups
 
@@ -435,23 +446,25 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 
 | Option | Wirkung |
 |---|---|
-| `--output auto\|framebuffer\|terminal\|tmux` | Wo die Fenster gezeichnet werden (siehe die Tabelle der Modi oben). |
+| `--output auto\|window\|framebuffer\|terminal\|tmux` | Wo die Fenster gezeichnet werden (siehe die Tabelle der Modi oben). |
 | `--graphics auto\|kitty\|sixel\|blocks` | Wie Bilder im Terminal gezeichnet werden. |
 | `--framebuffer /dev/fb0` | Framebuffer-Gerät. |
 | `--test <camera>` | Eine Kamera direkt nach dem Start anzeigen. |
 | `--test-connection` | Die Verbindung zu Frigate prüfen (wie **Verbindung testen** unter Windows) und beenden. |
 | `--list` | Listet die Kameras mit ihren Objekten und Zonen auf — die Namen für `cameras`, `labels` und `zones` in `[trigger]` — und beendet sich. |
+| `--autostart on\|off` | Startet die Desktop-Fenster mit der Desktop-Sitzung (ein Eintrag in `~/.config/autostart`) oder nicht mehr. |
+| `--quit` | Beendet die laufenden Desktop-Fenster. |
 | `--version`, `--help` | Version, Kurzhilfe. |
 
 ### Einstellungen
 
-Die Linux-Version verwendet dieselbe `config.ini` (in `~/.config/frigate-pip/` oder `$XDG_CONFIG_HOME/frigate-pip/`) wie die Windows-Version — siehe [Die Einstellungsdatei](#7-die-einstellungsdatei). Änderungen werden innerhalb von zwei Sekunden nach dem Speichern der Datei übernommen. Folgende Einstellungen werden verwendet: alles in `[app]` (Sprache), `[frigate]`, `[mqtt]`, `[trigger]`, in `[display]`: `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`; in `[video]`: `live`, `stream`, `auto_main_width`, `camera_audio`; sowie die Abschnitte `[camera.<name>]`. Die nur unter Windows verfügbaren Einstellungen (`monitor`, `topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) werden ignoriert. `frigate-pip --list` zeigt die Namen Ihrer Kameras, Objekte und Zonen für die Filter in `[trigger]`.
+Die Linux-Version verwendet dieselbe `config.ini` (in `~/.config/frigate-pip/` oder `$XDG_CONFIG_HOME/frigate-pip/`) wie die Windows-Version — siehe [Die Einstellungsdatei](#7-die-einstellungsdatei). Änderungen werden innerhalb von zwei Sekunden nach dem Speichern der Datei übernommen. Folgende Einstellungen werden verwendet: alles in `[app]` (Sprache), `[frigate]`, `[mqtt]`, `[trigger]`, in `[display]`: `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`; in `[video]`: `live`, `stream`, `auto_main_width`, `camera_audio`; sowie die Abschnitte `[camera.<name>]`. Die nur unter Windows verfügbaren Einstellungen (`topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) werden ignoriert. `frigate-pip --list` zeigt die Namen Ihrer Kameras, Objekte und Zonen für die Filter in `[trigger]`.
 
 Zusätzliche Einstellungen im Abschnitt `[console]`:
 
 | Schlüssel | Standard | Bedeutung |
 |---|---|---|
-| `output` | `auto` | `auto`, `framebuffer`, `terminal` oder `tmux`. |
+| `output` | `auto` | `auto`, `window`, `framebuffer`, `terminal` oder `tmux`. |
 | `graphics` | `auto` | `auto`, `kitty`, `sixel` oder `blocks` (Bilder im Terminal). |
 | `framebuffer` | `/dev/fb0` | Framebuffer-Gerät. |
 | `ffmpeg` | `ffmpeg` | ffmpeg-Programm (Name oder vollständiger Pfad). |
@@ -495,3 +508,5 @@ Danach: `sudo systemctl enable --now frigate-pip`. Das Protokoll wird ins Journa
 - **Blasse Farben in tmux-Popups** — aktivieren Sie 24-Bit-Farbe in tmux (siehe [tmux-Popups](#tmux-popups)).
 - **Kein Ton** — der Kameraton benötigt PulseAudio/PipeWire oder ALSA; der Benutzer des Dienstes muss Mitglied der Gruppe `audio` sein.
 - **Für einen ausführlichen Bericht** starten Sie FrigatePiP mit `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` und hängen Sie das Ende dieser Datei und des Protokolls an Ihr Issue an.
+- **Keine Desktop-Fenster** — sie brauchen X11 oder XWayland: `echo $DISPLAY` muss etwas wie `:0` anzeigen. Ohne das verwendet FrigatePiP die Konsolenmodi; das Protokoll nennt den Grund (`No desktop windows`).
+- **FrigatePiP meldet, dass es bereits läuft** — pro Benutzer läuft eine Kopie, zum Beispiel die mit der Desktop-Sitzung gestartete; `frigate-pip --quit` beendet sie.

@@ -16,7 +16,7 @@ The log contains your Frigate address and camera names — remove anything you d
 
 - [Rust](https://rustup.rs) stable, 1.87 or later.
 - **Windows application:** Windows 10 or 11, 64-bit, with either the MSVC (`x86_64-pc-windows-msvc`, default) or the GNU (`x86_64-pc-windows-gnu`) toolchain. Its only dependency is the [`windows`](https://crates.io/crates/windows) crate. Optional: [Inno Setup 6](https://jrsoftware.org/isinfo.php) to build the installer.
-- **Linux console version:** Linux (or WSL on Windows) with `ffmpeg`; its dependencies are the `libc` and `fontdue` crates. Optional: `musl-tools` for a static binary and [cargo-deb](https://crates.io/crates/cargo-deb) for the Debian package — see [Testing the Linux console version](#testing-the-linux-console-version).
+- **Linux version:** Linux (or WSL on Windows) with `ffmpeg`; its dependencies are the `libc` and `fontdue` crates. Optional: `musl-tools` for a static binary and [cargo-deb](https://crates.io/crates/cargo-deb) for the Debian package — see [Testing the Linux version](#testing-the-linux-version).
 - Optional: a Frigate server with go2rtc to try things for real.
 
 The Windows application:
@@ -48,7 +48,7 @@ To try the behaviour of Windows "N" editions without Media Foundation, start the
 
 To try the update path, start the installed app with `FRIGATEPIP_FAKE_VERSION=1.0.0`: it then treats the latest GitHub release as newer and offers to install it (**Settings → Connection → Check now**).
 
-### Testing the Linux console version
+### Testing the Linux version
 
 Build and test on Linux (WSL works well: it has a terminal with Sixel in Windows Terminal, and X11/Wayland/PulseAudio through WSLg):
 
@@ -66,6 +66,8 @@ ffmpeg -f rawvideo -pix_fmt bgra -s 1280x720 -i /tmp/fakefb screen.png
 ```
 
 Note that the window's background is put back when FrigatePiP exits, so copy the file while it runs. `FRIGATEPIP_FFMPEG_LOG=/tmp/ff.log` collects ffmpeg's messages; `FRIGATEPIP_AUDIO_OUT=wav:/tmp/a.wav` records the camera audio to a file instead of playing it.
+
+Desktop windows can be tested without a desktop on a virtual X server: `Xvfb :5 -screen 0 1600x900x24 -ac &`, then `DISPLAY=:5 ./target/release/frigate-pip --output window --test front_door`; a picture of the screen: `ffmpeg -f x11grab -video_size 1600x900 -i :5 -frames:v 1 screen.png`. Under WSLg the windows are created in the right place, but their picture does not appear on the Windows screen, so use Xvfb there.
 
 tmux popups need a tmux client: start tmux in a terminal, then `./target/release/frigate-pip --output tmux --test front_door` from another tmux window.
 
@@ -122,8 +124,8 @@ Linux console version:
 
 | Path | Contents |
 |---|---|
-| `src/console/` | `mod.rs` (main loop, windows, keys, viewer mode for tmux popups), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `tmux.rs` (tmux popups), `canvas.rs` (pictures and captions). |
-| `packaging/` | Debian package: `frigate-pip@.service` and the maintainer scripts; the APT repository's public key and the GitHub Pages start page. |
+| `src/console/` | `mod.rs` (main loop, windows, keys, mouse actions, viewer mode for tmux popups), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `desktop.rs` (desktop windows), `x11.rs` (a minimal X11 client: windows, pictures, mouse events, monitors), `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `tmux.rs` (tmux popups), `canvas.rs` (pictures, captions and buttons). |
+| `packaging/` | Debian package: `frigate-pip@.service`, the menu entry and icon, and the maintainer scripts; the APT repository's public key and the GitHub Pages start page. |
 
 Everything else:
 

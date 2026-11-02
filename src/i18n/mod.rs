@@ -348,6 +348,21 @@ pub struct Strings {
     /// `--list`: how to use the names.
     #[cfg_attr(windows, allow(dead_code))]
     pub console_list_hint: &'static str,
+    /// Printed when the desktop windows start in a terminal.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_window_running: &'static str,
+    /// A second start of the desktop windows.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_already_running: &'static str,
+    /// `--quit` when nothing runs.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_not_running: &'static str,
+    /// `--autostart on`: {0} = the desktop entry written.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_autostart_on: &'static str,
+    /// `--autostart off`.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_autostart_off: &'static str,
 
     /// Frigate labels: (label, translation)
     pub labels: &'static [(&'static str, &'static str)],
@@ -398,6 +413,7 @@ mod tests {
                 (en.test_audio, s.test_audio),
                 (en.test_rtsp_fail, s.test_rtsp_fail),
                 (en.console_list_title, s.console_list_title),
+                (en.console_autostart_on, s.console_autostart_on),
                 (en.status_connected, s.status_connected),
                 (en.status_disconnected, s.status_disconnected),
                 (en.menu_update, s.menu_update),

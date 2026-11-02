@@ -22,8 +22,10 @@ pub struct Shared {
     pub dirty: AtomicBool,
     /// The frame comes from live video (red dot).
     pub live: AtomicBool,
-    /// Camera audio muted by the user (key m): its frames are not played.
+    /// Camera audio muted by the user (key m, sound button): its frames are not played.
     pub muted: AtomicBool,
+    /// The camera audio is being played.
+    pub audio: AtomicBool,
     pub cancel: Cancel,
 }
 
@@ -185,6 +187,7 @@ fn rtsp(url: &str, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake) -
                     if let Some(stdin) = proc.0.stdin.take() {
                         crate::log!("{}: audio {} Hz", p.camera, a.rate);
                         pp.audio = Some((proc, stdin));
+                        shared.audio.store(true, Ordering::Relaxed);
                     }
                 }
                 Err(e) => crate::log!("{}: no audio: {e}", p.camera),

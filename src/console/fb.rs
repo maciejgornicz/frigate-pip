@@ -228,7 +228,7 @@ impl Output for Framebuffer {
         }
         let mut pic = if (img.w, img.h) == (rect.w, rect.h) { img.clone() } else { img.resized(rect.w, rect.h) };
         if let (Some(font), false) = (&self.font, caption.is_empty()) {
-            font.caption(&mut pic, caption, live);
+            font.caption(&mut pic, caption, live, 0.0);
         }
         let standard32 = self.bytes == 4 && (self.red.offset, self.green.offset, self.blue.offset) == (16, 8, 0);
         for y in y0..y1 {

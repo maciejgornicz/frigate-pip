@@ -75,12 +75,116 @@ impl Image {
     }
 
     fn disc(&mut self, cx: f32, cy: f32, r: f32, color: (u8, u8, u8)) {
+        self.disc_alpha(cx, cy, r, color, 1.0);
+    }
+
+    /// A filled circle with opacity `opacity` (0–1), smooth edges.
+    fn disc_alpha(&mut self, cx: f32, cy: f32, r: f32, color: (u8, u8, u8), opacity: f32) {
         for y in (cy - r - 1.0) as i32..=(cy + r + 1.0) as i32 {
             for x in (cx - r - 1.0) as i32..=(cx + r + 1.0) as i32 {
                 let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
-                let cover = (r - d + 0.5).clamp(0.0, 1.0);
+                let cover = (r - d + 0.5).clamp(0.0, 1.0) * opacity;
                 self.blend(x, y, color, (cover * 255.0) as u8);
             }
+        }
+    }
+
+    /// A line `width` pixels wide with smooth edges.
+    fn line(&mut self, (x0, y0): (f32, f32), (x1, y1): (f32, f32), width: f32, color: (u8, u8, u8)) {
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len2 = (dx * dx + dy * dy).max(1e-6);
+        let h = width / 2.0;
+        for y in (y0.min(y1) - h - 1.0) as i32..=(y0.max(y1) + h + 1.0) as i32 {
+            for x in (x0.min(x1) - h - 1.0) as i32..=(x0.max(x1) + h + 1.0) as i32 {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let t = (((px - x0) * dx + (py - y0) * dy) / len2).clamp(0.0, 1.0);
+                let d = ((px - x0 - t * dx).powi(2) + (py - y0 - t * dy).powi(2)).sqrt();
+                self.blend(x, y, color, ((h - d + 0.5).clamp(0.0, 1.0) * 255.0) as u8);
+            }
+        }
+    }
+
+    /// A filled polygon (4×4 samples per pixel for smooth edges).
+    fn polygon(&mut self, points: &[(f32, f32)], color: (u8, u8, u8)) {
+        let inside = |x: f32, y: f32| {
+            let mut c = false;
+            let mut j = points.len() - 1;
+            for i in 0..points.len() {
+                let ((xi, yi), (xj, yj)) = (points[i], points[j]);
+                if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
+                    c = !c;
+                }
+                j = i;
+            }
+            c
+        };
+        let (x0, x1) = points.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
+        let (y0, y1) = points.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+        for y in y0.floor() as i32..=y1.ceil() as i32 {
+            for x in x0.floor() as i32..=x1.ceil() as i32 {
+                let hits = (0..16).filter(|i| inside(x as f32 + (i % 4) as f32 / 4.0 + 0.125, y as f32 + (i / 4) as f32 / 4.0 + 0.125)).count();
+                self.blend(x, y, color, (hits * 255 / 16) as u8);
+            }
+        }
+    }
+
+    /// The right part of a ring (angles within ±`span` radians), `width` pixels thick.
+    fn arc(&mut self, (cx, cy): (f32, f32), r: f32, span: f32, width: f32, color: (u8, u8, u8)) {
+        let h = width / 2.0;
+        for y in (cy - r - h - 1.0) as i32..=(cy + r + h + 1.0) as i32 {
+            for x in cx as i32..=(cx + r + h + 1.0) as i32 {
+                let (px, py) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                if py.atan2(px).abs() > span {
+                    continue;
+                }
+                let d = ((px * px + py * py).sqrt() - r).abs();
+                self.blend(x, y, color, ((h - d + 0.5).clamp(0.0, 1.0) * 255.0) as u8);
+            }
+        }
+    }
+
+    /// Round close button (×) in `rect` (x0, y0, x1, y1); red under the mouse — like on Windows.
+    pub fn close_button(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), hot: bool) {
+        let (cx, cy, rad) = ((x0 + x1) as f32 / 2.0, y0 as f32 + (x1 - x0) as f32 / 2.0, (x1 - x0) as f32 / 2.0);
+        if hot {
+            self.disc(cx, cy, rad, (239, 68, 68));
+        } else {
+            self.disc_alpha(cx, cy, rad, (0, 0, 0), 0.55);
+        }
+        let (arm, width) = (rad * 0.38, (rad / 7.0).max(1.5));
+        self.line((cx - arm, cy - arm), (cx + arm, cy + arm), width, (255, 255, 255));
+        self.line((cx - arm, cy + arm), (cx + arm, cy - arm), width, (255, 255, 255));
+    }
+
+    /// Round sound button: a speaker with waves, or crossed out when muted.
+    pub fn sound_button(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), muted: bool, hot: bool) {
+        let (cx, cy, rad) = ((x0 + x1) as f32 / 2.0, y0 as f32 + (x1 - x0) as f32 / 2.0, (x1 - x0) as f32 / 2.0);
+        self.disc_alpha(cx, cy, rad, (0, 0, 0), 0.55);
+        if hot {
+            self.disc_alpha(cx, cy, rad, (255, 255, 255), 0.3);
+        }
+        let s = rad * 0.46;
+        let o = cx - 0.2 * s;
+        let width = (rad / 7.0).max(1.5);
+        let white = (255, 255, 255);
+        self.polygon(
+            &[
+                (o - 0.75 * s, cy - 0.32 * s),
+                (o - 0.25 * s, cy - 0.32 * s),
+                (o + 0.3 * s, cy - 0.8 * s),
+                (o + 0.3 * s, cy + 0.8 * s),
+                (o - 0.25 * s, cy + 0.32 * s),
+                (o - 0.75 * s, cy + 0.32 * s),
+            ],
+            white,
+        );
+        if muted {
+            let (x, arm) = (o + 0.85 * s, 0.3 * s);
+            self.line((x - arm, cy - arm), (x + arm, cy + arm), width, white);
+            self.line((x - arm, cy + arm), (x + arm, cy - arm), width, white);
+        } else {
+            self.arc((o + 0.3 * s, cy), 0.42 * s, 0.9, width, white);
+            self.arc((o + 0.3 * s, cy), 0.8 * s, 0.9, width, white);
         }
     }
 }
@@ -123,12 +227,13 @@ impl Font {
     }
 
     /// Caption in the top-left corner: a dark rounded box, a dot (red while the
-    /// picture is live) and the text — like the Windows version.
-    pub fn caption(&self, img: &mut Image, text: &str, live: bool) {
+    /// picture is live) and the text — like the Windows version. `reserve` = pixels
+    /// kept free on the right (buttons).
+    pub fn caption(&self, img: &mut Image, text: &str, live: bool, reserve: f32) {
         let px = (img.h as f32 / 20.0).clamp(12.0, 36.0);
         let pad = (px * 0.6).round();
         let dot = px * 0.62;
-        let max_w = img.w as f32 - pad * 4.0 - dot * 2.0;
+        let max_w = img.w as f32 - pad * 4.0 - dot * 2.0 - reserve;
         let line = self.font.horizontal_line_metrics(px).map(|m| m.ascent).unwrap_or(px * 0.8);
         // Glyphs that still fit into the width.
         let mut glyphs = Vec::new();

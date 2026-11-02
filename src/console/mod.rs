@@ -1,13 +1,16 @@
-//! Linux console version: preview windows drawn on the framebuffer (a console without
-//! X or Wayland, e.g. a Raspberry Pi with a monitor) or inside a terminal (Kitty
-//! graphics, Sixel or coloured half blocks). Video is decoded by the `ffmpeg` program.
+//! Linux version: preview windows on the desktop (X11 or XWayland), drawn on the
+//! framebuffer (a console without X or Wayland, e.g. a Raspberry Pi with a monitor),
+//! inside a terminal (Kitty graphics, Sixel or coloured half blocks) or as tmux popups.
+//! Video is decoded by the `ffmpeg` program.
 
 mod canvas;
+mod desktop;
 mod fb;
 mod ffmpeg;
 mod term;
 mod tmux;
 mod video;
+mod x11;
 
 use crate::config::{self, Config, Corner, IniDoc};
 use crate::filter::Detection;
@@ -18,6 +21,7 @@ use crate::view::{choose_slot, choose_stream, Slot};
 use canvas::Image;
 use ffmpeg::Ffmpeg;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::Arc;
@@ -68,6 +72,35 @@ pub trait Output {
     }
     /// The settings changed.
     fn configure(&mut self, _cfg: &Config) {}
+    /// Mouse input on desktop windows: which window and what the user did.
+    fn pointer(&mut self, _e: &x11::Event) -> Vec<(u64, Action)> {
+        Vec::new()
+    }
+    /// Camera audio of window `id`: 0 = none, 1 = on, 2 = muted (desktop windows show a button).
+    fn set_sound(&mut self, _id: u64, _state: u8) {}
+    /// The windows have their own buttons (close, sound).
+    fn buttons(&self) -> bool {
+        false
+    }
+    /// Desktop scaling: the window width and the margin from the settings are multiplied by it.
+    fn scale(&self) -> f32 {
+        1.0
+    }
+}
+
+/// What the user did with a desktop window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Action {
+    Close,
+    /// Sound button: mute / unmute.
+    Sound,
+    /// A click: pin / unpin.
+    Pin,
+    /// A double click: open the camera in Frigate.
+    Open,
+    Hover(bool),
+    /// Dragged to this place (in the usable area).
+    Moved(i32, i32),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -84,6 +117,7 @@ pub struct View {
 /// How the console version shows its windows.
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
+    Window,
     Framebuffer,
     Terminal,
     Tmux,
@@ -129,28 +163,34 @@ fn arg(args: &[String], name: &str) -> Option<String> {
     })
 }
 
-const HELP: &str = "FrigatePiP for the Linux console: instant picture-in-picture camera windows for Frigate NVR.
+const HELP: &str = "FrigatePiP for Linux: instant picture-in-picture camera windows for Frigate NVR.
 
 Usage: frigate-pip [options]
 
 Where the windows appear (--output):
+  window       On the desktop (X11, or Wayland with XWayland): borderless windows above
+               the others in a corner of the screen; runs in the background. Mouse: x
+               closes, the speaker mutes, drag moves, a click pins, a double click
+               opens the camera in Frigate, the right button closes.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
                with a monitor). Runs in the background, e.g. as a systemd service.
   terminal     Inside this terminal window (Kitty graphics, Sixel or half blocks).
                Runs in the foreground: the terminal shows FrigatePiP while it runs.
   tmux         Runs in the background; each window opens as a tmux popup over what
                you are doing in tmux, e.g.: tmux new -d -s frigate-pip 'frigate-pip --output tmux'
-  auto         framebuffer on a console (TERM=linux) or without a terminal,
-               terminal otherwise (default).
+  auto         window on a desktop (DISPLAY is set), framebuffer on a console
+               (TERM=linux) or without a terminal, terminal otherwise (default).
 
 Options:
-  --output auto|framebuffer|terminal|tmux   see above
+  --output auto|window|framebuffer|terminal|tmux   see above
   --graphics auto|kitty|sixel|blocks        pictures in a terminal (default: auto)
   --framebuffer /dev/fb0                    framebuffer device
   --test CAMERA                             show a camera right after the start
   --test-connection                         check the connection to Frigate and exit
   --list                                    list the cameras with their objects and zones
                                             (the names for cameras, labels, zones in config.ini)
+  --autostart on|off                        start the desktop windows with the desktop session
+  --quit                                    stop the running desktop windows
   --version                                 print the version
   --help                                    this help
 
@@ -158,13 +198,15 @@ Keys (when started in a terminal or on a console): q quit, x close windows,
 p pause / resume, m sound on / off, 1-9 show camera 1-9.
 In a tmux popup: q, x or Esc close it, m sound on / off.
 Settings: ~/.config/frigate-pip/config.ini - user guide:
-https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md#12-linux-console-version";
+https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md#12-linux-version";
 
 enum Ev {
     Notice(Notice),
     Key(u8),
     /// A window has a new picture.
     Wake,
+    /// Mouse on a desktop window, or the desktop went away.
+    Pointer(x11::Event),
 }
 
 static QUIT: AtomicBool = AtomicBool::new(false);
@@ -217,6 +259,25 @@ pub fn main() {
         }
         return;
     }
+    if args.iter().any(|a| a == "--quit") {
+        match single_instance() {
+            Err(pid) if pid > 0 => unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            },
+            _ => println!("{}", t().console_not_running),
+        }
+        return;
+    }
+    if let Some(v) = arg(&args, "--autostart") {
+        match set_autostart(v != "off") {
+            Ok(msg) => println!("{msg}"),
+            Err(e) => {
+                eprintln!("FrigatePiP: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let console = ConsoleCfg::read(&doc, &args);
     let ff = match Ffmpeg::find(&console.ffmpeg) {
         Ok(f) => Arc::new(f),
@@ -231,17 +292,32 @@ pub fn main() {
         run_view(&camera, &args, &cfg, &console, ff);
         return;
     }
-    let (out, mode) = match open_output(&console, &cfg) {
+    let (tx, rx) = mpsc::channel();
+    let (out, mode) = match open_output(&console, &cfg, &tx) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("FrigatePiP: {e}");
             std::process::exit(1);
         }
     };
-    if mode == Mode::Tmux && is_tty(libc::STDOUT_FILENO) {
-        println!("FrigatePiP {} - {}", env!("CARGO_PKG_VERSION"), t().console_tmux_running);
+    // One copy of the desktop windows per user (autostart and a manual start).
+    let _instance = match mode {
+        Mode::Window => match single_instance() {
+            Ok(lock) => lock,
+            Err(_) => {
+                println!("{}", t().console_already_running);
+                return;
+            }
+        },
+        _ => None,
+    };
+    if is_tty(libc::STDOUT_FILENO) {
+        match mode {
+            Mode::Tmux => println!("FrigatePiP {} - {}", env!("CARGO_PKG_VERSION"), t().console_tmux_running),
+            Mode::Window => println!("FrigatePiP {} - {}", env!("CARGO_PKG_VERSION"), t().console_window_running),
+            _ => {}
+        }
     }
-    let (tx, rx) = mpsc::channel();
     let keys = is_tty(libc::STDIN_FILENO).then(|| {
         let tx = tx.clone();
         // The terminal output switches the terminal to raw mode itself.
@@ -282,6 +358,54 @@ fn camera_list(url: &str, cams: &[CameraInfo]) -> String {
     out
 }
 
+/// Lock file of the desktop windows (one copy per user); it holds the process id.
+fn lock_path() -> PathBuf {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    dir.join(format!("frigate-pip-{}.lock", unsafe { libc::getuid() }))
+}
+
+/// Takes the lock for this copy (`None` when no lock file can be used);
+/// `Err(pid)` when another copy holds it.
+fn single_instance() -> Result<Option<std::fs::File>, i32> {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(lock_path()) else {
+        return Ok(None);
+    };
+    if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let mut pid = String::new();
+        let _ = f.read_to_string(&mut pid);
+        return Err(pid.trim().parse().unwrap_or(0));
+    }
+    let _ = f.set_len(0).and_then(|_| f.write_all(std::process::id().to_string().as_bytes()));
+    Ok(Some(f))
+}
+
+/// `--autostart on|off`: a desktop entry in ~/.config/autostart starts the desktop windows
+/// with the desktop session.
+fn set_autostart(on: bool) -> Result<String, String> {
+    let dir = crate::util::app_dir().parent().map(|p| p.join("autostart")).ok_or("no configuration folder")?;
+    let file = dir.join("frigate-pip.desktop");
+    if !on {
+        return match std::fs::remove_file(&file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", file.display())),
+            _ => Ok(t().console_autostart_off.to_string()),
+        };
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::write(&file, autostart_entry(&exe.to_string_lossy())))
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    Ok(i18n::fmt(t().console_autostart_on, &[&file.display()]))
+}
+
+fn autostart_entry(exe: &str) -> String {
+    let exec = if exe.contains(' ') { format!("\"{exe}\"") } else { exe.to_string() };
+    format!(
+        "[Desktop Entry]\nType=Application\nName=FrigatePiP\nComment=Camera windows for Frigate NVR detections\nExec={exec} --output window\nIcon=frigate-pip\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+    )
+}
+
 fn install_signals() {
     unsafe {
         for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
@@ -290,33 +414,49 @@ fn install_signals() {
     }
 }
 
-/// tmux popups when asked for, otherwise the framebuffer on a console without graphics
-/// and the terminal elsewhere.
-fn open_output(c: &ConsoleCfg, cfg: &Config) -> Result<(Box<dyn Output>, Mode), String> {
+/// Desktop windows on a desktop, tmux popups when asked for, otherwise the framebuffer on
+/// a console without graphics and the terminal elsewhere.
+fn open_output(c: &ConsoleCfg, cfg: &Config, tx: &Sender<Ev>) -> Result<(Box<dyn Output>, Mode), String> {
+    let output = c.output.as_str();
+    let auto = !matches!(output, "window" | "desktop" | "tmux" | "framebuffer" | "fb" | "terminal");
+    if matches!(output, "window" | "desktop") || (auto && std::env::var_os("DISPLAY").is_some()) {
+        let tx = tx.clone();
+        let font = canvas::Font::load(c.font.as_deref());
+        match desktop::Desktop::open(&cfg.monitor, font, move |e| {
+            let _ = tx.send(Ev::Pointer(e));
+        }) {
+            Ok(d) => {
+                crate::log!("Output: desktop windows");
+                return Ok((Box::new(d), Mode::Window));
+            }
+            Err(e) if auto => crate::log!("No desktop windows ({e}) - using the console"),
+            Err(e) => return Err(e),
+        }
+    }
     let on_console = std::env::var("TERM").is_ok_and(|t| t == "linux") || !is_tty(libc::STDOUT_FILENO);
-    let mode = match c.output.as_str() {
+    let mode = match output {
         "tmux" => Mode::Tmux,
         "framebuffer" | "fb" => Mode::Framebuffer,
         "terminal" => Mode::Terminal,
         _ if on_console && std::path::Path::new(&c.framebuffer).exists() => Mode::Framebuffer,
         _ => Mode::Terminal,
     };
-    crate::log!(
-        "Output: {}",
-        match mode {
-            Mode::Framebuffer => "framebuffer",
-            Mode::Terminal => "terminal",
-            Mode::Tmux => "tmux popups",
-        }
-    );
     let out: Box<dyn Output> = match mode {
         Mode::Framebuffer => {
             let font = canvas::Font::load(c.font.as_deref());
             Box::new(fb::Framebuffer::open(&c.framebuffer, c.framebuffer_size.as_deref(), font)?)
         }
-        Mode::Terminal => Box::new(term::Terminal::open(&c.graphics, true)?),
         Mode::Tmux => Box::new(tmux::Tmux::new(cfg.width.max(64) as u32, cfg.position)?),
+        _ => Box::new(term::Terminal::open(&c.graphics, true)?),
     };
+    crate::log!(
+        "Output: {}",
+        match mode {
+            Mode::Framebuffer => "framebuffer",
+            Mode::Tmux => "tmux popups",
+            _ => "terminal",
+        }
+    );
     Ok((out, mode))
 }
 
@@ -388,6 +528,16 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     shared.cancel.cancel();
 }
 
+/// Opens an address in the desktop's browser (xdg-open).
+fn open_url(url: &str) {
+    match std::process::Command::new("xdg-open").arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        Ok(mut child) => {
+            let _ = std::thread::Builder::new().name("xdg-open".into()).spawn(move || child.wait());
+        }
+        Err(e) => crate::log!("Cannot open {url}: xdg-open: {e}"),
+    }
+}
+
 /// The caption, marked when the camera audio is muted.
 fn with_sound(caption: &str, muted: bool) -> String {
     if muted {
@@ -408,6 +558,12 @@ struct Win {
     /// Picture size the decoder was started with.
     size: (u32, u32),
     last_draw: Option<Instant>,
+    /// Desktop windows: the mouse is over it, pinned with a click, dragged by the user.
+    hovered: bool,
+    pinned: bool,
+    user_moved: bool,
+    /// Sound state last given to the output (see `Output::set_sound`).
+    sound: u8,
 }
 
 struct App {
@@ -477,6 +633,15 @@ impl App {
                     }
                 }
                 Ok(Ev::Wake) => {}
+                Ok(Ev::Pointer(x11::Event::Closed)) => {
+                    crate::log!("The desktop session ended");
+                    break;
+                }
+                Ok(Ev::Pointer(e)) => {
+                    for (id, action) in self.out.pointer(&e) {
+                        self.on_action(id, action);
+                    }
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
@@ -525,6 +690,43 @@ impl App {
         }
     }
 
+    /// The mouse on a desktop window — like on Windows.
+    fn on_action(&mut self, id: u64, action: Action) {
+        let Some(i) = self.wins.iter().position(|w| w.id == id) else { return };
+        let w = &mut self.wins[i];
+        match action {
+            Action::Close => {
+                crate::log!("{}: closed by the user", w.camera);
+                self.close(i);
+                return;
+            }
+            Action::Sound => {
+                let muted = !w.shared.muted.fetch_xor(true, Ordering::Relaxed);
+                crate::log!("{}: sound {}", w.camera, if muted { "muted" } else { "on" });
+            }
+            Action::Pin => w.pinned = !w.pinned,
+            Action::Open => {
+                // The first click of the double click pinned it: undo that.
+                w.pinned = !w.pinned;
+                open_url(&format!("{}/#{}", self.cfg.url, w.camera));
+            }
+            Action::Hover(on) => {
+                w.hovered = on;
+                if !on {
+                    // Like on Windows: at least 3 more seconds after the mouse leaves.
+                    w.deadline = w.deadline.max(Instant::now() + Duration::from_secs(3));
+                }
+            }
+            Action::Moved(x, y) => {
+                w.user_moved = true;
+                if let Some(r) = w.rect.as_mut() {
+                    (r.x, r.y) = (x, y);
+                }
+            }
+        }
+        w.shared.dirty.store(true, Ordering::Relaxed);
+    }
+
     /// A camera at once (`--test`, number keys): like a detection, also while paused.
     fn test(&mut self, name: &str) {
         let camera = self
@@ -555,7 +757,8 @@ impl App {
             w.shared.dirty.store(true, Ordering::Relaxed);
             return;
         }
-        let states: Vec<(bool, bool)> = self.wins.iter().map(|_| (false, false)).collect();
+        // Pinned windows are never replaced.
+        let states: Vec<(bool, bool)> = self.wins.iter().map(|w| (false, w.pinned)).collect();
         let max_windows = self.out.max_windows().map_or(self.cfg.max_popups, |m| m.min(self.cfg.max_popups));
         let replace_at = match choose_slot(&states, max_windows, self.cfg.replace) {
             Slot::New => None,
@@ -604,7 +807,21 @@ impl App {
         };
         shared.muted.store(self.muted, Ordering::Relaxed);
         crate::log!("{}: window after {} ms", d.camera, t0.elapsed().as_millis());
-        let win = Win { id, camera: d.camera, caption, deadline: now + dur, hard: now + max, shared, rect: None, size, last_draw: None };
+        let win = Win {
+            id,
+            camera: d.camera,
+            caption,
+            deadline: now + dur,
+            hard: now + max,
+            shared,
+            rect: None,
+            size,
+            last_draw: None,
+            hovered: false,
+            pinned: false,
+            user_moved: false,
+            sound: 0,
+        };
         match replace_at {
             Some(i) => self.wins.insert(i, win),
             None => self.wins.push(win),
@@ -615,8 +832,9 @@ impl App {
     /// Picture size for a camera with this aspect ratio, within the screen.
     fn picture_size(&self, aspect: f32) -> (u32, u32) {
         let (sw, sh) = self.out.size();
-        let margin = self.cfg.margin.max(0) as u32;
-        let w = (self.cfg.width.max(64) as u32).min(sw.saturating_sub(2 * margin).max(64));
+        let margin = self.margin();
+        let width = (self.cfg.width.max(64) as f32 * self.out.scale()).round() as u32;
+        let w = width.min(sw.saturating_sub(2 * margin).max(64));
         let mut h = (w as f32 / aspect).round() as u32;
         let max_h = sh.saturating_sub(2 * margin + self.out.caption_height()).max(32);
         let mut w = w;
@@ -627,12 +845,20 @@ impl App {
         (w & !1, h & !1)
     }
 
-    /// Places the windows from the chosen corner, oldest first.
+    /// Distance from the screen edge in pixels (scaled on the desktop).
+    fn margin(&self) -> u32 {
+        (self.cfg.margin.max(0) as f32 * self.out.scale()).round() as u32
+    }
+
+    /// Places the windows from the chosen corner, oldest first (windows the user dragged
+    /// somewhere else stay there).
     fn layout(&mut self) {
         let caption_h = self.out.caption_height();
-        let sizes: Vec<(u32, u32)> = self.wins.iter().map(|w| (w.size.0, w.size.1 + caption_h)).collect();
-        let rects = stack(self.out.size(), self.cfg.position, self.cfg.margin.max(0) as u32, &sizes);
-        for (i, rect) in rects.into_iter().enumerate() {
+        let placed: Vec<usize> = (0..self.wins.len()).filter(|&i| !self.wins[i].user_moved).collect();
+        let sizes: Vec<(u32, u32)> = placed.iter().map(|&i| (self.wins[i].size.0, self.wins[i].size.1 + caption_h)).collect();
+        let rects = stack(self.out.size(), self.cfg.position, self.margin(), &sizes);
+        for (k, rect) in rects.into_iter().enumerate() {
+            let i = placed[k];
             if self.wins[i].rect != rect {
                 if rect.is_none() {
                     self.out.clear(self.wins[i].id);
@@ -646,15 +872,32 @@ impl App {
     fn draw(&mut self) {
         let caption_h = self.out.caption_height();
         let min_gap = self.out.min_interval();
+        let buttons = self.out.buttons();
         for w in &mut self.wins {
             let Some(rect) = w.rect else { continue };
+            let muted = w.shared.muted.load(Ordering::Relaxed);
+            let sound = match (self.cfg.camera_audio && w.shared.audio.load(Ordering::Relaxed), muted) {
+                (false, _) => 0,
+                (true, false) => 1,
+                (true, true) => 2,
+            };
+            if sound != w.sound && w.last_draw.is_some() {
+                w.sound = sound;
+                self.out.set_sound(w.id, sound);
+            }
             if w.last_draw.is_some_and(|t| t.elapsed() < min_gap) || !w.shared.dirty.swap(false, Ordering::Relaxed) {
                 continue;
             }
             let Some(frame) = w.shared.frame.lock().unwrap().clone() else {
                 continue;
             };
-            let caption = if self.cfg.overlay || caption_h > 0 { with_sound(&w.caption, self.muted && self.cfg.camera_audio) } else { String::new() };
+            let caption = if self.cfg.overlay || caption_h > 0 {
+                let base = if w.pinned { format!("{} · {}", w.caption, t().overlay_pinned) } else { w.caption.clone() };
+                // Desktop windows show a muted speaker instead.
+                with_sound(&base, muted && self.cfg.camera_audio && !buttons)
+            } else {
+                String::new()
+            };
             self.out.draw(w.id, rect, &frame, &caption, w.shared.live.load(Ordering::Relaxed));
             w.last_draw = Some(Instant::now());
         }
@@ -669,13 +912,16 @@ impl App {
             w.shared.cancel.cancel();
         }
         let now = Instant::now();
-        let expired: Vec<usize> = (0..self.wins.len()).filter(|&i| now >= self.wins[i].deadline).collect();
+        // A window under the mouse or pinned stays (desktop windows).
+        let expired: Vec<usize> =
+            (0..self.wins.len()).filter(|&i| now >= self.wins[i].deadline && !self.wins[i].hovered && !self.wins[i].pinned).collect();
         for i in expired.into_iter().rev() {
             self.close(i);
         }
         if self.out.refresh() {
             for w in &mut self.wins {
                 w.rect = None;
+                w.user_moved = false;
             }
             self.layout();
         }
@@ -820,6 +1066,15 @@ mod tests {
         assert_eq!(&lines[2..5], ["front_door (Front door)", "  objects: person, car", "  zones:   driveway"]);
         assert_eq!(&lines[6..9], ["garden", "  objects: —", "  zones:   —"]);
         assert!(lines[10].contains("[trigger]"));
+    }
+
+    #[test]
+    fn autostart_entry_starts_the_desktop_windows() {
+        let e = autostart_entry("/usr/bin/frigate-pip");
+        assert!(e.starts_with("[Desktop Entry]\n"));
+        assert!(e.contains("\nExec=/usr/bin/frigate-pip --output window\n"));
+        assert!(e.contains("\nIcon=frigate-pip\n") && e.contains("\nTerminal=false\n"));
+        assert!(autostart_entry("/opt/my apps/frigate-pip").contains("\nExec=\"/opt/my apps/frigate-pip\" --output window\n"));
     }
 
     #[test]
