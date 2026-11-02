@@ -25,9 +25,11 @@ FrigatePiP ist eine kleine Windows-Anwendung im Infobereich der Taskleiste für 
 - **Windows 10 (Version 1809 oder neuer) oder Windows 11**, 64 Bit.
 - **Frigate** muss vom PC aus über das Netzwerk erreichbar sein. Empfohlen wird Frigate 0.14 oder neuer; die *Review*-Modi erfordern 0.14 oder neuer.
 - Der **API-Port 5000** von Frigate muss vom PC aus erreichbar sein. FrigatePiP meldet sich nicht an, daher kann der authentifizierte Port 8971 nicht verwendet werden. Veröffentlichen Sie den Port unter Docker, z. B. `- "5000:5000"`.
+- **Frigate-Add-on für Home Assistant:** Port 5000 ist standardmäßig deaktiviert – aktivieren Sie ihn in den *Netzwerk*-Einstellungen des Add-ons. HTTPS-Adressen werden nicht unterstützt: Verwenden Sie die normale `http://`-Adresse im lokalen Netzwerk.
 - Für flüssiges Livevideo: der in Frigate integrierte **go2rtc-RTSP-Server, Port 8554** (`- "8554:8554"`). Ohne ihn können Sie weiterhin MJPEG oder Schnappschüsse verwenden (siehe [Livebild](#livebild)).
 - Optional: ein von Frigate verwendeter **MQTT-Broker**, falls Sie MQTT dem Frigate-WebSocket vorziehen.
-- Für H.265-Kameras (HEVC) benötigt Windows einen HEVC-Decoder. Die meisten PCs mit aktuellem Grafiktreiber haben einen; andernfalls installieren Sie die *HEVC-Videoerweiterungen* aus dem Microsoft Store oder verwenden einen H.264-Sub-Stream.
+- Für H.265-Kameras (HEVC) benötigt Windows einen HEVC-Decoder. Die meisten PCs mit aktuellem Grafiktreiber haben einen; andernfalls installieren Sie die *HEVC-Videoerweiterungen* aus dem Microsoft Store oder verwenden einen H.264-Sub-Stream. Ist kein Decoder verfügbar, zeigt FrigatePiP automatisch stattdessen MJPEG von Frigate.
+- **Windows-N-Editionen** (z. B. Windows 11 Pro N) enthalten Media Foundation erst, wenn Sie das optionale Windows-Feature *Media Feature Pack* hinzufügen. FrigatePiP funktioniert auch ohne, das Livebild kommt dann jedoch als MJPEG von Frigate (ca. 5 Bilder pro Sekunde), und AAC-Kameraton ist nicht verfügbar.
 
 ## 2. Installation
 
@@ -294,7 +296,7 @@ FrigatePiP ist auf Englisch, Polnisch, Deutsch, Spanisch, Portugiesisch und Fran
 
 **Datenschutz:** FrigatePiP verbindet sich nur mit den Adressen, die Sie eingeben (Frigate, go2rtc und der MQTT-Broker). Es gibt keine Telemetrie, keine Konten und keine Clouddienste. Bilder werden nur angezeigt und nie gespeichert. Die Links unter **Hilfe** öffnen dieses Handbuch auf GitHub in Ihrem Browser.
 
-**Ressourcen:** Während FrigatePiP auf Erkennungen wartet, verbraucht es praktisch keine CPU-Leistung und ca. 5–10 MB Arbeitsspeicher. Video wird nach Möglichkeit von der Grafikkarte decodiert.
+**Ressourcen:** Während FrigatePiP auf Erkennungen wartet, verbraucht es praktisch keine CPU-Leistung und ca. 5–10 MB Arbeitsspeicher. Video wird nach Möglichkeit von der Grafikkarte decodiert. Ohne nutzbare Grafikkarte (z. B. in manchen virtuellen Maschinen) zeichnet es mit dem Software-Renderer WARP.
 
 ## 11. Fehlerbehebung
 
@@ -303,6 +305,8 @@ Beginnen Sie mit **Verbindung testen** in den Einstellungen und mit **Protokoll 
 **Das Symbol bleibt grau (nicht verbunden)**
 - Prüfen Sie die Frigate-Adresse und den Port (5000) in einem Browser auf demselben PC: `http://<frigate>:5000/api/version` sollte die Version anzeigen.
 - Unter Docker muss Port 5000 veröffentlicht sein. Port 8971 (mit Anmeldung) wird nicht unterstützt.
+- Home-Assistant-Add-on: Aktivieren Sie Port 5000 in den *Netzwerk*-Einstellungen des Add-ons.
+- Die Adresse muss mit `http://` beginnen. HTTPS (z. B. über einen Reverse Proxy) wird nicht unterstützt.
 - Bei MQTT: Prüfen Sie Broker-Adresse, Anmeldedaten und Topic-Präfix.
 
 **Es erscheinen keine Fenster**
@@ -318,6 +322,7 @@ Beginnen Sie mit **Verbindung testen** in den Einstellungen und mit **Protokoll 
 - Wenn go2rtc eine Anmeldung erfordert, tragen Sie die Anmeldedaten in die **RTSP-Adresse** ein.
 - Installieren Sie für H.265-Kameras die *HEVC-Videoerweiterungen* oder verwenden Sie einen H.264-Sub-Stream.
 - Wählen Sie als Notlösung **MJPEG von Frigate**.
+- Unter Windows N ohne *Media Feature Pack* ist RTSP-Video nicht verfügbar; FrigatePiP verwendet automatisch MJPEG (im Protokoll: *MJPEG from Frigate instead of RTSP*).
 
 **Das Video startet langsam**
 - Aktivieren Sie **Vorpuffer** und **GPU bereithalten**.

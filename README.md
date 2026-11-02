@@ -28,7 +28,7 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 
 Prefer no installer? Download `frigate-pip.exe` from the same release and run it from any folder.
 
-**Requirements:** Windows 10 (1809+) or 11, 64-bit; Frigate reachable on its API port **5000** (the unauthenticated port; 8971 is not supported) and, for live video, go2rtc's RTSP port **8554**. Details, updating and uninstalling: [user guide → Installation](docs/en/user-guide.md#2-installation).
+**Requirements:** Windows 10 (1809+) or 11, 64-bit; Frigate reachable over plain `http://` on its API port **5000** (the unauthenticated port; 8971 and HTTPS are not supported — in the Home Assistant add-on, enable port 5000 in the add-on's network settings) and, for live video, go2rtc's RTSP port **8554**. On Windows N editions without the Media Feature Pack, live video falls back to MJPEG. Details, updating and uninstalling: [user guide → Installation](docs/en/user-guide.md#2-installation).
 
 ## Usage in short
 

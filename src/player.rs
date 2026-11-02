@@ -231,6 +231,12 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let mut src: [Source; 2] = Default::default();
     let mut mjpeg_active = false;
     match p.live {
+        // Without Media Foundation (Windows N) RTSP video cannot be decoded.
+        LiveMode::Rtsp if !crate::decoder::mf_startup() => {
+            crate::log!("{cam}: MJPEG from Frigate instead of RTSP");
+            spawn_mjpeg(mjpeg_url.clone(), tx.clone(), cancel.clone());
+            mjpeg_active = true;
+        }
         LiveMode::Rtsp => {
             // The prebuffer (sub) gives a picture at once; if the window wants another stream
             // (main), we connect directly in parallel and switch over after the first frame.
@@ -362,6 +368,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
 
         let alive = src.iter().any(|s| s.active && !s.failed);
         if shown.is_none() && !alive && !mjpeg_active && p.live != LiveMode::Snapshot {
+            crate::log!("{cam}: no RTSP video - MJPEG from Frigate instead");
             spawn_mjpeg(mjpeg_url.clone(), tx.clone(), cancel.clone());
             mjpeg_active = true;
         }

@@ -136,23 +136,28 @@ pub fn gdi_paint_jpeg(hwnd: HWND, jpeg: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Graphics device; without a usable graphics card (some virtual machines and remote
+/// sessions) the WARP software rasterizer is used instead.
 pub fn create_device(flags: D3D11_CREATE_DEVICE_FLAG) -> Result<ID3D11Device> {
+    static WARP_LOGGED: std::sync::Once = std::sync::Once::new();
     let levels = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0];
-    let mut device = None;
-    unsafe {
-        D3D11CreateDevice(
-            None,
-            D3D_DRIVER_TYPE_HARDWARE,
-            HMODULE::default(),
-            flags,
-            Some(&levels),
-            D3D11_SDK_VERSION,
-            Some(&mut device),
-            None,
-            None,
-        )?;
+    let mut last: Result<ID3D11Device> = Err(windows::Win32::Foundation::E_FAIL.into());
+    for driver in [D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP] {
+        let mut device = None;
+        let r =
+            unsafe { D3D11CreateDevice(None, driver, HMODULE::default(), flags, Some(&levels), D3D11_SDK_VERSION, Some(&mut device), None, None) };
+        match (r, device) {
+            (Ok(()), Some(d)) => {
+                if driver == D3D_DRIVER_TYPE_WARP {
+                    WARP_LOGGED.call_once(|| crate::log!("No usable graphics card - drawing with WARP (software)"));
+                }
+                return Ok(d);
+            }
+            (Err(e), _) => last = Err(e),
+            (Ok(()), None) => {}
+        }
     }
-    device.ok_or_else(|| windows::Win32::Foundation::E_FAIL.into())
+    last
 }
 
 impl Renderer {

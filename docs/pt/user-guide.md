@@ -25,9 +25,11 @@ O FrigatePiP é uma pequena aplicação da área de notificação do Windows par
 - **Windows 10 (versão 1809 ou posterior) ou Windows 11**, 64 bits.
 - **Frigate** acessível a partir do PC através da rede. Recomenda-se o Frigate 0.14 ou posterior; os modos *Review* exigem a versão 0.14 ou posterior.
 - A **porta 5000 da API** do Frigate tem de estar acessível a partir do PC. O FrigatePiP não inicia sessão, por isso não é possível usar a porta autenticada 8971. Com Docker, publique a porta, p. ex. `- "5000:5000"`.
+- **Add-on do Frigate para o Home Assistant:** a porta 5000 está desativada por predefinição — ative-a nas definições de *Rede* do add-on. Endereços HTTPS não são suportados: use o endereço `http://` normal da rede local.
 - Para vídeo ao vivo fluido: o **servidor RTSP go2rtc, porta 8554**, integrado no Frigate (`- "8554:8554"`). Sem ele, pode continuar a usar MJPEG ou instantâneos (ver [Imagem ao vivo](#imagem-ao-vivo)).
 - Opcional: um **broker MQTT** usado pelo Frigate, se preferir o MQTT ao WebSocket do Frigate.
-- Para câmaras H.265 (HEVC), o Windows precisa de um descodificador HEVC. A maioria dos PCs com um driver gráfico recente tem um; caso contrário, instale as *Extensões de Vídeo HEVC* a partir da Microsoft Store ou use um stream sub em H.264.
+- Para câmaras H.265 (HEVC), o Windows precisa de um descodificador HEVC. A maioria dos PCs com um driver gráfico recente tem um; caso contrário, instale as *Extensões de Vídeo HEVC* a partir da Microsoft Store ou use um stream sub em H.264. Se não houver descodificador disponível, o FrigatePiP mostra automaticamente MJPEG do Frigate.
+- **As edições N do Windows** (por exemplo, Windows 11 Pro N) não incluem o Media Foundation até adicionar a funcionalidade opcional do Windows *Media Feature Pack*. O FrigatePiP funciona na mesma sem ela, mas a imagem ao vivo chega como MJPEG do Frigate (cerca de 5 imagens por segundo) e o áudio AAC da câmara não está disponível.
 
 ## 2. Instalação
 
@@ -294,7 +296,7 @@ O FrigatePiP está disponível em inglês, polaco, alemão, espanhol, português
 
 **Privacidade:** o FrigatePiP conecta-se apenas aos endereços que introduzir (Frigate, go2rtc e o broker MQTT). Não tem telemetria, contas nem serviços na nuvem. As imagens são apenas apresentadas e nunca são guardadas. Os links **Ajuda** abrem este guia no GitHub, no browser.
 
-**Recursos:** enquanto aguarda deteções, o FrigatePiP praticamente não usa CPU e usa cerca de 5–10 MB de memória. O vídeo é descodificado pela placa gráfica sempre que possível.
+**Recursos:** enquanto aguarda deteções, o FrigatePiP praticamente não usa CPU e usa cerca de 5–10 MB de memória. O vídeo é descodificado pela placa gráfica sempre que possível. Sem uma placa gráfica utilizável (por exemplo, em algumas máquinas virtuais), desenha com o renderizador por software WARP.
 
 ## 11. Resolução de problemas
 
@@ -303,6 +305,8 @@ Comece por **Testar conexão** nas configurações e por **Mostrar registo** no 
 **O ícone continua cinzento (sem conexão)**
 - Verifique o endereço do Frigate e a porta (5000) num browser no mesmo PC: `http://<frigate>:5000/api/version` deve mostrar a versão.
 - No Docker, a porta 5000 tem de estar publicada. A porta 8971 (com autenticação) não é suportada.
+- Add-on do Home Assistant: ative a porta 5000 nas definições de *Rede* do add-on.
+- O endereço tem de começar por `http://`. HTTPS (por exemplo, através de um reverse proxy) não é suportado.
 - Com MQTT: verifique o endereço do broker, as credenciais e o prefixo de tópicos.
 
 **Não aparece nenhuma janela**
@@ -318,6 +322,7 @@ Comece por **Testar conexão** nas configurações e por **Mostrar registo** no 
 - Se o go2rtc exigir autenticação, inclua as credenciais no **Endereço RTSP**.
 - Para câmaras H.265, instale as *Extensões de Vídeo HEVC* ou use um stream sub em H.264.
 - Como alternativa, selecione **MJPEG do Frigate**.
+- No Windows N sem o *Media Feature Pack*, o vídeo RTSP não está disponível; o FrigatePiP usa MJPEG automaticamente (o registo indica *MJPEG from Frigate instead of RTSP*).
 
 **O vídeo demora a começar**
 - Ative **Pré-buffer** e **GPU pronta**.

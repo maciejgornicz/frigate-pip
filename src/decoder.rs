@@ -2,9 +2,10 @@
 
 use crate::rtp::Codec;
 use std::mem::ManuallyDrop;
-use std::sync::Once;
+use std::sync::OnceLock;
+use windows::core::w;
 use windows::core::{Interface, Result, GUID};
-use windows::Win32::Foundation::E_FAIL;
+use windows::Win32::Foundation::{E_FAIL, E_NOTIMPL};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::CoTaskMemFree;
@@ -27,11 +28,20 @@ pub struct Decoder {
     _manager: Option<IMFDXGIDeviceManager>,
 }
 
-pub(crate) fn mf_startup() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| unsafe {
-        let _ = MFStartup(MF_VERSION, MFSTARTUP_LITE);
-    });
+pub(crate) fn mf_startup() -> bool {
+    static READY: OnceLock<bool> = OnceLock::new();
+    *READY.get_or_init(|| unsafe {
+        use windows::Win32::System::LibraryLoader::{LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
+        // mfplat.dll is delay-loaded (see build.rs) and missing on Windows "N" editions
+        // without the Media Feature Pack: nothing may call it unless it can be loaded.
+        // FRIGATEPIP_NO_MF=1 simulates such a system.
+        let present = std::env::var_os("FRIGATEPIP_NO_MF").is_none() && LoadLibraryExW(w!("mfplat.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32).is_ok();
+        if !present {
+            crate::log!("Media Foundation is not available (Windows N without the Media Feature Pack?) - no RTSP video or AAC audio");
+            return false;
+        }
+        MFStartup(MF_VERSION, MFSTARTUP_LITE).is_ok()
+    })
 }
 
 unsafe fn find_decoder(subtype: GUID) -> Result<IMFTransform> {
@@ -64,7 +74,9 @@ unsafe fn find_decoder(subtype: GUID) -> Result<IMFTransform> {
 impl Decoder {
     /// `device`: D3D11 device for hardware decoding (`None` = software).
     pub fn new(codec: Codec, device: Option<&ID3D11Device>) -> Result<Decoder> {
-        mf_startup();
+        if !mf_startup() {
+            return Err(E_NOTIMPL.into());
+        }
         let subtype = match codec {
             Codec::H264 => MFVideoFormat_H264,
             Codec::H265 => MFVideoFormat_HEVC,

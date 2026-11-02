@@ -25,9 +25,11 @@ FrigatePiP is a small Windows tray application for [Frigate NVR](https://frigate
 - **Windows 10 (version 1809 or later) or Windows 11**, 64-bit.
 - **Frigate** reachable from your PC over the network. Frigate 0.14 or later is recommended; the *Review* modes need 0.14 or later.
 - Frigate's **API port 5000** must be reachable from the PC. FrigatePiP does not log in, so the authenticated port 8971 cannot be used. With Docker, publish the port, e.g. `- "5000:5000"`.
+- **Frigate add-on for Home Assistant:** port 5000 is disabled by default — enable it in the add-on's *Network* settings. HTTPS addresses are not supported: use the plain `http://` address in your local network.
 - For smooth live video: Frigate's built-in **go2rtc RTSP server, port 8554** (`- "8554:8554"`). Without it you can still use MJPEG or snapshots (see [Live picture](#live-picture)).
 - Optional: an **MQTT broker** used by Frigate, if you prefer MQTT to the Frigate WebSocket.
-- For H.265 (HEVC) cameras, Windows needs an HEVC decoder. Most PCs with a recent graphics driver have one; otherwise install *HEVC Video Extensions* from the Microsoft Store, or use an H.264 sub stream.
+- For H.265 (HEVC) cameras, Windows needs an HEVC decoder. Most PCs with a recent graphics driver have one; otherwise install *HEVC Video Extensions* from the Microsoft Store, or use an H.264 sub stream. If no decoder is available, FrigatePiP automatically shows MJPEG from Frigate instead.
+- **Windows N editions** (for example Windows 11 Pro N) have no Media Foundation until you add the optional Windows feature *Media Feature Pack*. FrigatePiP still works without it, but live video comes as MJPEG from Frigate (about 5 frames per second) and AAC camera audio is not available.
 
 ## 2. Installation
 
@@ -294,7 +296,7 @@ FrigatePiP is available in English, Polish, German, Spanish, Portuguese and Fren
 
 **Privacy:** FrigatePiP connects only to the addresses you enter (Frigate, go2rtc and the MQTT broker). It has no telemetry, no accounts and no cloud services. Pictures are only displayed and never saved. The **Help** links open this guide on GitHub in your browser.
 
-**Resources:** while waiting for detections FrigatePiP uses practically no CPU and about 5–10 MB of memory. Video is decoded by the graphics card when possible.
+**Resources:** while waiting for detections FrigatePiP uses practically no CPU and about 5–10 MB of memory. Video is decoded by the graphics card when possible. Without a usable graphics card (for example in some virtual machines) it draws with the WARP software renderer.
 
 ## 11. Troubleshooting
 
@@ -303,6 +305,8 @@ Start with **Test connection** in the settings and with **Show log** in the tray
 **The icon stays grey (not connected)**
 - Check the Frigate address and the port (5000) in a browser on the same PC: `http://<frigate>:5000/api/version` should show the version.
 - In Docker, port 5000 must be published. Port 8971 (with login) is not supported.
+- Home Assistant add-on: enable port 5000 in the add-on's *Network* settings.
+- The address must start with `http://`. HTTPS (for example through a reverse proxy) is not supported.
 - With MQTT: check the broker address, login and topic prefix.
 
 **No windows appear**
@@ -318,6 +322,7 @@ Start with **Test connection** in the settings and with **Show log** in the tray
 - If go2rtc requires a login, put it into the **RTSP address**.
 - For H.265 cameras install *HEVC Video Extensions*, or use an H.264 sub stream.
 - As a workaround select **MJPEG from Frigate**.
+- On Windows N without the *Media Feature Pack* RTSP video is not available; FrigatePiP uses MJPEG automatically (the log says *MJPEG from Frigate instead of RTSP*).
 
 **Video starts slowly**
 - Enable **Prebuffer** and **Ready GPU**.

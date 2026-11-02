@@ -279,7 +279,9 @@ impl AudioDecoder {
                 out_bytes: 0,
             }),
             AudioCodec::Aac { config, .. } => unsafe {
-                crate::decoder::mf_startup();
+                if !crate::decoder::mf_startup() {
+                    return Err(windows::Win32::Foundation::E_NOTIMPL.into());
+                }
                 let mft = find_aac_decoder()?;
                 let it = MFCreateMediaType()?;
                 it.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)?;

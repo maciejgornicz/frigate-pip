@@ -40,6 +40,8 @@ cargo test --release -- --ignored --nocapture
 
 `FRIGATE_STREAMS` is a comma-separated list of go2rtc stream names. Without these variables the live tests print a hint and pass. Never commit real addresses, camera names, credentials or footage.
 
+To try the behaviour of Windows "N" editions without Media Foundation, start the app with the environment variable `FRIGATEPIP_NO_MF=1`: live video then falls back to MJPEG.
+
 ### Building the installer
 
 ```
@@ -71,6 +73,7 @@ The installer is written to `target\installer`. GitHub Actions runs `cargo fmt -
 | `src/i18n/` | Translations: `mod.rs` (the `Strings` struct and language selection) and one file per language. |
 | `docs/<lang>/user-guide.md` | The user guide in every language. |
 | `installer/frigate-pip.iss` | Inno Setup script. |
+| `build.rs`, `.cargo/config.toml` | MSVC builds: delay-loaded `mfplat.dll` and a statically linked C runtime, so the exe starts on any Windows 10/11 PC. |
 
 ## Design principles
 

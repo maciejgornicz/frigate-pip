@@ -1,0 +1,4 @@
+# Release builds must run on any Windows 10/11 PC: link the C runtime statically,
+# so the MSVC build does not need the Visual C++ Redistributable (VCRUNTIME140.dll).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
