@@ -34,13 +34,15 @@ Prefer no installer? Download `FrigatePiP-<version>-portable.exe` from the same 
 
 ## Linux console
 
+Debian, Ubuntu and Raspberry Pi OS (64-bit): download `frigate-pip_<version>_amd64.deb` (or `_arm64.deb` for a Raspberry Pi) from [Releases](https://github.com/maciejgornicz/frigate-pip/releases/latest) — apt installs ffmpeg with it:
+
 ```
-sudo apt install ffmpeg
-tar xzf FrigatePiP-*-linux-x86_64.tar.gz      # or …-linux-arm64.tar.gz (Raspberry Pi)
-sudo install frigate-pip /usr/local/bin/
+sudo apt install ./frigate-pip_*.deb
 frigate-pip --test-connection                # after setting url in ~/.config/frigate-pip/config.ini
 frigate-pip
 ```
+
+Other distributions: install ffmpeg, unpack `FrigatePiP-<version>-linux-x86_64.tar.gz` (or `…-arm64.tar.gz`) and copy `frigate-pip` to `/usr/local/bin`.
 
 Three ways to run it:
 

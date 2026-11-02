@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+# On removal, stop and disable every frigate-pip@<user> service, so that no link
+# to the removed unit file is left behind.
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+    for link in /etc/systemd/system/*.wants/frigate-pip@*.service; do
+        if [ -L "$link" ]; then
+            systemctl disable --now "${link##*/}" || true
+        fi
+    done
+    systemctl stop 'frigate-pip@*.service' || true
+fi

@@ -364,26 +364,32 @@ Wideo dekoduje program **ffmpeg**; dane dostarcza mu własny klient RTSP Frigate
 ### Wymagania
 
 - Linux na **x86_64** lub **ARM64** (Raspberry Pi 3, 4 lub 5 z systemem 64-bitowym).
-- **ffmpeg**: `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) lub pakiet z Twojej dystrybucji.
+- **ffmpeg**: instaluje się razem z paczką `.deb`; w innym wypadku `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) lub pakiet z Twojej dystrybucji.
 - Do napisów na framebufferze: czcionka DejaVu (`fonts-dejavu-core`, zwykle instalowana razem z ffmpeg).
 - Do framebuffera: członkostwo w grupie `video` (`sudo usermod -aG video $USER`, a potem ponowne zalogowanie).
 - Frigate dostępny tak samo jak w wersji dla Windows (port API 5000, port RTSP 8554).
 
 ### Instalacja
 
-1. Pobierz `FrigatePiP-<version>-linux-x86_64.tar.gz` lub `FrigatePiP-<version>-linux-arm64.tar.gz` (Raspberry Pi) ze strony [Releases](https://github.com/maciejgornicz/frigate-pip/releases).
-2. Rozpakuj archiwum i umieść program w jednym z katalogów w ścieżce PATH:
+1. Zainstaluj program:
+   - **Debian, Ubuntu, Raspberry Pi OS (64-bit)** — pobierz `frigate-pip_<version>_amd64.deb` (lub `frigate-pip_<version>_arm64.deb` dla Raspberry Pi) ze strony [Releases](https://github.com/maciejgornicz/frigate-pip/releases) i zainstaluj go przez apt, który doinstaluje też ffmpeg:
 
-   ```
-   tar xzf FrigatePiP-*-linux-*.tar.gz
-   sudo install frigate-pip /usr/local/bin/
-   ```
+     ```
+     sudo apt install ./frigate-pip_*.deb
+     ```
 
-3. Uruchom program raz: utworzy plik `~/.config/frigate-pip/config.ini`. W sekcji `[frigate]` ustaw `url` na adres swojego Frigate.
-4. Sprawdź połączenie: `frigate-pip --test-connection`.
-5. Uruchom `frigate-pip`. Za pomocą `--test <camera>` (lub klawiszy **1–9**) możesz od razu zobaczyć kamerę.
+   - **Inne dystrybucje** — pobierz `FrigatePiP-<version>-linux-x86_64.tar.gz` lub `FrigatePiP-<version>-linux-arm64.tar.gz`, rozpakuj archiwum i umieść program w jednym z katalogów w ścieżce PATH:
 
-Program to pojedynczy plik bez dodatkowych bibliotek. Aby go zaktualizować, podmień plik; aby go usunąć, usuń plik i katalog `~/.config/frigate-pip`.
+     ```
+     tar xzf FrigatePiP-*-linux-*.tar.gz
+     sudo install frigate-pip /usr/local/bin/
+     ```
+
+2. Uruchom program raz: utworzy plik `~/.config/frigate-pip/config.ini`. W sekcji `[frigate]` ustaw `url` na adres swojego Frigate.
+3. Sprawdź połączenie: `frigate-pip --test-connection`.
+4. Uruchom `frigate-pip`. Za pomocą `--test <camera>` (lub klawiszy **1–9**) możesz od razu zobaczyć kamerę.
+
+Program to pojedynczy plik bez dodatkowych bibliotek. Aby go zaktualizować, zainstaluj nowszą paczkę w ten sam sposób (lub podmień plik); aby go usunąć, wykonaj `sudo apt remove frigate-pip` (lub usuń plik) i usuń katalog `~/.config/frigate-pip`.
 
 ### Gdzie pojawiają się okna
 
@@ -443,7 +449,11 @@ Język wynika z ustawień regionalnych systemu (`LANG`), chyba że w `[app]` ust
 
 ### Automatyczne uruchamianie (systemd)
 
-Dla monitora wyświetlającego konsolę (np. Raspberry Pi bez pulpitu) utwórz plik `/etc/systemd/system/frigate-pip.service` (zastąp `pi` nazwą swojego użytkownika):
+Dla monitora wyświetlającego konsolę (np. Raspberry Pi bez pulpitu) FrigatePiP może startować jako usługa przy uruchomieniu komputera.
+
+**Po instalacji z paczki `.deb`:** usługa jest już w paczce — wystarczy włączyć ją dla swojego użytkownika (zastąp `pi` jego nazwą): `sudo systemctl enable --now frigate-pip@pi`. Jej log: `journalctl -u frigate-pip@pi`.
+
+**Po instalacji z archiwum:** utwórz plik `/etc/systemd/system/frigate-pip.service` (zastąp `pi` nazwą swojego użytkownika):
 
 ```ini
 [Unit]

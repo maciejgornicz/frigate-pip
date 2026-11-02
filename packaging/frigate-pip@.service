@@ -1,0 +1,15 @@
+# FrigatePiP on the framebuffer of a console without a desktop, for the user named
+# after the @ (e.g. a Raspberry Pi): sudo systemctl enable --now frigate-pip@pi
+[Unit]
+Description=FrigatePiP for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=%i
+SupplementaryGroups=video audio
+ExecStart=/usr/bin/frigate-pip --output framebuffer
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

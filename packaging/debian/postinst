@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+# Let systemd see the new or updated frigate-pip@.service; after an upgrade,
+# restart the running services so they use the new program.
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    if [ "$1" = configure ] && [ -n "$2" ]; then
+        systemctl try-restart 'frigate-pip@*.service' || true
+    fi
+fi
