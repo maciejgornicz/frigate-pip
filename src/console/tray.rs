@@ -119,6 +119,17 @@ fn pixmaps(rgb: (u8, u8, u8)) -> V {
     V::A("(iiay)".into(), icons)
 }
 
+/// The icon for notifications (`image-data`: 48×48 RGBA), so they have it also when the
+/// icon is not installed in the icon theme (tar.gz).
+fn image_data() -> V {
+    const SIZE: u32 = 48;
+    let mut bytes = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    for a in crate::icon::coverage(SIZE) {
+        bytes.extend([V::Y(0x3B), V::Y(0x82), V::Y(0xF6), V::Y(a)]);
+    }
+    V::R(vec![V::I(SIZE as i32), V::I(SIZE as i32), V::I(SIZE as i32 * 4), V::B(true), V::I(8), V::I(4), V::A("y".into(), bytes)])
+}
+
 fn sni_props(st: &State) -> Vec<(&'static str, V)> {
     let none = || V::A("(iiay)".into(), Vec::new());
     vec![
@@ -324,8 +335,10 @@ impl Tray {
     }
 
     /// A desktop notification; with `action`, clicking it (or that button) opens the settings.
+    /// The click is the "default" action without a label: servers that draw every action
+    /// as a button (XFCE) leave unlabelled ones out, so the button is not there twice.
     pub fn notify(&self, summary: &str, body: &str, action: Option<&str>) {
-        let actions = action.map(|a| vec![V::s("default"), V::s(a), V::s("settings"), V::s(a)]).unwrap_or_default();
+        let actions = action.map(|a| vec![V::s("default"), V::s(""), V::s("settings"), V::s(a)]).unwrap_or_default();
         let args = vec![
             V::s("FrigatePiP"),
             V::U(0),
@@ -333,7 +346,7 @@ impl Tray {
             V::s(summary),
             V::s(body),
             V::A("s".into(), actions),
-            V::dict(vec![("desktop-entry", V::s("frigate-pip"))]),
+            V::dict(vec![("desktop-entry", V::s("frigate-pip")), ("image-data", image_data())]),
             V::I(-1),
         ];
         match self.bus.call(NOTIFICATIONS, "/org/freedesktop/Notifications", NOTIFICATIONS, "Notify", args) {
@@ -383,5 +396,6 @@ mod tests {
         let V::R(first) = &icons[0] else { panic!() };
         let V::A(_, bytes) = &first[2] else { panic!() };
         assert_eq!((first[0].clone(), bytes.len()), (V::I(16), 16 * 16 * 4));
+        assert_eq!(image_data().signature(), "(iiibiiay)");
     }
 }
