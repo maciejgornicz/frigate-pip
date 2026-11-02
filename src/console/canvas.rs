@@ -12,9 +12,10 @@ pub struct Image {
 
 impl Image {
     /// The part `want` of the camera picture from a picture that shows the part `have`, at
-    /// the same size (bilinear, 8-bit fixed point). What `have` does not cover stays black:
-    /// zooming out shows at once where the known part belongs.
-    pub fn zoomed(&self, have: Zoom, want: Zoom) -> Image {
+    /// the same size (bilinear, 8-bit fixed point). What `have` does not cover comes from
+    /// `whole` (an older picture of the whole camera view), or stays black: zooming out shows
+    /// at once, with the live part at its place.
+    pub fn zoomed(&self, have: Zoom, want: Zoom, whole: Option<&Image>) -> Image {
         if have == want || self.w == 0 || self.h == 0 {
             return self.clone();
         }
@@ -34,7 +35,11 @@ impl Image {
                 .collect()
         };
         let (cols, rows) = (axis(w, want.x, have.x), axis(h, want.y, have.y));
-        let mut out = Image::new(w, h);
+        let gaps = cols.iter().chain(rows.iter()).any(Option::is_none);
+        let mut out = match whole {
+            Some(whole) if gaps => whole.resized(w, h).zoomed(Zoom::FULL, want, None),
+            _ => Image::new(w, h),
+        };
         for (y, row) in rows.iter().enumerate() {
             let Some((ya, yb, ty)) = *row else { continue };
             for (x, col) in cols.iter().enumerate() {
@@ -327,15 +332,21 @@ mod tests {
         let row = |im: &Image, y: u32| im.data[(y * 8 * 4) as usize..((y + 1) * 8 * 4) as usize].to_vec();
         // Zoomed in on the right half: white (the first column blends a little of the black edge).
         let right = Zoom { x: 0.5, y: 0.0, size: 0.5 };
-        let z = img.zoomed(Zoom::FULL, right);
+        let z = img.zoomed(Zoom::FULL, right, None);
         for y in 0..2 {
             assert!(row(&z, y)[4..].iter().all(|&b| b == 255) && row(&z, y)[0] > 128);
         }
-        // Back out from that picture: its content goes to the right half, the left half is black for now.
-        let back = z.zoomed(right, Zoom::FULL);
+        // Back out from that picture: its content goes to the right half, the left half is
+        // black for now — or comes from an older picture of the whole view.
+        let back = z.zoomed(right, Zoom::FULL, None);
         assert!(row(&back, 0)[..16].iter().all(|&b| b == 0));
         assert!(row(&back, 0)[20..].iter().all(|&b| b == 255));
-        assert_eq!(img.zoomed(Zoom::FULL, Zoom::FULL).data, img.data);
+        let mut grey = Image::new(8, 2);
+        grey.data.fill(128);
+        let filled = z.zoomed(right, Zoom::FULL, Some(&grey));
+        assert!(row(&filled, 0)[..12].iter().all(|&b| b == 128));
+        assert!(row(&filled, 0)[20..].iter().all(|&b| b == 255));
+        assert_eq!(img.zoomed(Zoom::FULL, Zoom::FULL, None).data, img.data);
     }
 
     #[test]

@@ -735,6 +735,9 @@ struct Win {
     /// A decoder restarted after the wheel: it takes over at its first live picture, the old
     /// one plays until then (no frozen picture while the new one waits for a key frame).
     next: Option<(Arc<video::Shared>, Instant)>,
+    /// The last picture of the whole view, kept when zooming in: zooming out fills the sides
+    /// from it until the decoder delivers the wider part.
+    whole: Option<Image>,
     last_draw: Option<Instant>,
     /// Desktop windows: the mouse is over it, pinned with a click, dragged by the user.
     hovered: bool,
@@ -1097,6 +1100,9 @@ impl App {
                 }
             }
             Action::Zoom(notches, u, v) => {
+                if w.zoom.is_full() && w.whole.is_none() {
+                    w.whole = w.shared.frame.lock().unwrap().as_ref().filter(|(_, z)| z.is_full()).map(|(f, _)| f.clone());
+                }
                 w.zoom = w.zoom.at(notches as f32, u, v);
                 // At once from the current pictures; sharp once the wheel stops.
                 w.resized = Some(Instant::now());
@@ -1264,6 +1270,7 @@ impl App {
             zoom: Zoom::FULL,
             dec_zoom: Zoom::FULL,
             next: None,
+            whole: None,
             last_draw: None,
             hovered: false,
             pinned: false,
@@ -1356,7 +1363,10 @@ impl App {
                 continue;
             };
             // A new zoom shows at once from the pictures the decoder delivers now.
-            let frame = frame.zoomed(frame_zoom, w.zoom);
+            if frame_zoom.is_full() && w.zoom.is_full() {
+                w.whole = None;
+            }
+            let frame = frame.zoomed(frame_zoom, w.zoom, w.whole.as_ref());
             let caption = if self.cfg.overlay || caption_h > 0 {
                 let base = crate::view::state_caption(&w.caption, w.pinned, w.zoom);
                 // Desktop windows show a muted speaker instead.
