@@ -228,6 +228,8 @@ pub struct Config {
     pub camera_audio: bool,
     /// Interface language: `auto` (Windows) or a language code.
     pub language: String,
+    /// Once a day ask GitHub whether a new version exists.
+    pub check_updates: bool,
 
     pub overrides: HashMap<String, CamOverride>,
 }
@@ -318,6 +320,7 @@ impl Config {
             gpu_warm: boolean(g("video", "gpu_warm"), false),
             camera_audio: boolean(g("video", "camera_audio"), false),
             language: opt(g("app", "language")).unwrap_or_else(|| "auto".into()),
+            check_updates: boolean(g("app", "check_updates"), true),
 
             overrides,
         }
@@ -377,7 +380,7 @@ fn flag(b: bool) -> &'static str {
 /// Writes all settings to the INI document (existing lines and comments are kept).
 pub fn write_all(c: &Config, d: &mut IniDoc) {
     let quoted = |v: &str| if v.contains([';', '#']) || v != v.trim() { format!("\"{v}\"") } else { v.to_string() };
-    let pairs: [(&str, &str, String); 33] = [
+    let pairs: [(&str, &str, String); 34] = [
         ("frigate", "url", c.url.clone()),
         ("frigate", "source", c.source.key().into()),
         ("frigate", "rtsp", c.rtsp.clone()),
@@ -411,6 +414,7 @@ pub fn write_all(c: &Config, d: &mut IniDoc) {
         ("video", "gpu_warm", flag(c.gpu_warm).into()),
         ("video", "camera_audio", flag(c.camera_audio).into()),
         ("app", "language", c.language.clone()),
+        ("app", "check_updates", flag(c.check_updates).into()),
     ];
     for (section, key, value) in pairs {
         d.set(section, key, &value);
@@ -451,6 +455,8 @@ pub const DEFAULT_INI: &str = "\
 [app]
 ; auto = Windows display language (English if not supported), or: en, pl, de, es, pt, fr
 language = auto
+; Once a day, ask GitHub whether a new version exists (true / false)
+check_updates = true
 
 [frigate]
 ; Address of the Frigate server. Port 5000 does not require logging in.
@@ -632,6 +638,7 @@ mod tests {
         c.gpu_warm = true;
         c.camera_audio = true;
         c.language = "de".into();
+        c.check_updates = false;
         write_all(&c, &mut doc);
         let back = Config::from_ini(&IniDoc::parse(&doc.to_text()));
         assert_eq!(back, c);

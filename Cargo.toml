@@ -1,6 +1,6 @@
 [package]
 name = "frigate-pip"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.87"
 description = "Instant picture-in-picture camera windows for Frigate NVR on Windows"
@@ -15,6 +15,7 @@ features = [
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Security",
+    "Win32_Security_Cryptography",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Direct3D",
@@ -25,6 +26,7 @@ features = [
     "Win32_Graphics_Direct2D_Common",
     "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Imaging",
+    "Win32_Networking_WinHttp",
     "Win32_Media_Audio",
     "Win32_Media_MediaFoundation",
     "Win32_Storage_FileSystem",

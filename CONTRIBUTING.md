@@ -42,6 +42,8 @@ cargo test --release -- --ignored --nocapture
 
 To try the behaviour of Windows "N" editions without Media Foundation, start the app with the environment variable `FRIGATEPIP_NO_MF=1`: live video then falls back to MJPEG.
 
+To try the update path, start the installed app with `FRIGATEPIP_FAKE_VERSION=1.0.0`: it then treats the latest GitHub release as newer and offers to install it (**Settings → Connection → Check now**).
+
 ### Building the installer
 
 ```
@@ -70,6 +72,7 @@ The installer is written to `target\installer`. GitHub Actions runs `cargo fmt -
 | `src/audio.rs` | Camera audio: AAC / G.711 depacketizing and decoding, WASAPI playback. |
 | `src/ws.rs`, `src/mqtt.rs`, `src/net.rs` | Minimal WebSocket, MQTT and HTTP clients. |
 | `src/json.rs`, `src/util.rs`, `src/icon.rs` | JSON parser, small utilities and logging, tray icon drawn in code. |
+| `src/update.rs` | Update check on GitHub (HTTPS via WinHTTP), download with SHA-256 check, silent installer run. |
 | `src/i18n/` | Translations: `mod.rs` (the `Strings` struct and language selection) and one file per language. |
 | `docs/<lang>/user-guide.md` | The user guide in every language. |
 | `installer/frigate-pip.iss` | Inno Setup script. |

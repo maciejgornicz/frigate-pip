@@ -7,6 +7,7 @@ use crate::hub::Hub;
 use crate::i18n::{self, t};
 use crate::player::{self, Shared, WM_APP_ASPECT, WM_APP_PLAYER_DONE};
 use crate::settings::{self, Settings};
+use crate::update::{self, Release};
 use crate::util::Cancel;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -36,12 +37,14 @@ const WM_APP_TRAY: u32 = WM_APP + 2;
 const WM_APP_RELOAD: u32 = WM_APP + 3;
 pub const WM_APP_QUIT: u32 = WM_APP + 4;
 pub const WM_APP_SETTINGS: u32 = WM_APP + 5;
+const WM_APP_UPDATE: u32 = WM_APP + 6;
 pub const COPYDATA_TEST: usize = 0x4650_5450;
 
 const TIMER_DEADLINE: usize = 1;
 const TIMER_FORCE_CLOSE: usize = 2;
 const TIMER_RESUME: usize = 3;
 const TIMER_TEST: usize = 4;
+const TIMER_UPDATE: usize = 5;
 
 const CMD_TEST: u32 = 1000;
 const CMD_PAUSE_15: u32 = 1100;
@@ -52,6 +55,7 @@ const CMD_SETTINGS: u32 = 1700;
 const CMD_CLOSE_ALL: u32 = 1800;
 const CMD_OPEN_FRIGATE: u32 = 1801;
 const CMD_HELP: u32 = 1803;
+const CMD_UPDATE: u32 = 1805;
 const CMD_EDIT: u32 = 1802;
 const CMD_LOG: u32 = 1804;
 const CMD_EXIT: u32 = 1999;
@@ -128,6 +132,13 @@ pub struct App {
     settings: Option<Settings>,
     /// Unsaved draft from the settings window — display uses it live.
     view: Option<Config>,
+    /// A newer release found on GitHub.
+    update: Option<Release>,
+    update_status: update::Status,
+    /// Version already announced with a notification (once per run).
+    update_notified: Option<String>,
+    /// The last notification offers the update (a click installs it).
+    update_balloon: bool,
 }
 
 // ---------------------------------------------------------------- helpers
@@ -139,6 +150,21 @@ fn wide(s: &str) -> HSTRING {
 fn open_url(url: &str) {
     unsafe {
         ShellExecuteW(HWND::default(), w!("open"), &wide(url), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
+/// Result of the background update work, sent to the UI thread.
+enum UpdateEvent {
+    Checked { manual: bool, result: Result<Release, String> },
+    InstallFailed(String),
+}
+
+fn post_update_event(hwnd: isize, ev: UpdateEvent) {
+    let b = Box::into_raw(Box::new(ev));
+    unsafe {
+        if PostMessageW(HWND(hwnd as _), WM_APP_UPDATE, WPARAM(0), LPARAM(b as isize)).is_err() {
+            drop(Box::from_raw(b));
+        }
     }
 }
 
@@ -377,12 +403,18 @@ pub fn run(test: Option<String>, open_settings: bool) {
             gpu_warm: None,
             settings: None,
             view: None,
+            update: None,
+            update_status: update::Status::Idle,
+            update_notified: None,
+            update_balloon: false,
         };
         APP.with(|a| *a.borrow_mut() = Some(app));
         with_app(|a| {
             a.tray(NIM_ADD);
             a.start_listener();
             a.update_gpu_warm();
+            // The first update check a minute after the start, then once a day.
+            SetTimer(a.hwnd, TIMER_UPDATE, 60_000, None);
             if let Some(t) = test {
                 a.test(&t);
             }
@@ -433,6 +465,9 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                     with_app(|a| a.open_settings());
                 }
                 WM_RBUTTONUP => show_menu(hwnd),
+                NIN_BALLOONUSERCLICK => {
+                    with_app(|a| a.balloon_clicked());
+                }
                 _ => {}
             }
             LRESULT(0)
@@ -447,6 +482,11 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         }
         WM_APP_SETTINGS => {
             with_app(|a| a.open_settings());
+            LRESULT(0)
+        }
+        WM_APP_UPDATE => {
+            let ev = Box::from_raw(lp.0 as *mut UpdateEvent);
+            with_app(|a| a.on_update_event(*ev));
             LRESULT(0)
         }
         WM_COPYDATA => {
@@ -470,6 +510,9 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                             a.test_now(&t);
                         }
                     });
+                }
+                TIMER_UPDATE => {
+                    with_app(|a| a.on_update_timer());
                 }
                 _ => {}
             }
@@ -1000,6 +1043,7 @@ impl App {
         self.settings = Settings::create(self.hinst, init);
         if let Some(s) = &self.settings {
             SETTINGS_HWND.store(s.hwnd.0 as isize, Ordering::Relaxed);
+            s.set_update(&self.update_status, self.update.as_ref().map(|r| r.version.as_str()));
         }
     }
 
@@ -1013,6 +1057,13 @@ impl App {
             x if x == IDCANCEL.0 => self.close_settings(),
             settings::ID_APPLY => self.apply_settings(),
             settings::ID_HELP => open_url(&settings::help_url()),
+            settings::ID_UPDATE => {
+                if self.update.is_some() {
+                    self.run_update();
+                } else {
+                    self.check_for_update(true);
+                }
+            }
             settings::ID_TEST => self.run_connection_test(),
             settings::ID_TEST_OUT => {}
             settings::ID_PREVIEW => {
@@ -1411,6 +1462,121 @@ impl App {
         self.tray(NIM_MODIFY);
     }
 
+    // ------------------------------------------------ updates
+
+    fn on_update_timer(&mut self) {
+        unsafe {
+            SetTimer(self.hwnd, TIMER_UPDATE, 24 * 60 * 60 * 1000, None);
+        }
+        if self.cfg.check_updates {
+            self.check_for_update(false);
+        }
+    }
+
+    /// Asks GitHub for the latest release in the background.
+    fn check_for_update(&mut self, manual: bool) {
+        if matches!(self.update_status, update::Status::Checking | update::Status::Downloading) {
+            return;
+        }
+        self.set_update_status(update::Status::Checking);
+        let hwnd = self.hwnd.0 as isize;
+        let _ = std::thread::Builder::new().name("update-check".into()).spawn(move || {
+            post_update_event(hwnd, UpdateEvent::Checked { manual, result: update::check() });
+        });
+    }
+
+    fn on_update_event(&mut self, ev: UpdateEvent) {
+        match ev {
+            UpdateEvent::Checked { result: Ok(r), .. } => {
+                let current = update::current_version();
+                if update::is_newer(&r.version, &current) {
+                    crate::log!("Update available: {} (running {current})", r.version);
+                    let v = r.version.clone();
+                    self.update = Some(r);
+                    self.set_update_status(update::Status::Available(v.clone()));
+                    if self.update_notified.as_deref() != Some(v.as_str()) {
+                        self.update_notified = Some(v.clone());
+                        self.notify(&i18n::fmt(t().update_balloon_title, &[&v]), t().update_balloon_text, true);
+                    }
+                } else {
+                    crate::log!("No update: {current} is current (latest {})", r.version);
+                    self.update = None;
+                    self.set_update_status(update::Status::Latest);
+                }
+            }
+            UpdateEvent::Checked { result: Err(e), manual } => {
+                crate::log!("Update check failed: {e}");
+                let st = match (&self.update, manual) {
+                    (_, true) => update::Status::CheckFailed(e),
+                    (Some(r), false) => update::Status::Available(r.version.clone()),
+                    (None, false) => update::Status::Idle,
+                };
+                self.set_update_status(st);
+            }
+            UpdateEvent::InstallFailed(e) => {
+                crate::log!("Update failed: {e}");
+                self.set_update_status(update::Status::InstallFailed(e.clone()));
+                self.notify("FrigatePiP", &i18n::fmt(t().update_failed, &[&e]), false);
+            }
+        }
+    }
+
+    /// Installs the update found: the installed copy downloads and runs the installer,
+    /// a portable copy opens the release page.
+    fn run_update(&mut self) {
+        let Some(r) = self.update.clone() else { return };
+        if !update::installed() {
+            open_url(&r.page);
+            return;
+        }
+        if self.update_status == update::Status::Downloading {
+            return;
+        }
+        crate::log!("Downloading update {}", r.version);
+        self.set_update_status(update::Status::Downloading);
+        let hwnd = self.hwnd.0 as isize;
+        let _ = std::thread::Builder::new().name("update".into()).spawn(move || {
+            if let Err(e) = update::install(&r) {
+                post_update_event(hwnd, UpdateEvent::InstallFailed(e));
+            }
+        });
+    }
+
+    fn balloon_clicked(&mut self) {
+        if self.update_balloon {
+            self.run_update();
+        }
+    }
+
+    fn set_update_status(&mut self, st: update::Status) {
+        self.update_status = st;
+        if let Some(s) = &self.settings {
+            s.set_update(&self.update_status, self.update.as_ref().map(|r| r.version.as_str()));
+        }
+    }
+
+    /// Windows notification from the tray icon; `offer` = a click installs the update.
+    fn notify(&mut self, title: &str, text: &str, offer: bool) {
+        self.update_balloon = offer;
+        let mut nid = NOTIFYICONDATAW {
+            cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: self.hwnd,
+            uID: 1,
+            uFlags: NIF_INFO,
+            dwInfoFlags: NIIF_INFO,
+            ..Default::default()
+        };
+        for (i, c) in title.encode_utf16().take(nid.szInfoTitle.len() - 1).enumerate() {
+            nid.szInfoTitle[i] = c;
+        }
+        for (i, c) in text.encode_utf16().take(nid.szInfo.len() - 1).enumerate() {
+            nid.szInfo[i] = c;
+        }
+        unsafe {
+            let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+        }
+    }
+
     fn build_menu(&self) -> HMENU {
         unsafe {
             let m = CreatePopupMenu().unwrap_or_default();
@@ -1427,6 +1593,10 @@ impl App {
             let _ = AppendMenuW(m, MF_STRING | MF_GRAYED, 0, &wide(&self.status_line()));
             sep(m);
             let t = t();
+            if let Some(r) = &self.update {
+                item(m, CMD_UPDATE, &i18n::fmt(t.menu_update, &[&r.version]), false);
+                sep(m);
+            }
             item(m, CMD_SETTINGS, t.menu_settings, false);
             let _ = SetMenuDefaultItem(m, CMD_SETTINGS, 0);
 
@@ -1478,6 +1648,7 @@ impl App {
             CMD_EDIT => open_in_notepad(&self.path),
             CMD_LOG => open_in_notepad(&crate::util::log_path()),
             CMD_HELP => open_url(&settings::help_url()),
+            CMD_UPDATE => self.run_update(),
             CMD_EXIT => unsafe { PostQuitMessage(0) },
             _ => {}
         }
@@ -1570,6 +1741,10 @@ mod tests {
             gpu_warm: None,
             settings: None,
             view: None,
+            update: None,
+            update_status: update::Status::Idle,
+            update_notified: None,
+            update_balloon: false,
         };
         i18n::set(i18n::Lang::En);
         let m = app.build_menu();

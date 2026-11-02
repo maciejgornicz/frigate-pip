@@ -48,7 +48,7 @@ Téléchargez `frigate-pip.exe` depuis la page Releases et exécutez-le depuis n
 
 ### Mise à jour
 
-Exécutez le programme d’installation de la nouvelle version. Il ferme FrigatePiP s’il est en cours d’exécution, remplace le programme et conserve vos paramètres. Avec la version portable, quittez FrigatePiP et remplacez le fichier exe.
+FrigatePiP recherche une nouvelle version une fois par jour (**Rechercher les mises à jour** dans les paramètres). Lorsqu’une version est disponible, une notification apparaît, et le menu de la zone de notification comme la fenêtre des paramètres proposent **Mettre à jour vers …** : FrigatePiP télécharge le programme d’installation depuis GitHub, vérifie sa somme de contrôle SHA-256 et l’exécute — la mise à jour prend quelques secondes et conserve vos paramètres. **Vérifier maintenant** dans les paramètres recherche immédiatement une nouvelle version. Vous pouvez aussi exécuter vous-même le programme d’installation d’une nouvelle version. La version portable ouvre seulement la page de la version : téléchargez le nouveau fichier exe et remplacez l’ancien.
 
 ### Désinstallation
 
@@ -86,6 +86,7 @@ Survolez l’icône pour voir l’état (par exemple *Connecté : http://192.16
 | Élément de menu | Action |
 |---|---|
 | *(ligne d’état)* | État de la connexion ou temps de pause restant (à titre informatif). |
+| **Mettre à jour vers …** | Apparaît lorsqu’une nouvelle version est disponible : la télécharge et l’installe (voir [Mise à jour](#mise-à-jour)). |
 | **Paramètres…** | Ouvre la fenêtre des paramètres. |
 | **Afficher la caméra** | Ouvre immédiatement une fenêtre d’aperçu de la caméra choisie, même lorsque les notifications sont suspendues. Pratique pour vérifier l’image ou simplement pour regarder. |
 | **Suspendre les notifications** | **Pendant 15 minutes**, **Pendant 1 heure** ou **Jusqu’à la reprise**. Pendant la pause, les détections n’ouvrent pas de fenêtres. L’élément affiche **En pause** tant qu’une pause est active, et **Reprendre maintenant** y met fin. |
@@ -147,6 +148,8 @@ La plupart des modifications s’appliquent **immédiatement** aux fenêtres d�
 | **Tester la connexion** | Vérifie les valeurs saisies ci-dessus (Frigate, caméras, événements, vidéo et audio RTSP) sans les enregistrer. |
 | **Langue** | Langue de FrigatePiP. **Automatique (Windows)** suit la langue d’affichage de Windows ; l’anglais est utilisé lorsque cette langue n’est pas disponible. Voir [Langue](#9-langue). |
 | **Lancer FrigatePiP au démarrage de Windows** | Lance FrigatePiP automatiquement à l’ouverture de votre session Windows. |
+| **Rechercher les mises à jour** | Une fois par jour, FrigatePiP demande à GitHub si une nouvelle version existe et, le cas échéant, affiche une notification et propose la mise à jour. Aucune donnée sur vous ou vos caméras n’est envoyée. |
+| **Vérifier maintenant** / **Mettre à jour vers …** | Recherche immédiatement une nouvelle version ; si elle en trouve une, le bouton la télécharge et l’installe (vos paramètres sont conservés). Le texte à côté affiche le résultat. |
 
 ### 6.2 Détection
 
@@ -226,6 +229,7 @@ Tous les paramètres sont stockés dans `%APPDATA%\FrigatePiP\config.ini` (un fi
 | Section | Clé | Par défaut | Signification |
 |---|---|---|---|
 | `[app]` | `language` | `auto` | `auto` (langue de Windows) ou `en`, `pl`, `de`, `es`, `pt`, `fr`. |
+| | `check_updates` | `true` | Rechercher une nouvelle version une fois par jour. |
 | `[frigate]` | `url` | `http://frigate.local:5000` | Adresse de Frigate. |
 | | `source` | `websocket` | `websocket` ou `mqtt`. |
 | | `rtsp` | `rtsp://{host}:8554/{stream}` | Modèle d’adresse RTSP. |
@@ -295,7 +299,7 @@ FrigatePiP est disponible en anglais, polonais, allemand, espagnol, portugais et
 | Journal | `%APPDATA%\FrigatePiP\frigate-pip.log` (jusqu’à 512 Ko ; le précédent est conservé sous le nom `frigate-pip.old.log`) |
 | Démarrage automatique | Valeur de Registre `FrigatePiP` dans `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
-**Confidentialité :** FrigatePiP se connecte uniquement aux adresses que vous saisissez (Frigate, go2rtc et le broker MQTT). Il n’a ni télémétrie, ni comptes, ni services cloud. Les images sont uniquement affichées et jamais enregistrées. Les liens **Aide** ouvrent ce guide sur GitHub dans votre navigateur.
+**Confidentialité :** FrigatePiP se connecte uniquement aux adresses que vous saisissez (Frigate, go2rtc et le broker MQTT) et, sauf si vous désactivez **Rechercher les mises à jour**, une fois par jour à GitHub pour rechercher une nouvelle version. Il n’a ni télémétrie, ni comptes, ni services cloud. Les images sont uniquement affichées et jamais enregistrées. Les liens **Aide** ouvrent ce guide sur GitHub dans votre navigateur.
 
 **Ressources :** en attente de détections, FrigatePiP n’utilise pratiquement pas de CPU et environ 5–10 Mo de mémoire. La vidéo est décodée par la carte graphique lorsque c’est possible. Sans carte graphique utilisable (par exemple dans certaines machines virtuelles), il dessine avec le moteur de rendu logiciel WARP.
 

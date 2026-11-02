@@ -20,6 +20,7 @@ mod render;
 mod rtp;
 mod rtsp;
 mod settings;
+mod update;
 mod ws;
 
 use windows::core::{w, PCWSTR};

@@ -154,6 +154,21 @@ pub static STRINGS: Strings = Strings {
     test_rtsp_fail: "✖ Vidéo RTSP {0} : {1}",
     test_done: "Terminé.",
 
+    menu_update: "Mettre à jour vers {0}…",
+    check_updates: "Rechercher les mises à jour",
+    update_check_now: "Vérifier maintenant",
+    update_install: "Mettre à jour vers {0}",
+    update_checking: "Vérification…",
+    update_latest: "Vous avez la dernière version ({0}).",
+    update_available: "La version {0} est disponible.",
+    update_downloading: "Téléchargement de la mise à jour…",
+    update_failed: "Échec de la mise à jour : {0}",
+    update_check_failed: "Impossible de rechercher les mises à jour : {0}",
+    update_balloon_title: "FrigatePiP {0} est disponible",
+    update_balloon_text: "Cliquez pour mettre à jour.",
+    tip_check_updates: "Une fois par jour, FrigatePiP demande à GitHub si une nouvelle version existe (aucune donnée sur vous ou vos caméras n’est envoyée) et propose de l’installer.",
+    tip_update: "Recherche immédiatement une nouvelle version, ou télécharge et installe celle qui a été trouvée. Vos paramètres sont conservés.",
+
     labels: &[
         ("person", "personne"),
         ("car", "voiture"),

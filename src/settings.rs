@@ -30,6 +30,9 @@ pub const ID_TEST: i32 = 108;
 pub const ID_TEST_OUT: i32 = 109;
 pub const ID_AUTOSTART: i32 = 110;
 pub const ID_LANGUAGE: i32 = 111;
+pub const ID_CHECK_UPDATES: i32 = 112;
+pub const ID_UPDATE: i32 = 113;
+pub const ID_UPDATE_STATUS: i32 = 114;
 pub const ID_MODE: i32 = 200;
 pub const ID_CAMS: i32 = 201;
 pub const ID_LABELS: i32 = 202;
@@ -69,7 +72,7 @@ const SS_ENDELLIPSIS: u32 = 0x4000;
 const MAX_POPUPS: usize = 8;
 /// Client area at 96 DPI.
 const WIDTH: i32 = 680;
-const HEIGHT: i32 = 520;
+const HEIGHT: i32 = 548;
 /// Right edge of the contents of a tab page.
 const RIGHT: i32 = WIDTH - 28;
 /// `GWLP_USERDATA` mark of controls drawn on a tab page.
@@ -514,7 +517,7 @@ impl Settings {
     fn build(&mut self, c: &Config, autostart: bool, monitors: &[String], cameras: &[(String, String)]) {
         let t = i18n::t();
         unsafe {
-            self.tab = self.add(None, WC_TABCONTROLW, "", WS_VISIBLE.0 | WS_CLIPSIBLINGS.0 | WS_TABSTOP.0, 0, ID_TAB, 12, 12, WIDTH - 24, 456);
+            self.tab = self.add(None, WC_TABCONTROLW, "", WS_VISIBLE.0 | WS_CLIPSIBLINGS.0 | WS_TABSTOP.0, 0, ID_TAB, 12, 12, WIDTH - 24, 484);
             for (i, name) in [t.tab_connection, t.tab_detection, t.tab_window, t.tab_video].iter().enumerate() {
                 // "&" would underline the next letter.
                 let mut buf: Vec<u16> = name.replace('&', "&&").encode_utf16().chain(std::iter::once(0)).collect();
@@ -593,6 +596,16 @@ impl Settings {
         self.tip(&[l, e], t.tip_language);
         let e = self.check(Some(p), ID_AUTOSTART, t.autostart, autostart, lx, 442, full);
         self.tip(&[e], t.tip_autostart);
+        // Updates: check box, status text and a button ("Check now" / "Update to x").
+        let check_w = self.text_w(t.check_updates) + 26;
+        let e = self.check(Some(p), ID_CHECK_UPDATES, t.check_updates, c.check_updates, lx, 470, check_w);
+        self.tip(&[e], t.tip_check_updates);
+        let bw = self.text_w(t.update_check_now).max(self.text_w(&i18n::fmt(t.update_install, &[&"10.10.10"]))) + 28;
+        let b = self.add(Some(p), WC_BUTTONW, t.update_check_now, WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_UPDATE, RIGHT - bw, 468, bw, 26);
+        self.tip(&[b], t.tip_update);
+        let x = lx + check_w + 8;
+        self.label(p, "", x, 470, RIGHT - bw - 8 - x);
+        self.set_id_of_last(ID_UPDATE_STATUS);
 
         // ---- Detection
         let p = 1;
@@ -698,20 +711,20 @@ impl Settings {
         let widths: Vec<i32> = buttons.iter().map(|(_, text, _)| (self.text_w(text) + 24).max(72)).collect();
         let first = WIDTH - 12 - widths.iter().sum::<i32>() - 6 * (buttons.len() as i32 - 1);
         let pw = self.text_w(t.preview) + 4;
-        self.add(None, WC_STATICW, t.preview, WS_VISIBLE.0, 0, -1, 12, 484, pw, 20);
+        self.add(None, WC_STATICW, t.preview, WS_VISIBLE.0, 0, -1, 12, 512, pw, 20);
         let live_w = self.text_w(t.preview_live) + 26;
         let combo_x = 12 + pw + 4;
         let combo_w = (first - 12 - live_w - 8 - combo_x).clamp(90, 180);
         let cam_names: Vec<String> =
             if cameras.is_empty() { vec![t.menu_no_cameras.into()] } else { cameras.iter().map(|(_, t)| t.clone()).collect() };
-        let e = self.combo(None, ID_PREV_CAM, &cam_names, 0, combo_x, 480, combo_w);
+        let e = self.combo(None, ID_PREV_CAM, &cam_names, 0, combo_x, 508, combo_w);
         self.tip(&[e], t.tip_preview_camera);
-        let e = self.check(None, ID_PREVIEW, t.preview_live, false, combo_x + combo_w + 8, 481, live_w);
+        let e = self.check(None, ID_PREVIEW, t.preview_live, false, combo_x + combo_w + 8, 509, live_w);
         self.tip(&[e], t.tip_preview_live);
         let mut x = first;
         for ((id, text, default), w) in buttons.into_iter().zip(widths) {
             let style = WS_VISIBLE.0 | WS_TABSTOP.0 | if default { BS_DEFPUSHBUTTON } else { BS_PUSHBUTTON } as u32;
-            let b = self.add(None, WC_BUTTONW, text, style, 0, id, x, 478, w, 28);
+            let b = self.add(None, WC_BUTTONW, text, style, 0, id, x, 506, w, 28);
             if id == ID_HELP {
                 self.tip(&[b], t.tip_help);
             }
@@ -828,6 +841,7 @@ impl Settings {
         c.mqtt_password = self.text(ID_MQTT_PASS);
         c.mqtt_prefix = Some(self.text(ID_MQTT_PREFIX)).filter(|s| !s.is_empty()).unwrap_or_else(|| "frigate".into());
         c.rtsp = Some(self.text(ID_RTSP)).filter(|s| !s.is_empty()).unwrap_or_else(|| "rtsp://{host}:8554/{stream}".into());
+        c.check_updates = self.checked(ID_CHECK_UPDATES);
         c.language = match self.sel(ID_LANGUAGE) {
             0 => "auto".into(),
             n => Lang::ALL.get(n - 1).map_or("auto", |l| l.code()).into(),
@@ -908,6 +922,28 @@ impl Settings {
                 let _ = EnableWindow(self.item(id), mqtt);
             }
             let _ = EnableWindow(self.item(ID_AUTOW), auto);
+        }
+    }
+
+    /// Update status text and the update button ("Check now" or "Update to x").
+    pub fn set_update(&self, st: &crate::update::Status, available: Option<&str>) {
+        use crate::update::Status;
+        let t = i18n::t();
+        let text = match st {
+            Status::Idle => String::new(),
+            Status::Checking => t.update_checking.to_string(),
+            Status::Latest => i18n::fmt(t.update_latest, &[&crate::update::current_version()]),
+            Status::Available(v) => i18n::fmt(t.update_available, &[v]),
+            Status::Downloading => t.update_downloading.to_string(),
+            Status::CheckFailed(e) => i18n::fmt(t.update_check_failed, &[e]),
+            Status::InstallFailed(e) => i18n::fmt(t.update_failed, &[e]),
+        };
+        let button = available.map_or_else(|| t.update_check_now.to_string(), |v| i18n::fmt(t.update_install, &[&v]));
+        let busy = matches!(st, Status::Checking | Status::Downloading);
+        unsafe {
+            let _ = SetWindowTextW(self.item(ID_UPDATE_STATUS), &wide(&text));
+            let _ = SetWindowTextW(self.item(ID_UPDATE), &wide(&button));
+            let _ = EnableWindow(self.item(ID_UPDATE), !busy);
         }
     }
 

@@ -16,6 +16,7 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Mouse control:** drag to move, click to pin, wheel to resize, × or right-click to close, double-click to open the camera in Frigate.
 - **Settings window** with a live preview of your changes, a connection test and a description of every option.
 - **Events via the Frigate WebSocket** (nothing else needed) or via **MQTT**.
+- **Updates itself:** checks GitHub once a day and installs a new version with one click (can be switched off).
 - **Six languages** — English, Polski, Deutsch, Español, Português, Français — chosen automatically from Windows.
 - A single small executable (~0.7 MB) with no runtime dependencies; per-user installer, no administrator rights.
 

@@ -291,6 +291,29 @@ pub struct Strings {
     pub test_rtsp_fail: &'static str,
     pub test_done: &'static str,
 
+    // ---- updates
+    /// {0} = version
+    pub menu_update: &'static str,
+    pub check_updates: &'static str,
+    pub update_check_now: &'static str,
+    /// {0} = version
+    pub update_install: &'static str,
+    pub update_checking: &'static str,
+    /// {0} = version
+    pub update_latest: &'static str,
+    /// {0} = version
+    pub update_available: &'static str,
+    pub update_downloading: &'static str,
+    /// {0} = error
+    pub update_failed: &'static str,
+    /// {0} = error
+    pub update_check_failed: &'static str,
+    /// {0} = version
+    pub update_balloon_title: &'static str,
+    pub update_balloon_text: &'static str,
+    pub tip_check_updates: &'static str,
+    pub tip_update: &'static str,
+
     /// Frigate labels: (label, translation)
     pub labels: &'static [(&'static str, &'static str)],
 }
@@ -307,7 +330,7 @@ mod tests {
         assert_eq!(Lang::from_primary_langid(0x16), Lang::Pt);
         assert_eq!(Lang::from_primary_langid(0x0C), Lang::Fr);
         assert_eq!(Lang::from_primary_langid(0x09), Lang::En);
-        assert_eq!(Lang::from_primary_langid(0x11), Lang::En); // japoński → angielski
+        assert_eq!(Lang::from_primary_langid(0x11), Lang::En); // Japanese → English
         assert_eq!(resolve("de"), Lang::De);
         assert_eq!(Lang::from_code("PT"), Some(Lang::Pt));
         assert_eq!(Lang::from_code("auto"), None);
@@ -324,7 +347,7 @@ mod tests {
         let en = Lang::En.strings();
         for lang in Lang::ALL {
             let s = lang.strings();
-            // każdy szablon z parametrami musi zachować te same {n}
+            // every template with parameters must keep the same {n}
             let pairs = [
                 (en.status_paused_minutes, s.status_paused_minutes),
                 (en.monitor_item, s.monitor_item),
@@ -341,6 +364,13 @@ mod tests {
                 (en.test_rtsp_fail, s.test_rtsp_fail),
                 (en.status_connected, s.status_connected),
                 (en.status_disconnected, s.status_disconnected),
+                (en.menu_update, s.menu_update),
+                (en.update_install, s.update_install),
+                (en.update_latest, s.update_latest),
+                (en.update_available, s.update_available),
+                (en.update_failed, s.update_failed),
+                (en.update_check_failed, s.update_check_failed),
+                (en.update_balloon_title, s.update_balloon_title),
             ];
             for (a, b) in pairs {
                 for i in 0..4 {
@@ -351,7 +381,7 @@ mod tests {
             assert!(s.rtsp_hint.contains("{host}") && s.rtsp_hint.contains("{stream}"), "{:?}", lang);
             assert!(!s.settings_title.is_empty() && !s.labels.is_empty(), "{:?}", lang);
             for (k, _) in en.labels {
-                assert!(s.labels.iter().any(|(l, _)| l == k), "{:?}: brak etykiety {k}", lang);
+                assert!(s.labels.iter().any(|(l, _)| l == k), "{:?}: missing label {k}", lang);
             }
         }
     }

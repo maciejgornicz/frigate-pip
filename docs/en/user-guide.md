@@ -48,7 +48,7 @@ Download `frigate-pip.exe` from the Releases page and run it from any folder. Se
 
 ### Updating
 
-Run the installer of the new version. It closes the running FrigatePiP, replaces the program and keeps your settings. With the portable version, exit FrigatePiP and replace the exe.
+FrigatePiP checks for a new version once a day (**Check for updates** in the settings). When one is available, a notification appears and both the tray menu and the settings window offer **Update to …**: FrigatePiP downloads the installer from GitHub, verifies its SHA-256 checksum and runs it — the update takes a few seconds and keeps your settings. **Check now** in the settings looks for a new version at once. You can also run the installer of a new version yourself. The portable version only opens the release page: download the new exe and replace the old one.
 
 ### Uninstalling
 
@@ -86,6 +86,7 @@ Hover over the icon to see the status (for example *Connected: http://192.168.1.
 | Menu item | What it does |
 |---|---|
 | *(status line)* | Connection state or remaining pause time (informational). |
+| **Update to …** | Appears when a new version is available: downloads and installs it (see [Updating](#updating)). |
 | **Settings…** | Opens the settings window. |
 | **Show camera** | Opens a preview window of the chosen camera right away, even while notifications are paused. Useful to check the picture or simply to look. |
 | **Pause notifications** | **For 15 minutes**, **For 1 hour**, or **Until resumed**. While paused, detections do not open windows. The item reads **Paused** while a pause is active, and **Resume now** ends it. |
@@ -147,6 +148,8 @@ Most changes take effect **immediately** on open preview windows, so you can see
 | **Test connection** | Checks the values entered above (Frigate, cameras, events, RTSP video and audio) without saving them. |
 | **Language** | Language of FrigatePiP. **Automatic (Windows)** follows the Windows display language; English is used when that language is not available. See [Language](#9-language). |
 | **Start FrigatePiP with Windows** | Starts FrigatePiP automatically when you sign in to Windows. |
+| **Check for updates** | Once a day FrigatePiP asks GitHub whether a new version exists and, if so, shows a notification and offers the update. Nothing about you or your cameras is sent. |
+| **Check now** / **Update to …** | Looks for a new version at once; when one is found, the button downloads and installs it (your settings are kept). The text next to it shows the result. |
 
 ### 6.2 Detection
 
@@ -226,6 +229,7 @@ All settings are stored in `%APPDATA%\FrigatePiP\config.ini` (a plain text file)
 | Section | Key | Default | Meaning |
 |---|---|---|---|
 | `[app]` | `language` | `auto` | `auto` (Windows language) or `en`, `pl`, `de`, `es`, `pt`, `fr`. |
+| | `check_updates` | `true` | Look for a new version once a day. |
 | `[frigate]` | `url` | `http://frigate.local:5000` | Frigate address. |
 | | `source` | `websocket` | `websocket` or `mqtt`. |
 | | `rtsp` | `rtsp://{host}:8554/{stream}` | RTSP address template. |
@@ -295,7 +299,7 @@ FrigatePiP is available in English, Polish, German, Spanish, Portuguese and Fren
 | Log | `%APPDATA%\FrigatePiP\frigate-pip.log` (up to 512 KB; the previous one is kept as `frigate-pip.old.log`) |
 | Autostart | Registry value `FrigatePiP` in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
-**Privacy:** FrigatePiP connects only to the addresses you enter (Frigate, go2rtc and the MQTT broker). It has no telemetry, no accounts and no cloud services. Pictures are only displayed and never saved. The **Help** links open this guide on GitHub in your browser.
+**Privacy:** FrigatePiP connects only to the addresses you enter (Frigate, go2rtc and the MQTT broker) and, unless you switch off **Check for updates**, once a day to GitHub to look for a new version. It has no telemetry, no accounts and no cloud services. Pictures are only displayed and never saved. The **Help** links open this guide on GitHub in your browser.
 
 **Resources:** while waiting for detections FrigatePiP uses practically no CPU and about 5–10 MB of memory. Video is decoded by the graphics card when possible. Without a usable graphics card (for example in some virtual machines) it draws with the WARP software renderer.
 
