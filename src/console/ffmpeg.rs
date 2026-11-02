@@ -103,15 +103,9 @@ impl Ffmpeg {
         c
     }
 
-    /// Output options: raw BGRA frames of `size` on stdout, without delay; only the part
-    /// `zoom` of the picture (at the stream's resolution, then scaled).
+    /// Output options: raw BGRA frames of `size` on stdout, without delay.
     fn raw_out(&self, c: &mut Command, size: (u32, u32), zoom: Zoom) {
-        let crop = if zoom.is_full() {
-            String::new()
-        } else {
-            format!("crop=iw*{s:.6}:ih*{s:.6}:iw*{x:.6}:ih*{y:.6},", s = zoom.size, x = zoom.x, y = zoom.y)
-        };
-        let filter = format!("{crop}scale={}:{}:flags=bilinear", size.0, size.1);
+        let filter = video_filter(size, zoom);
         c.args(["-an", "-vf", &filter, "-pix_fmt", "bgra", self.fps_flag, "passthrough", "-flush_packets", "1", "-f", "rawvideo", "pipe:1"]);
     }
 
@@ -184,6 +178,14 @@ impl Ffmpeg {
     }
 }
 
+/// The video filter: only the part `zoom` of the picture (cut at the stream's resolution),
+/// scaled to `size`.
+fn video_filter(size: (u32, u32), zoom: Zoom) -> String {
+    let crop =
+        if zoom.is_full() { String::new() } else { format!("crop=iw*{s:.6}:ih*{s:.6}:iw*{x:.6}:ih*{y:.6},", s = zoom.size, x = zoom.x, y = zoom.y) };
+    format!("{crop}scale={}:{}:flags=bilinear", size.0, size.1)
+}
+
 /// Reads frames of `size` until the end of the stream or until `on_frame` returns `false`.
 pub fn read_frames(mut out: ChildStdout, size: (u32, u32), mut on_frame: impl FnMut(Image) -> bool) {
     let n = (size.0 * size.1 * 4) as usize;
@@ -225,6 +227,15 @@ pub fn adts_header(asc: &[u8], frame_len: usize) -> Option<[u8; 7]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_filter_crops_before_scaling() {
+        assert_eq!(video_filter((480, 270), Zoom::FULL), "scale=480:270:flags=bilinear");
+        assert_eq!(
+            video_filter((480, 270), Zoom { x: 0.25, y: 0.5, size: 0.5 }),
+            "crop=iw*0.500000:ih*0.500000:iw*0.250000:ih*0.500000,scale=480:270:flags=bilinear"
+        );
+    }
 
     #[test]
     fn hwaccel_auto_means_the_main_stream_only() {

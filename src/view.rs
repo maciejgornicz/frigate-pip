@@ -84,6 +84,18 @@ fn union<'a>(base: impl Iterator<Item = &'a String>, extra: &'a [String]) -> Vec
     out
 }
 
+/// The caption of a window with its state: pinned, zoomed (the same on Windows and Linux).
+pub fn state_caption(caption: &str, pinned: bool, zoom: Zoom) -> String {
+    let mut text = caption.to_string();
+    if pinned {
+        text = format!("{text} · {}", i18n::t().overlay_pinned);
+    }
+    if let Some(z) = zoom.label() {
+        text = format!("{text} · {z}");
+    }
+    text
+}
+
 /// Zoom of a preview window (Ctrl + mouse wheel): the part of the picture that is shown —
 /// its left and top edge and its size, as fractions of the whole picture. The part keeps
 /// the picture's aspect ratio.
@@ -119,16 +131,6 @@ impl Zoom {
         Zoom { x: (px - u * size).clamp(0.0, 1.0 - size), y: (py - v * size).clamp(0.0, 1.0 - size), size }
     }
 
-    /// This part as seen in a picture that itself shows the part `outer` (an older zoom):
-    /// relative to `outer`, as far as `outer` covers it.
-    #[cfg_attr(windows, allow(dead_code))]
-    pub fn within(self, outer: Zoom) -> Zoom {
-        let size = (self.size / outer.size).min(1.0);
-        let x = ((self.x - outer.x) / outer.size).clamp(0.0, 1.0 - size);
-        let y = ((self.y - outer.y) / outer.size).clamp(0.0, 1.0 - size);
-        Zoom { x, y, size }
-    }
-
     /// For the caption: "2.4×" (nothing at 1×).
     pub fn label(self) -> Option<String> {
         (!self.is_full()).then(|| format!("{:.1}×", 1.0 / self.size))
@@ -157,17 +159,8 @@ mod tests {
         assert_eq!(z2.at(-40.0, 0.5, 0.5), Zoom::FULL);
         assert_eq!(Zoom::FULL.at(-1.0, 0.5, 0.5), Zoom::FULL);
         assert_eq!((z.label().as_deref(), Zoom::FULL.label()), (Some("1.6×"), None));
-    }
-
-    #[test]
-    fn zoom_inside_an_older_zoom() {
-        // The decoder shows the left half (2×); the window wants the second quarter (4×).
-        let outer = Zoom { x: 0.0, y: 0.0, size: 0.5 };
-        let inner = Zoom { x: 0.25, y: 0.25, size: 0.25 };
-        assert_eq!(inner.within(outer), Zoom { x: 0.5, y: 0.5, size: 0.5 });
-        assert_eq!(Zoom::FULL.within(Zoom::FULL), Zoom::FULL);
-        // Wider than what the decoder has: all of it, for now.
-        assert_eq!(Zoom::FULL.within(outer), Zoom::FULL);
+        assert_eq!(state_caption("Gate", false, Zoom { x: 0.0, y: 0.0, size: 0.5 }), "Gate · 2.0×");
+        assert_eq!(state_caption("Gate", false, Zoom::FULL), "Gate");
     }
 
     #[test]

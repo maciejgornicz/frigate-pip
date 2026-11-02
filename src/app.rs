@@ -888,14 +888,7 @@ impl App {
     }
 
     fn popup_text(p: &Popup) -> String {
-        let mut text = p.base_text.clone();
-        if p.pinned {
-            text = format!("{text} · {}", t().overlay_pinned);
-        }
-        if let Some(zoom) = p.shared.zoom().label() {
-            text = format!("{text} · {zoom}");
-        }
-        text
+        crate::view::state_caption(&p.base_text, p.pinned, p.shared.zoom())
     }
 
     fn create_popup(

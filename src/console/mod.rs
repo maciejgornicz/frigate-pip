@@ -732,6 +732,9 @@ struct Win {
     /// The part of the picture shown (Ctrl + wheel), and the part the decoder delivers.
     zoom: Zoom,
     dec_zoom: Zoom,
+    /// A decoder restarted after the wheel: it takes over at its first live picture, the old
+    /// one plays until then (no frozen picture while the new one waits for a key frame).
+    next: Option<(Arc<video::Shared>, Instant)>,
     last_draw: Option<Instant>,
     /// Desktop windows: the mouse is over it, pinned with a click, dragged by the user.
     hovered: bool,
@@ -739,6 +742,16 @@ struct Win {
     user_moved: bool,
     /// Sound state last given to the output (see `Output::set_sound`).
     sound: u8,
+}
+
+impl Win {
+    /// Stops the window's video (and a decoder waiting to take over).
+    fn stop(&self) {
+        self.shared.cancel.cancel();
+        if let Some((next, _)) = &self.next {
+            next.cancel.cancel();
+        }
+    }
 }
 
 struct App {
@@ -1137,13 +1150,11 @@ impl App {
                 let _ = tx.send(Ev::Wake);
             }),
         );
-        shared.muted.store(w.shared.muted.load(Ordering::Relaxed), Ordering::Relaxed);
-        // The last picture stays on the screen until the new one comes.
-        if let Some(frame) = w.shared.frame.lock().unwrap().clone() {
-            *shared.frame.lock().unwrap() = Some(frame);
+        // Silent until it takes over: the old decoder still plays (see `draw`).
+        shared.muted.store(true, Ordering::Relaxed);
+        if let Some((waiting, _)) = w.next.replace((shared, Instant::now())) {
+            waiting.cancel.cancel();
         }
-        w.shared.cancel.cancel();
-        w.shared = shared;
         w.dec_size = w.size;
         w.dec_zoom = w.zoom;
         let zoom = w.zoom.label().map(|z| format!(", zoom {z}")).unwrap_or_default();
@@ -1252,6 +1263,7 @@ impl App {
             resized: None,
             zoom: Zoom::FULL,
             dec_zoom: Zoom::FULL,
+            next: None,
             last_draw: None,
             hovered: false,
             pinned: false,
@@ -1313,6 +1325,19 @@ impl App {
         let min_gap = self.out.min_interval();
         let buttons = self.out.buttons();
         for w in &mut self.wins {
+            // A restarted decoder takes over at its first live picture (a picture of any kind
+            // when the old one has none live, or after 5 s).
+            let ready = w.next.as_ref().is_some_and(|(next, since)| {
+                next.frame.lock().unwrap().is_some()
+                    && (next.live.load(Ordering::Relaxed) || !w.shared.live.load(Ordering::Relaxed) || since.elapsed() > Duration::from_secs(5))
+            });
+            if ready {
+                if let Some((next, _)) = w.next.take() {
+                    next.muted.store(w.shared.muted.load(Ordering::Relaxed), Ordering::Relaxed);
+                    next.dirty.store(true, Ordering::Relaxed);
+                    std::mem::replace(&mut w.shared, next).cancel.cancel();
+                }
+            }
             let Some(rect) = w.rect else { continue };
             let muted = w.shared.muted.load(Ordering::Relaxed);
             let sound = match (self.cfg.camera_audio && w.shared.audio.load(Ordering::Relaxed), muted) {
@@ -1331,12 +1356,9 @@ impl App {
                 continue;
             };
             // A new zoom shows at once from the pictures the decoder delivers now.
-            let frame = if w.zoom == frame_zoom { frame } else { frame.zoomed(w.zoom.within(frame_zoom)) };
+            let frame = frame.zoomed(frame_zoom, w.zoom);
             let caption = if self.cfg.overlay || caption_h > 0 {
-                let mut base = if w.pinned { format!("{} · {}", w.caption, t().overlay_pinned) } else { w.caption.clone() };
-                if let Some(zoom) = w.zoom.label() {
-                    base = format!("{base} · {zoom}");
-                }
+                let base = crate::view::state_caption(&w.caption, w.pinned, w.zoom);
                 // Desktop windows show a muted speaker instead.
                 with_sound(&base, muted && self.cfg.camera_audio && !buttons)
             } else {
@@ -1359,8 +1381,7 @@ impl App {
         // Windows closed by the user in another process (tmux popups).
         let gone: Vec<usize> = (0..self.wins.len()).filter(|&i| !self.out.alive(self.wins[i].id)).collect();
         for i in gone.into_iter().rev() {
-            let w = self.wins.remove(i);
-            w.shared.cancel.cancel();
+            self.wins.remove(i).stop();
         }
         let now = Instant::now();
         // A window under the mouse or pinned stays (desktop windows).
@@ -1396,7 +1417,7 @@ impl App {
 
     fn close_quiet(&mut self, i: usize) {
         let w = self.wins.remove(i);
-        w.shared.cancel.cancel();
+        w.stop();
         self.out.clear(w.id);
         crate::log!("{}: closed", w.camera);
     }
