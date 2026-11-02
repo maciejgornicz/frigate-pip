@@ -34,7 +34,7 @@ pub type OnAutostart = Arc<dyn Fn(bool) + Send + Sync>;
 pub fn start(path: PathBuf, info: Arc<Mutex<Info>>, on_autostart: OnAutostart) -> Result<Web, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("settings page: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let token = format!("{:016x}{:016x}", crate::util::random_u64(), crate::util::random_u64());
+    let token = token()?;
     let url = format!("http://127.0.0.1:{port}/{token}/");
     std::thread::Builder::new()
         .name("settings-page".into())
@@ -50,6 +50,14 @@ pub fn start(path: PathBuf, info: Arc<Mutex<Info>>, on_autostart: OnAutostart) -
         })
         .map_err(|e| e.to_string())?;
     Ok(Web { url })
+}
+
+/// The key in the page address: 128 bits from the system's random source (not the
+/// program's quick generator, whose numbers also travel over the network).
+fn token() -> Result<String, String> {
+    let mut b = [0u8; 16];
+    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).map_err(|e| format!("settings page: /dev/urandom: {e}"))?;
+    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
 struct Request {
@@ -219,10 +227,17 @@ const FIELDS: [&str; 26] = [
 /// form had it. Lists of checkboxes: everything checked = everything (also cameras and
 /// objects added to Frigate later), as on Windows.
 fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> Option<bool> {
-    let last = |name: &str| form.iter().rev().find(|(k, _)| k == name).map(|(_, v)| v.trim().to_string());
+    // Credentials exactly as typed (spaces included); the rest without outer spaces.
+    let last = |name: &str| {
+        form.iter()
+            .rev()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| if matches!(name, "mqtt.user" | "mqtt.password") { v.clone() } else { v.trim().to_string() })
+    };
     for f in FIELDS.iter().chain(["video.prebuffer", "video.camera_audio"].iter()) {
         if let (Some(v), Some((section, key))) = (last(f), f.split_once('.')) {
-            doc.set(section, key, &v);
+            // Quoted when needed: "abc #def" must not lose its end as a comment.
+            doc.set(section, key, &config::ini_value(&v));
         }
     }
     if let Some(v) = last("trigger.min_score") {
@@ -604,6 +619,25 @@ mod tests {
         // A bad number keeps the default.
         assert_eq!(c.width, 480);
         assert!(doc.to_text().contains("; FrigatePiP settings"));
+    }
+
+    #[test]
+    fn credentials_are_kept_exactly() {
+        let mut doc = IniDoc::parse(config::DEFAULT_INI);
+        let form = parse_form("mqtt.user=+me+&mqtt.password=+ab%3Bc+%23d+&frigate.url=+http%3A%2F%2Fx%3A5000+");
+        apply(&form, &mut doc, &[]);
+        let c = Config::from_ini(&doc);
+        assert_eq!((c.mqtt_user.as_str(), c.mqtt_password.as_str(), c.url.as_str()), (" me ", " ab;c #d ", "http://x:5000"));
+        // Saved again (e.g. another setting changed): still the same.
+        let c2 = Config::from_ini(&IniDoc::parse(&doc.to_text()));
+        assert_eq!(c2.mqtt_password, " ab;c #d ");
+    }
+
+    #[test]
+    fn page_key_is_random() {
+        let (a, b) = (token().unwrap(), token().unwrap());
+        assert_eq!(a.len(), 32);
+        assert_ne!(a, b);
     }
 
     #[test]

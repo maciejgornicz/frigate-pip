@@ -377,9 +377,19 @@ fn flag(b: bool) -> &'static str {
     }
 }
 
+/// A value as written to config.ini: quoted when it holds a comment sign or spaces at
+/// either end, so that it reads back unchanged (passwords, names).
+pub fn ini_value(v: &str) -> String {
+    if v.contains([';', '#']) || v != v.trim() {
+        format!("\"{v}\"")
+    } else {
+        v.to_string()
+    }
+}
+
 /// Writes all settings to the INI document (existing lines and comments are kept).
 pub fn write_all(c: &Config, d: &mut IniDoc) {
-    let quoted = |v: &str| if v.contains([';', '#']) || v != v.trim() { format!("\"{v}\"") } else { v.to_string() };
+    let quoted = ini_value;
     let pairs: [(&str, &str, String); 34] = [
         ("frigate", "url", c.url.clone()),
         ("frigate", "source", c.source.key().into()),

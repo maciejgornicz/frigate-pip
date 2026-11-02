@@ -161,10 +161,12 @@ fn u32le(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
 }
 
-/// Display number from DISPLAY (":0", ":0.0", "unix:1"); remote displays (host:0) are not supported.
-pub fn display_number(display: &str) -> Option<u32> {
+/// Display and screen number from DISPLAY (":0", ":0.1", "unix:1"); remote displays
+/// (host:0) are not supported.
+pub fn display_number(display: &str) -> Option<(u32, usize)> {
     let rest = display.strip_prefix("unix").unwrap_or(display).strip_prefix(':')?;
-    rest.split('.').next()?.parse().ok()
+    let (number, screen) = rest.split_once('.').unwrap_or((rest, "0"));
+    Some((number.parse().ok()?, screen.parse().ok()?))
 }
 
 /// MIT-MAGIC-COOKIE-1 for display `number` from an .Xauthority file: (name, data).
@@ -224,10 +226,10 @@ struct Setup {
     root_size: (u32, u32),
 }
 
-/// Parses the connection setup reply (after its 8-byte header). Only the usual
-/// little-endian 24-bit colour with 32 bits per pixel is supported (that is what our
+/// Parses the connection setup reply (after its 8-byte header) for screen `index`. Only the
+/// usual little-endian 24-bit colour with 32 bits per pixel is supported (that is what our
 /// BGRA pictures are).
-fn parse_setup(b: &[u8]) -> Result<Setup, String> {
+fn parse_setup(b: &[u8], index: usize) -> Result<Setup, String> {
     let short = || "short X11 setup reply".to_string();
     if b.len() < 32 {
         return Err(short());
@@ -239,8 +241,25 @@ fn parse_setup(b: &[u8]) -> Result<Setup, String> {
         return Err("X server with big-endian images is not supported".into());
     }
     let formats_at = 32 + vendor_len.div_ceil(4) * 4;
-    let screen = formats_at + formats * 8;
-    if screens == 0 || b.len() < screen + 40 {
+    if index >= screens as usize {
+        return Err(format!("the X display has no screen {index}"));
+    }
+    // Screen records follow each other: 40 bytes, then their depths with their visuals.
+    let mut screen = formats_at + formats * 8;
+    for _ in 0..index {
+        if b.len() < screen + 40 {
+            return Err(short());
+        }
+        let mut at = screen + 40;
+        for _ in 0..b[screen + 39] {
+            if at + 8 > b.len() {
+                return Err(short());
+            }
+            at += 8 + u16le(b, at + 2) as usize * 24;
+        }
+        screen = at;
+    }
+    if b.len() < screen + 40 {
         return Err(short());
     }
     let bpp24 = (0..formats).map(|i| &b[formats_at + i * 8..]).find(|f| f[0] == 24).map(|f| f[1]);
@@ -339,7 +358,7 @@ impl X11 {
     /// Connects to the display in DISPLAY; `on_event` is called on the reader thread.
     pub fn connect(on_event: impl Fn(Event) + Send + 'static) -> Result<X11, String> {
         let display = std::env::var("DISPLAY").map_err(|_| "no desktop (DISPLAY is not set)".to_string())?;
-        let number = display_number(&display).ok_or_else(|| format!("DISPLAY={display}: only local displays are supported"))?;
+        let (number, screen) = display_number(&display).ok_or_else(|| format!("DISPLAY={display}: only local displays are supported"))?;
         let mut s = socket(number).map_err(|e| format!("X display {display}: {e}"))?;
         let auth_file = std::env::var_os("XAUTHORITY")
             .map(std::path::PathBuf::from)
@@ -352,7 +371,7 @@ impl X11 {
         let mut body = vec![0; u16le(&head, 6) as usize * 4];
         s.read_exact(&mut body).map_err(|e| e.to_string())?;
         let setup = match head[0] {
-            1 => parse_setup(&body)?,
+            1 => parse_setup(&body, screen)?,
             0 => {
                 let why = String::from_utf8_lossy(&body[..(head[1] as usize).min(body.len())]).into_owned();
                 return Err(format!("X display {display} refused the connection: {}", why.trim()));
@@ -659,9 +678,10 @@ mod tests {
 
     #[test]
     fn display_names() {
-        assert_eq!(display_number(":0"), Some(0));
-        assert_eq!(display_number(":1.0"), Some(1));
-        assert_eq!(display_number("unix:2"), Some(2));
+        assert_eq!(display_number(":0"), Some((0, 0)));
+        assert_eq!(display_number(":1.0"), Some((1, 0)));
+        assert_eq!(display_number(":0.1"), Some((0, 1)));
+        assert_eq!(display_number("unix:2"), Some((2, 0)));
         assert_eq!(display_number("localhost:10.0"), None);
         assert_eq!(display_number(""), None);
     }
@@ -718,10 +738,18 @@ mod tests {
         visual[12..16].copy_from_slice(&0xFF00u32.to_le_bytes());
         visual[16..20].copy_from_slice(&0xFFu32.to_le_bytes());
         b.extend(visual);
-        let s = parse_setup(&b).unwrap();
+        let s = parse_setup(&b, 0).unwrap();
         assert_eq!((s.root, s.root_size, s.max_request, s.id_base), (0x1234, (1920, 1080), 262140, 0x0040_0000));
+        assert!(parse_setup(&b, 1).unwrap_err().contains("no screen 1"));
+        // A second screen: the first record (one depth, one visual) is skipped.
+        let first = b[44..].to_vec();
+        b[20] = 2;
+        let mut second = first.clone();
+        second[0..4].copy_from_slice(&0x5678u32.to_le_bytes());
+        b.extend(second);
+        assert_eq!(parse_setup(&b, 1).map(|s| s.root), Ok(0x5678));
         b[22] = 1;
-        assert!(parse_setup(&b).is_err());
+        assert!(parse_setup(&b, 0).is_err());
     }
 
     /// Needs an X server: `DISPLAY=:5 cargo test --release -- --ignored fullscreen` (e.g. Xvfb).
