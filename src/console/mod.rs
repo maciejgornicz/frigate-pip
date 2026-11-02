@@ -21,7 +21,7 @@ use crate::frigate::{self, CameraInfo, Notice};
 use crate::hub::Hub;
 use crate::i18n::{self, t};
 use crate::util::Cancel;
-use crate::view::{choose_slot, choose_stream, Slot};
+use crate::view::{choose_slot, choose_stream, Slot, Zoom};
 use canvas::Image;
 use ffmpeg::Ffmpeg;
 use std::collections::HashMap;
@@ -117,6 +117,8 @@ pub enum Action {
     Moved(i32, i32),
     /// The mouse wheel: bigger (+1) or smaller (-1).
     Wheel(i32),
+    /// Ctrl + mouse wheel: zoom in (+1) or out (-1) around this point of the window (0–1).
+    Zoom(i32, f32, f32),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -190,8 +192,9 @@ Usage: frigate-pip [options]
 Where the windows appear (--output):
   window       On the desktop (X11, or Wayland with XWayland): borderless windows above
                the others in a corner of the screen; runs in the background. Mouse: x
-               closes, the speaker mutes, drag moves, the wheel resizes, a click pins,
-               a double click opens the camera in Frigate, the right button closes.
+               closes, the speaker mutes, drag moves, the wheel resizes, Ctrl + wheel
+               zooms the picture around the mouse, a click pins, a double click opens
+               the camera in Frigate, the right button closes.
                A tray icon has the menu known from Windows; the settings open in the
                browser.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
@@ -654,6 +657,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         main: args.iter().any(|a| a == "--view-main"),
         live: cfg.live,
         size,
+        zoom: Zoom::FULL,
         audio: cfg.camera_audio,
         t0: Instant::now(),
     };
@@ -682,7 +686,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
             continue;
         }
         let frame = shared.frame.lock().unwrap().clone();
-        if let Some(frame) = frame {
+        if let Some((frame, _)) = frame {
             let text = with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed));
             out.draw(1, rect, frame, &text, shared.live.load(Ordering::Relaxed));
             last = Some(Instant::now());
@@ -723,8 +727,11 @@ struct Win {
     /// Picture size the decoder was started with, and its go2rtc stream.
     dec_size: (u32, u32),
     stream: Option<String>,
-    /// Resized with the wheel: the decoder follows once the wheel stops.
+    /// Resized or zoomed with the wheel: the decoder follows once the wheel stops.
     resized: Option<Instant>,
+    /// The part of the picture shown (Ctrl + wheel), and the part the decoder delivers.
+    zoom: Zoom,
+    dec_zoom: Zoom,
     last_draw: Option<Instant>,
     /// Desktop windows: the mouse is over it, pinned with a click, dragged by the user.
     hovered: bool,
@@ -1076,6 +1083,11 @@ impl App {
                     (r.x, r.y) = (x, y);
                 }
             }
+            Action::Zoom(notches, u, v) => {
+                w.zoom = w.zoom.at(notches as f32, u, v);
+                // At once from the current pictures; sharp once the wheel stops.
+                w.resized = Some(Instant::now());
+            }
             Action::Wheel(step) => {
                 // Like on Windows: 12 % per notch, from 160 px to the width of the screen.
                 let scale = self.out.scale();
@@ -1100,7 +1112,7 @@ impl App {
         w.shared.dirty.store(true, Ordering::Relaxed);
     }
 
-    /// The decoder of window `i` again, at the window's current size (after the wheel).
+    /// The decoder of window `i` again, at the window's current size and zoom (after the wheel).
     fn restart_video(&mut self, i: usize) {
         let main = self.is_main(&self.wins[i].camera, self.wins[i].stream.as_deref());
         let hub = self.hubs.get(&self.wins[i].camera).cloned();
@@ -1113,6 +1125,7 @@ impl App {
             main,
             live: self.cfg.live,
             size: w.size,
+            zoom: w.zoom,
             audio: self.cfg.camera_audio,
             t0: Instant::now(),
         };
@@ -1132,7 +1145,9 @@ impl App {
         w.shared.cancel.cancel();
         w.shared = shared;
         w.dec_size = w.size;
-        crate::log!("{}: video resized to {}x{}", w.camera, w.size.0, w.size.1);
+        w.dec_zoom = w.zoom;
+        let zoom = w.zoom.label().map(|z| format!(", zoom {z}")).unwrap_or_default();
+        crate::log!("{}: video {}x{}{zoom}", w.camera, w.size.0, w.size.1);
     }
 
     /// A camera at once (`--test`, number keys): like a detection, also while paused.
@@ -1207,6 +1222,7 @@ impl App {
                     main,
                     live: self.cfg.live,
                     size,
+                    zoom: Zoom::FULL,
                     audio: self.cfg.camera_audio,
                     t0,
                 };
@@ -1234,6 +1250,8 @@ impl App {
             dec_size: size,
             stream,
             resized: None,
+            zoom: Zoom::FULL,
+            dec_zoom: Zoom::FULL,
             last_draw: None,
             hovered: false,
             pinned: false,
@@ -1309,11 +1327,16 @@ impl App {
             if w.last_draw.is_some_and(|t| t.elapsed() < min_gap) || !w.shared.dirty.swap(false, Ordering::Relaxed) {
                 continue;
             }
-            let Some(frame) = w.shared.frame.lock().unwrap().clone() else {
+            let Some((frame, frame_zoom)) = w.shared.frame.lock().unwrap().clone() else {
                 continue;
             };
+            // A new zoom shows at once from the pictures the decoder delivers now.
+            let frame = if w.zoom == frame_zoom { frame } else { frame.zoomed(w.zoom.within(frame_zoom)) };
             let caption = if self.cfg.overlay || caption_h > 0 {
-                let base = if w.pinned { format!("{} · {}", w.caption, t().overlay_pinned) } else { w.caption.clone() };
+                let mut base = if w.pinned { format!("{} · {}", w.caption, t().overlay_pinned) } else { w.caption.clone() };
+                if let Some(zoom) = w.zoom.label() {
+                    base = format!("{base} · {zoom}");
+                }
                 // Desktop windows show a muted speaker instead.
                 with_sound(&base, muted && self.cfg.camera_audio && !buttons)
             } else {
@@ -1347,7 +1370,10 @@ impl App {
             self.close(i);
         }
         let settled: Vec<usize> = (0..self.wins.len())
-            .filter(|&i| self.wins[i].resized.is_some_and(|t| t.elapsed() > Duration::from_millis(700)) && self.wins[i].dec_size != self.wins[i].size)
+            .filter(|&i| {
+                let w = &self.wins[i];
+                w.resized.is_some_and(|t| t.elapsed() > Duration::from_millis(700)) && (w.dec_size != w.size || w.dec_zoom != w.zoom)
+            })
             .collect();
         for i in settled {
             self.wins[i].resized = None;

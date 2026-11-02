@@ -4,7 +4,7 @@
 //! pins, a double click opens the camera in Frigate, the right button closes.
 
 use super::canvas::{Font, Image};
-use super::x11::{Event, Monitor, BUTTON1_MASK, X11};
+use super::x11::{Event, Monitor, BUTTON1_MASK, CONTROL_MASK, X11};
 use super::{Action, Output, Rect};
 use std::collections::HashMap;
 
@@ -351,6 +351,11 @@ impl Output for Desktop {
                 }
             }
             Event::Release { button: 3, .. } => actions.push(Action::Close),
+            // Ctrl + wheel: the picture zooms in (4) or out (5) around the mouse.
+            Event::Press { button: button @ (4 | 5), x, y, state, .. } if state & CONTROL_MASK != 0 => {
+                let (u, v) = (x as f32 / w.rect.w.max(1) as f32, y as f32 / w.rect.h.max(1) as f32);
+                actions.push(Action::Zoom(if button == 4 { 1 } else { -1 }, u, v));
+            }
             // The wheel: 4 = up (bigger), 5 = down (smaller).
             Event::Press { button: 4, .. } => actions.push(Action::Wheel(1)),
             Event::Press { button: 5, .. } => actions.push(Action::Wheel(-1)),

@@ -7,6 +7,7 @@ use crate::hub::{Feed, Hub, Sink};
 use crate::render::{Overlay, Renderer};
 use crate::rtp::{AccessUnit, VideoTrack};
 use crate::util::Cancel;
+use crate::view::Zoom;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -42,6 +43,8 @@ pub struct Shared {
     dirty: AtomicBool,
     /// Camera audio of this window and its mute button.
     pub sound: Arc<Sound>,
+    /// The part of the picture that is shown (Ctrl + mouse wheel).
+    zoom: Mutex<Zoom>,
 }
 
 impl Shared {
@@ -53,6 +56,7 @@ impl Shared {
             close_button: AtomicU8::new(0),
             dirty: AtomicBool::new(false),
             sound: Arc::default(),
+            zoom: Mutex::new(Zoom::FULL),
         })
     }
 
@@ -73,6 +77,15 @@ impl Shared {
         if self.close_button.swap(state, Ordering::Relaxed) != state {
             self.dirty.store(true, Ordering::Relaxed);
         }
+    }
+
+    pub fn zoom(&self) -> Zoom {
+        *self.zoom.lock().unwrap()
+    }
+
+    pub fn set_zoom(&self, zoom: Zoom) {
+        *self.zoom.lock().unwrap() = zoom;
+        self.dirty.store(true, Ordering::Relaxed);
     }
 
     pub fn request_redraw(&self) {
@@ -309,6 +322,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             (true, false) => 1,
             (true, true) => 2,
         },
+        zoom: shared.zoom(),
     };
     let _ = r.redraw(&overlay_text(false));
 

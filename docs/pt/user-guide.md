@@ -117,6 +117,7 @@ As janelas de pré-visualização nunca recebem o foco do teclado, por isso não
 | **Arrastar** | Move a janela. Fica onde a colocar até se fechar. |
 | **Clique** | **Fixa** a janela: fica aberta até a fechar (a legenda mostra *fixada*). Clique novamente para a desafixar. |
 | **Roda do rato** | Aumenta ou diminui a janela. |
+| **Ctrl + roda do rato** | Aproxima (até 8×) ou afasta a imagem em torno do ponteiro; a legenda mostra o zoom, p. ex. *2.0×*. O detalhe depende do stream: o stream main (`stream = main`) é o que tem mais. |
 | **×** (canto superior direito) | Fecha a janela de imediato. O botão aparece quando aponta o rato para a janela. |
 | **Altifalante** (à esquerda do ×) | Desliga o som da janela; outro clique volta a ligá-lo. O botão aparece quando aponta para uma janela que reproduz o áudio da câmara; enquanto o som estiver desligado, o altifalante riscado continua visível. |
 | **Clique direito** | Fecha a janela. |
@@ -414,7 +415,7 @@ Num ambiente de trabalho Linux, as janelas de pré-visualização funcionam como
 - **Iniciar:** menu de aplicações → **FrigatePiP** (instalado com o apt) ou `frigate-pip` num terminal do ambiente de trabalho. Funciona em segundo plano, sem terminal; funciona uma cópia por utilizador. Um segundo arranque (ou `frigate-pip --settings`) abre as configurações da cópia em execução.
 - **Com a sessão do ambiente de trabalho:** `frigate-pip --autostart on` (para desligar: `frigate-pip --autostart off`). Para parar: `frigate-pip --quit`.
 - **Ícone na área de notificação:** com o mesmo menu que no Windows (ver [O ícone na área de notificação](#4-o-ícone-na-área-de-notificação)); a cor mostra o estado: azul — ligado, cinzento — sem ligação, âmbar — em pausa. Aparece no KDE Plasma, Xfce, Cinnamon, MATE e Budgie, e no GNOME com a extensão AppIndicator (incluída no Ubuntu).
-- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, arrastar move a janela, a roda redimensiona-a, um clique fixa-a, um duplo clique abre a câmara no Frigate e uma janela sob o ponteiro não se fecha.
+- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, arrastar move a janela, a roda redimensiona-a, Ctrl + roda aproxima a imagem em torno do ponteiro, um clique fixa-a, um duplo clique abre a câmara no Frigate e uma janela sob o ponteiro não se fecha.
 - **Opções das janelas:** `topmost` (com `false`, as janelas são janelas normais que outras podem tapar), `sound` (o som de notificação do ambiente de trabalho) e `skip_fullscreen` (nada enquanto a janela ativa estiver em ecrã inteiro) funcionam como no Windows.
 - **Configurações:** um clique no ícone (ou **Configurações…** no seu menu) abre-as no navegador, com as mesmas opções, descrições e teste de ligação que no Windows; a página só se abre neste computador. No primeiro arranque abre-se sozinha. São guardadas em `~/.config/frigate-pip/config.ini` (descrito abaixo).
 

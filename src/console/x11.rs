@@ -23,6 +23,8 @@ pub enum Event {
         root_x: i32,
         root_y: i32,
         time: u32,
+        /// Modifier keys and buttons held (`CONTROL_MASK`…).
+        state: u16,
     },
     Release {
         window: u32,
@@ -64,6 +66,8 @@ pub enum Event {
 
 /// Button 1 held during a motion (`Event::Motion::buttons`).
 pub const BUTTON1_MASK: u16 = 0x100;
+/// Ctrl held during a button press (`Event::Press::state`).
+pub const CONTROL_MASK: u16 = 0x4;
 
 /// A monitor from RandR, in screen pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -293,7 +297,7 @@ fn parse_event(code: u8, b: &[u8; 32], root: u32) -> Option<Event> {
     // Crossing events caused by grabs (e.g. while a button is held) are not real.
     let normal = b[30] == 0;
     Some(match code {
-        4 => Event::Press { window, button: b[1], x, y, root_x: rx, root_y: ry, time: u32le(b, 4) },
+        4 => Event::Press { window, button: b[1], x, y, root_x: rx, root_y: ry, time: u32le(b, 4), state: u16le(b, 28) },
         5 => Event::Release { window, button: b[1], x, y, root_x: rx, root_y: ry },
         6 => Event::Motion { window, x, y, root_x: rx, root_y: ry, buttons: u16le(b, 28) },
         7 if normal => Event::Enter { window },

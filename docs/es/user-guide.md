@@ -117,6 +117,7 @@ Las ventanas de vista previa nunca toman el foco del teclado, por lo que no inte
 | **Arrastrar** | Mueve la ventana. Se queda donde la coloque hasta que se cierre. |
 | **Clic** | **Fija** la ventana: permanece abierta hasta que usted la cierre (el texto muestra *fijada*). Haga clic de nuevo para dejar de fijarla. |
 | **Rueda del mouse** | Agranda o reduce la ventana. |
+| **Ctrl + rueda del mouse** | Acerca (hasta 8×) o aleja la imagen alrededor del puntero; el texto muestra el zoom, p. ej. *2.0×*. El detalle depende del flujo: el flujo main (`stream = main`) es el que más tiene. |
 | **×** (esquina superior derecha) | Cierra la ventana al instante. El botón aparece al señalar la ventana con el mouse. |
 | **Altavoz** (a la izquierda de ×) | Silencia la ventana; otro clic vuelve a activar el sonido. El botón aparece al señalar una ventana que reproduce el audio de la cámara; mientras el sonido está desactivado, el altavoz tachado permanece visible. |
 | **Clic derecho** | Cierra la ventana. |
@@ -414,7 +415,7 @@ En un escritorio Linux, las ventanas de vista previa funcionan como en Windows: 
 - **Inicio:** menú de aplicaciones → **FrigatePiP** (instalado con apt) o `frigate-pip` en un terminal del escritorio. Se ejecuta en segundo plano sin terminal; se ejecuta una copia por usuario. Un segundo inicio (o `frigate-pip --settings`) abre la configuración de la copia en ejecución.
 - **Con la sesión del escritorio:** `frigate-pip --autostart on` (para desactivarlo: `frigate-pip --autostart off`). Para detenerlo: `frigate-pip --quit`.
 - **Icono en la bandeja:** con el mismo menú que en Windows (consulte [El icono de la bandeja](#4-el-icono-de-la-bandeja)); su color muestra el estado: azul — conectado, gris — sin conexión, ámbar — en pausa. Aparece en KDE Plasma, Xfce, Cinnamon, MATE y Budgie, y en GNOME con la extensión AppIndicator (incluida en Ubuntu).
-- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, arrastrar mueve la ventana, la rueda cambia su tamaño, un clic la fija, un doble clic abre la cámara en Frigate y una ventana bajo el puntero no se cierra.
+- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, arrastrar mueve la ventana, la rueda cambia su tamaño, Ctrl + rueda acerca la imagen alrededor del puntero, un clic la fija, un doble clic abre la cámara en Frigate y una ventana bajo el puntero no se cierra.
 - **Opciones de las ventanas:** `topmost` (con `false`, las ventanas son ventanas normales que otras pueden tapar), `sound` (el sonido de notificación del escritorio) y `skip_fullscreen` (nada mientras la ventana activa está a pantalla completa) funcionan como en Windows.
 - **Configuración:** un clic en el icono (o **Configuración…** en su menú) la abre en el navegador, con las mismas opciones, descripciones y prueba de conexión que en Windows; la página solo se abre en este equipo. En el primer inicio se abre sola. Se guarda en `~/.config/frigate-pip/config.ini` (descrito más abajo).
 

@@ -1,5 +1,7 @@
 //! Pictures in memory (BGRA) and the caption drawn on them.
 
+use crate::view::Zoom;
+
 /// Picture in BGRA, 4 bytes per pixel, rows without padding.
 #[derive(Clone)]
 pub struct Image {
@@ -9,6 +11,37 @@ pub struct Image {
 }
 
 impl Image {
+    /// The part `z` of the picture, scaled up to the whole picture (bilinear).
+    pub fn zoomed(&self, z: Zoom) -> Image {
+        if z.is_full() || self.w == 0 || self.h == 0 {
+            return self.clone();
+        }
+        let (w, h) = (self.w, self.h);
+        let mut out = Image::new(w, h);
+        let (x0, y0) = (z.x * w as f32, z.y * h as f32);
+        // Source position of the centre of output pixel `i`.
+        let src = |origin: f32, i: u32, max: u32| (origin + (i as f32 + 0.5) * z.size - 0.5).clamp(0.0, (max - 1) as f32);
+        for y in 0..h {
+            let fy = src(y0, y, h);
+            let (ya, ty) = (fy as u32, fy.fract());
+            let yb = (ya + 1).min(h - 1);
+            for x in 0..w {
+                let fx = src(x0, x, w);
+                let (xa, tx) = (fx as u32, fx.fract());
+                let xb = (xa + 1).min(w - 1);
+                let at = |px: u32, py: u32| ((py * w + px) * 4) as usize;
+                let (a, b, c, d) = (at(xa, ya), at(xb, ya), at(xa, yb), at(xb, yb));
+                let o = at(x, y);
+                for k in 0..4 {
+                    let top = self.data[a + k] as f32 * (1.0 - tx) + self.data[b + k] as f32 * tx;
+                    let bottom = self.data[c + k] as f32 * (1.0 - tx) + self.data[d + k] as f32 * tx;
+                    out.data[o + k] = (top * (1.0 - ty) + bottom * ty).round() as u8;
+                }
+            }
+        }
+        out
+    }
+
     pub fn new(w: u32, h: u32) -> Image {
         Image { w, h, data: vec![0; (w * h * 4) as usize] }
     }
@@ -271,6 +304,25 @@ impl Font {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoomed_picture() {
+        // 8×2: left half black, right half white; the right half zoomed 2× is white (the
+        // first column blends a little of the black edge, as bilinear scaling does).
+        let mut img = Image::new(8, 2);
+        for y in 0..2 {
+            for x in 4..8 {
+                img.data[((y * 8 + x) * 4) as usize..][..4].copy_from_slice(&[255; 4]);
+            }
+        }
+        let z = img.zoomed(Zoom { x: 0.5, y: 0.0, size: 0.5 });
+        assert_eq!((z.w, z.h), (8, 2));
+        for y in 0..2 {
+            assert!(z.data[(y * 8 * 4 + 4) as usize..((y + 1) * 8 * 4) as usize].iter().all(|&b| b == 255));
+            assert!(z.data[(y * 8 * 4) as usize] > 128);
+        }
+        assert_eq!(img.zoomed(Zoom::FULL).data, img.data);
+    }
 
     #[test]
     fn resize_averages_when_shrinking() {

@@ -9,6 +9,7 @@ use crate::hub::{Feed, Hub};
 use crate::rtp::{AccessUnit, Codec, VideoTrack};
 use crate::rtsp::{self, Media};
 use crate::util::Cancel;
+use crate::view::Zoom;
 use std::cell::RefCell;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,7 +20,8 @@ use std::time::{Duration, Instant};
 /// State shared between the window's threads and the screen loop.
 #[derive(Default)]
 pub struct Shared {
-    pub frame: Mutex<Option<Image>>,
+    /// The newest picture and the part of the camera picture it shows.
+    pub frame: Mutex<Option<(Image, Zoom)>>,
     /// A new frame (or caption) waits to be drawn.
     pub dirty: AtomicBool,
     /// The frame comes from live video (red dot).
@@ -42,6 +44,8 @@ pub struct Params {
     pub live: LiveMode,
     /// Picture size in pixels.
     pub size: (u32, u32),
+    /// The part of the camera picture to show (Ctrl + mouse wheel).
+    pub zoom: Zoom,
     pub audio: bool,
     pub t0: Instant,
 }
@@ -76,8 +80,8 @@ pub fn start(p: Params, ff: Arc<Ffmpeg>, wake: Wake) -> Arc<Shared> {
     shared
 }
 
-fn store(shared: &Shared, img: Image, live: bool, wake: &Wake) {
-    *shared.frame.lock().unwrap() = Some(img);
+fn store(shared: &Shared, img: Image, zoom: Zoom, live: bool, wake: &Wake) {
+    *shared.frame.lock().unwrap() = Some((img, zoom));
     shared.live.store(live, Ordering::Relaxed);
     shared.dirty.store(true, Ordering::Relaxed);
     wake();
@@ -85,20 +89,20 @@ fn store(shared: &Shared, img: Image, live: bool, wake: &Wake) {
 
 /// Frigate's latest picture of the camera (shown until live video starts).
 fn snapshot(p: &Params, ff: &Ffmpeg, shared: &Shared, wake: &Wake) {
-    let url = format!("{}/api/{}/latest.jpg?h={}", p.frigate_url, p.camera, p.size.1.max(1));
-    let Ok(mut proc) = ff.url(&url, None, p.size, true) else { return };
+    let url = format!("{}/api/{}/latest.jpg?h={}", p.frigate_url, p.camera, source_height(p));
+    let Ok(mut proc) = ff.url(&url, None, p.size, true, p.zoom) else { return };
     let Some(out) = proc.0.stdout.take() else { return };
     read_frames(out, p.size, |img| {
         if !shared.cancel.is_set() && !shared.live.load(Ordering::Relaxed) {
-            store(shared, img, false, wake);
+            store(shared, img, p.zoom, false, wake);
         }
         false
     });
 }
 
 fn mjpeg(p: &Params, ff: &Ffmpeg, shared: &Shared, wake: &Wake) {
-    let url = format!("{}/api/{}?fps=5&h={}", p.frigate_url, p.camera, p.size.1.max(1));
-    let Ok(mut proc) = ff.url(&url, Some("mpjpeg"), p.size, false) else { return };
+    let url = format!("{}/api/{}?fps=5&h={}", p.frigate_url, p.camera, source_height(p));
+    let Ok(mut proc) = ff.url(&url, Some("mpjpeg"), p.size, false, p.zoom) else { return };
     let Some(out) = proc.0.stdout.take() else { return };
     let proc = Arc::new(Mutex::new(Some(proc)));
     kill_on_cancel(shared, proc.clone());
@@ -108,9 +112,15 @@ fn mjpeg(p: &Params, ff: &Ffmpeg, shared: &Shared, wake: &Wake) {
             first = false;
             crate::log!("{}: MJPEG {}x{} after {} ms", p.camera, img.w, img.h, p.t0.elapsed().as_millis());
         }
-        store(shared, img, true, wake);
+        store(shared, img, p.zoom, true, wake);
         !shared.cancel.is_set()
     });
+}
+
+/// Height of the pictures to ask Frigate for: more when zoomed in, so that the part still
+/// has detail (Frigate does not go beyond its own resolution).
+fn source_height(p: &Params) -> u32 {
+    ((p.size.1.max(1) as f32 / p.zoom.size).round() as u32).min(2160)
 }
 
 /// Kills a process as soon as the window closes (that also ends a blocked read).
@@ -183,13 +193,13 @@ impl<'a> Feeder<'a> {
         crate::log!("{}: RTSP ready after {} ms ({format}){}", p.camera, p.t0.elapsed().as_millis(), self.via);
         // The bridge carries the prebuffer's sub stream, not the window's.
         let main = p.main && self.role != Role::Bridge;
-        match self.ff.video_pipe(format, p.size, main) {
+        match self.ff.video_pipe(format, p.size, main, p.zoom) {
             Ok(mut proc) => {
                 if let (Some(stdin), Some(out)) = (proc.0.stdin.take(), proc.0.stdout.take()) {
                     let proc = Arc::new(Mutex::new(Some(proc)));
                     kill_on_cancel(self.shared, proc.clone());
                     self.video = Some((proc, stdin));
-                    let (size, cam, t0, via) = (p.size, p.camera.clone(), p.t0, self.via);
+                    let (size, zoom, cam, t0, via) = (p.size, p.zoom, p.camera.clone(), p.t0, self.via);
                     let (shared, wake, role, handover) = (self.shared.clone(), self.wake.clone(), self.role, self.handover.clone());
                     let _ = std::thread::Builder::new().name(format!("decode-{cam}")).spawn(move || {
                         let mut first = true;
@@ -204,7 +214,7 @@ impl<'a> Feeder<'a> {
                                     handover.store(true, Ordering::Relaxed);
                                 }
                             }
-                            store(&shared, img, true, &wake);
+                            store(&shared, img, zoom, true, &wake);
                             !shared.cancel.is_set()
                         });
                     });

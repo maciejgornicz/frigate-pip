@@ -18,7 +18,7 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Camera audio** (AAC, G.711) on a separate thread, so it never delays the picture.
 - **Filters:** cameras, objects, required zones, minimum confidence, stationary objects; every object, or Frigate *Review* alerts / detections only.
 - **Windows the way you like them:** monitor, corner, size, timing, how many at once, replace the oldest or skip, always on top, caption, notification sound, quiet during full-screen games and presentations.
-- **Mouse control:** drag to move, click to pin, wheel to resize, speaker button to mute, × or right-click to close, double-click to open the camera in Frigate.
+- **Mouse control:** drag to move, click to pin, wheel to resize, Ctrl + wheel to zoom in where the mouse points, speaker button to mute, × or right-click to close, double-click to open the camera in Frigate.
 - **Settings window** with a live preview of your changes, a connection test and a description of every option.
 - **Events via the Frigate WebSocket** (nothing else needed) or via **MQTT**.
 - **Updates itself:** checks GitHub once a day and installs a new version with one click (can be switched off).
@@ -61,7 +61,7 @@ Everything is described in the [user guide](docs/en/user-guide.md).
 
 > **On a Windows PC — also when you work in WSL — use the [Windows application](#windows):** its windows appear over everything, terminals included. The Linux version is meant for Linux computers.
 
-The Linux version (x86_64 and ARM64) shares the Frigate connection (WebSocket or MQTT), the filters, the window corner, size and timing, live video (with the optional prebuffer), MJPEG / snapshots and camera audio with the Windows application; video and audio are decoded by **ffmpeg** (on the graphics card when it can), fed by FrigatePiP's own RTSP client. On a desktop its windows work like on Windows, mouse included (× and the speaker button, drag to move, wheel to resize, click to pin, double-click to open the camera in Frigate). There it also has a tray icon with the same menu as on Windows, and its settings open as a page in the browser (with the same options, descriptions and connection test). Settings are stored in `~/.config/frigate-pip/config.ini`.
+The Linux version (x86_64 and ARM64) shares the Frigate connection (WebSocket or MQTT), the filters, the window corner, size and timing, live video (with the optional prebuffer), MJPEG / snapshots and camera audio with the Windows application; video and audio are decoded by **ffmpeg** (on the graphics card when it can), fed by FrigatePiP's own RTSP client. On a desktop its windows work like on Windows, mouse included (× and the speaker button, drag to move, wheel to resize, Ctrl + wheel to zoom, click to pin, double-click to open the camera in Frigate). There it also has a tray icon with the same menu as on Windows, and its settings open as a page in the browser (with the same options, descriptions and connection test). Settings are stored in `~/.config/frigate-pip/config.ini`.
 
 ### Installation
 

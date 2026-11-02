@@ -4,6 +4,7 @@
 //! (PipeWire) or ALSA.
 
 use super::canvas::Image;
+use crate::view::Zoom;
 use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdout, Command, Stdio};
@@ -102,15 +103,21 @@ impl Ffmpeg {
         c
     }
 
-    /// Output options: raw BGRA frames of `size` on stdout, without delay.
-    fn raw_out(&self, c: &mut Command, size: (u32, u32)) {
-        let scale = format!("scale={}:{}:flags=bilinear", size.0, size.1);
-        c.args(["-an", "-vf", &scale, "-pix_fmt", "bgra", self.fps_flag, "passthrough", "-flush_packets", "1", "-f", "rawvideo", "pipe:1"]);
+    /// Output options: raw BGRA frames of `size` on stdout, without delay; only the part
+    /// `zoom` of the picture (at the stream's resolution, then scaled).
+    fn raw_out(&self, c: &mut Command, size: (u32, u32), zoom: Zoom) {
+        let crop = if zoom.is_full() {
+            String::new()
+        } else {
+            format!("crop=iw*{s:.6}:ih*{s:.6}:iw*{x:.6}:ih*{y:.6},", s = zoom.size, x = zoom.x, y = zoom.y)
+        };
+        let filter = format!("{crop}scale={}:{}:flags=bilinear", size.0, size.1);
+        c.args(["-an", "-vf", &filter, "-pix_fmt", "bgra", self.fps_flag, "passthrough", "-flush_packets", "1", "-f", "rawvideo", "pipe:1"]);
     }
 
     /// Decoder fed through stdin with an elementary stream (`h264` or `hevc`); `main` = the
     /// camera's main stream (see `HwAccel`).
-    pub fn video_pipe(&self, format: &str, size: (u32, u32), main: bool) -> std::io::Result<Proc> {
+    pub fn video_pipe(&self, format: &str, size: (u32, u32), main: bool, zoom: Zoom) -> std::io::Result<Proc> {
         let mut c = self.command();
         // No "-fflags nobuffer": it drops what was read while probing — the first key frame.
         c.args(["-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0", "-threads", "1"]);
@@ -118,13 +125,13 @@ impl Ffmpeg {
             c.args(["-hwaccel", "auto"]);
         }
         c.args(["-f", format, "-i", "pipe:0"]);
-        self.raw_out(&mut c, size);
+        self.raw_out(&mut c, size, zoom);
         c.stdin(Stdio::piped()).stdout(Stdio::piped());
         c.spawn().map(Proc)
     }
 
     /// ffmpeg reading a URL itself (Frigate's snapshot or MJPEG stream).
-    pub fn url(&self, url: &str, format: Option<&str>, size: (u32, u32), one_frame: bool) -> std::io::Result<Proc> {
+    pub fn url(&self, url: &str, format: Option<&str>, size: (u32, u32), one_frame: bool, zoom: Zoom) -> std::io::Result<Proc> {
         let mut c = self.command();
         // A Frigate that stops answering must not leave the process hanging (5 s, in µs).
         c.args(["-probesize", "32768", "-analyzeduration", "0", "-rw_timeout", "5000000"]);
@@ -135,7 +142,7 @@ impl Ffmpeg {
         if one_frame {
             c.args(["-frames:v", "1"]);
         }
-        self.raw_out(&mut c, size);
+        self.raw_out(&mut c, size, zoom);
         c.stdin(Stdio::null()).stdout(Stdio::piped());
         c.spawn().map(Proc)
     }

@@ -117,6 +117,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 | **Ziehen** | Verschiebt das Fenster. Es bleibt dort, wo Sie es abgelegt haben, bis es sich schließt. |
 | **Klicken** | Das Fenster wird **angeheftet**: Es bleibt geöffnet, bis Sie es schließen (die Beschriftung zeigt *angeheftet*). Erneut klicken, um es zu lösen. |
 | **Mausrad** | Vergrößert oder verkleinert das Fenster. |
+| **Strg + Mausrad** | Zoomt das Bild um den Mauszeiger herum heran (bis 8×) oder wieder heraus; die Beschriftung zeigt den Zoom, z. B. *2.0×*. Wie viele Details zu sehen sind, hängt vom Stream ab: der Main-Stream (`stream = main`) hat die meisten. |
 | **×** (oben rechts) | Schließt das Fenster sofort. Die Schaltfläche erscheint, wenn Sie mit der Maus auf das Fenster zeigen. |
 | **Lautsprecher** (links neben ×) | Schaltet den Ton des Fensters aus; ein weiterer Klick schaltet ihn wieder ein. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Kameraton zeigen; solange der Ton aus ist, bleibt der durchgestrichene Lautsprecher sichtbar. |
 | **Rechtsklick** | Schließt das Fenster. |
@@ -414,7 +415,7 @@ Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rah
 - **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie. Ein zweiter Start (oder `frigate-pip --settings`) öffnet die Einstellungen der laufenden Kopie.
 - **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
 - **Symbol im Infobereich:** mit demselben Menü wie unter Windows (siehe [Das Tray-Symbol](#4-das-tray-symbol)); seine Farbe zeigt den Zustand: blau — verbunden, grau — nicht verbunden, orange — pausiert. Es erscheint unter KDE Plasma, Xfce, Cinnamon, MATE und Budgie sowie unter GNOME mit der Erweiterung AppIndicator (in Ubuntu enthalten).
-- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
+- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
 - **Fensteroptionen:** `topmost` (bei `false` sind die Fenster gewöhnliche Fenster, die andere verdecken können), `sound` (der Benachrichtigungston des Desktops) und `skip_fullscreen` (nichts, solange das aktive Fenster im Vollbild ist) wirken wie unter Windows.
 - **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben).
 
