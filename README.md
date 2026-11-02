@@ -110,6 +110,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout, live tests and ho
 
 Bug reports, translations and pull requests are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Support
+
+FrigatePiP is free and open source, and every feature stays free for everyone. If it is useful to you, you can [buy me a coffee on Ko-fi](https://ko-fi.com/maciejgornicz) — thank you!
+
 ## License
 
 FrigatePiP is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
