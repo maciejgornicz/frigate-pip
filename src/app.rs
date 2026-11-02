@@ -573,7 +573,14 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
         }
         WM_MOUSEWHEEL => {
             let delta = ((wp.0 >> 16) & 0xFFFF) as u16 as i16;
-            with_app(|a| a.wheel(hwnd, delta));
+            // With Ctrl the picture zooms around the mouse; without, the window grows or shrinks.
+            // MK_CONTROL = 0x0008 in the low word (key state).
+            if wp.0 & 0x0008 != 0 {
+                let at = POINT { x: (lp.0 & 0xFFFF) as u16 as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as u16 as i16 as i32 };
+                with_app(|a| a.zoom(hwnd, delta, at));
+            } else {
+                with_app(|a| a.wheel(hwnd, delta));
+            }
             LRESULT(0)
         }
         WM_TIMER => {
@@ -881,11 +888,7 @@ impl App {
     }
 
     fn popup_text(p: &Popup) -> String {
-        if p.pinned {
-            format!("{} · {}", p.base_text, t().overlay_pinned)
-        } else {
-            p.base_text.clone()
-        }
+        crate::view::state_caption(&p.base_text, p.pinned, p.shared.zoom())
     }
 
     fn create_popup(
@@ -1363,6 +1366,23 @@ impl App {
         let factor = if delta > 0 { 1.12 } else { 1.0 / 1.12 };
         p.width = Some(((cur * factor) as i32).clamp((160.0 * scale) as i32, max_w));
         self.layout();
+    }
+
+    /// Ctrl + wheel: zooms the picture in or out around the mouse (`at`, screen pixels).
+    fn zoom(&mut self, hwnd: HWND, delta: i16, at: POINT) {
+        let Some(p) = self.find(hwnd) else { return };
+        let mut pt = at;
+        let mut rc = RECT::default();
+        unsafe {
+            let _ = ScreenToClient(hwnd, &mut pt);
+            let _ = GetClientRect(hwnd, &mut rc);
+        }
+        // Where the picture is in the window (it may have bars when the aspect differs).
+        let (l, t, r, b) = crate::render::fit(((p.aspect * 1000.0).round() as u32, 1000), (rc.right.max(1) as u32, rc.bottom.max(1) as u32));
+        let (u, v) = ((pt.x as f32 - l) / (r - l).max(1.0), (pt.y as f32 - t) / (b - t).max(1.0));
+        let zoom = p.shared.zoom().at(delta as f32 / WHEEL_DELTA as f32, u, v);
+        p.shared.set_zoom(zoom);
+        p.shared.set_overlay(Self::popup_text(p));
     }
 
     fn set_aspect(&mut self, hwnd: HWND, w: u32, h: u32) {

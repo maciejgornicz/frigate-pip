@@ -1,5 +1,7 @@
 //! Pictures in memory (BGRA) and the caption drawn on them.
 
+use crate::view::Zoom;
+
 /// Picture in BGRA, 4 bytes per pixel, rows without padding.
 #[derive(Clone)]
 pub struct Image {
@@ -9,6 +11,52 @@ pub struct Image {
 }
 
 impl Image {
+    /// The part `want` of the camera picture from a picture that shows the part `have`, at
+    /// the same size (bilinear, 8-bit fixed point). What `have` does not cover comes from
+    /// `whole` (an older picture of the whole camera view), or stays black: zooming out shows
+    /// at once, with the live part at its place.
+    pub fn zoomed(&self, have: Zoom, want: Zoom, whole: Option<&Image>) -> Image {
+        if have == want || self.w == 0 || self.h == 0 {
+            return self.clone();
+        }
+        let (w, h) = (self.w, self.h);
+        // For every output column (row): the two source columns and the weight of the second (0–256).
+        let axis = |n: u32, want_from: f32, have_from: f32| -> Vec<Option<(u32, u32, u32)>> {
+            (0..n)
+                .map(|i| {
+                    let f = (want_from + (i as f32 + 0.5) / n as f32 * want.size - have_from) / have.size;
+                    if !(0.0..=1.0).contains(&f) {
+                        return None;
+                    }
+                    let s = (f * n as f32 - 0.5).clamp(0.0, (n - 1) as f32);
+                    let a = s as u32;
+                    Some((a, (a + 1).min(n - 1), ((s - a as f32) * 256.0) as u32))
+                })
+                .collect()
+        };
+        let (cols, rows) = (axis(w, want.x, have.x), axis(h, want.y, have.y));
+        let gaps = cols.iter().chain(rows.iter()).any(Option::is_none);
+        let mut out = match whole {
+            Some(whole) if gaps => whole.resized(w, h).zoomed(Zoom::FULL, want, None),
+            _ => Image::new(w, h),
+        };
+        for (y, row) in rows.iter().enumerate() {
+            let Some((ya, yb, ty)) = *row else { continue };
+            for (x, col) in cols.iter().enumerate() {
+                let Some((xa, xb, tx)) = *col else { continue };
+                let at = |px: u32, py: u32| ((py * w + px) * 4) as usize;
+                let (a, b, c, d) = (at(xa, ya), at(xb, ya), at(xa, yb), at(xb, yb));
+                let o = (y * w as usize + x) * 4;
+                for k in 0..4 {
+                    let top = self.data[a + k] as u32 * (256 - tx) + self.data[b + k] as u32 * tx;
+                    let bottom = self.data[c + k] as u32 * (256 - tx) + self.data[d + k] as u32 * tx;
+                    out.data[o + k] = ((top * (256 - ty) + bottom * ty + (1 << 15)) >> 16) as u8;
+                }
+            }
+        }
+        out
+    }
+
     pub fn new(w: u32, h: u32) -> Image {
         Image { w, h, data: vec![0; (w * h * 4) as usize] }
     }
@@ -271,6 +319,35 @@ impl Font {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoomed_picture() {
+        // 8×2: left half black, right half white.
+        let mut img = Image::new(8, 2);
+        for y in 0..2 {
+            for x in 4..8 {
+                img.data[((y * 8 + x) * 4) as usize..][..4].copy_from_slice(&[255; 4]);
+            }
+        }
+        let row = |im: &Image, y: u32| im.data[(y * 8 * 4) as usize..((y + 1) * 8 * 4) as usize].to_vec();
+        // Zoomed in on the right half: white (the first column blends a little of the black edge).
+        let right = Zoom { x: 0.5, y: 0.0, size: 0.5 };
+        let z = img.zoomed(Zoom::FULL, right, None);
+        for y in 0..2 {
+            assert!(row(&z, y)[4..].iter().all(|&b| b == 255) && row(&z, y)[0] > 128);
+        }
+        // Back out from that picture: its content goes to the right half, the left half is
+        // black for now — or comes from an older picture of the whole view.
+        let back = z.zoomed(right, Zoom::FULL, None);
+        assert!(row(&back, 0)[..16].iter().all(|&b| b == 0));
+        assert!(row(&back, 0)[20..].iter().all(|&b| b == 255));
+        let mut grey = Image::new(8, 2);
+        grey.data.fill(128);
+        let filled = z.zoomed(right, Zoom::FULL, Some(&grey));
+        assert!(row(&filled, 0)[..12].iter().all(|&b| b == 128));
+        assert!(row(&filled, 0)[20..].iter().all(|&b| b == 255));
+        assert_eq!(img.zoomed(Zoom::FULL, Zoom::FULL, None).data, img.data);
+    }
 
     #[test]
     fn resize_averages_when_shrinking() {

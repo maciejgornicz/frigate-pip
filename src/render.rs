@@ -2,6 +2,7 @@
 //! Direct2D for JPEG images / software frames, and a DirectWrite overlay.
 
 use crate::decoder::{nv12_to_bgra, Frame};
+use crate::view::Zoom;
 use std::mem::ManuallyDrop;
 use windows::core::{w, Interface, Result, HSTRING};
 use windows::Foundation::Numerics::Matrix3x2;
@@ -26,6 +27,8 @@ pub struct Overlay {
     pub close: u8,
     /// Sound button: 0 = no camera audio (no button), 1 = sound on, 2 = muted.
     pub sound: u8,
+    /// The part of the picture that is shown (Ctrl + mouse wheel).
+    pub zoom: Zoom,
 }
 
 /// Close button in the top-right corner of the window, in client pixels (left, top, right, bottom).
@@ -88,6 +91,12 @@ pub struct Renderer {
 
 fn color(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
     D2D1_COLOR_F { r, g, b, a }
+}
+
+/// The zoomed part of a picture of `size` pixels: (left, top, right, bottom).
+pub fn part(size: (u32, u32), zoom: Zoom) -> (f32, f32, f32, f32) {
+    let (w, h) = (size.0 as f32, size.1 as f32);
+    (zoom.x * w, zoom.y * h, (zoom.x + zoom.size) * w, (zoom.y + zoom.size) * h)
 }
 
 /// Rectangle with the aspect ratio of `src` fitted inside `dst` (letterbox).
@@ -373,19 +382,20 @@ impl Renderer {
         unsafe {
             if let Last::Gpu(Frame::Gpu { tex, index, width, height, .. }) = &self.last {
                 let (tex, index, crop) = (tex.clone(), *index, (*width, *height));
-                self.blit(&tex, index, crop)?;
+                self.blit(&tex, index, crop, ov.zoom)?;
                 self.d2d.BeginDraw();
             } else {
                 self.d2d.BeginDraw();
                 self.d2d.Clear(Some(&color(0.0, 0.0, 0.0, 1.0)));
                 if let (Last::Image, Some(img)) = (&self.last, &self.image) {
-                    let (l, t, r, b) = fit(self.image_size, self.size);
+                    let (sl, st, sr, sb) = part(self.image_size, ov.zoom);
+                    let (l, t, r, b) = fit(((sr - sl).round() as u32, (sb - st).round() as u32), self.size);
                     self.d2d.DrawBitmap(
                         img,
                         Some(&D2D_RECT_F { left: l, top: t, right: r, bottom: b }),
                         1.0,
                         D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-                        None,
+                        Some(&D2D_RECT_F { left: sl, top: st, right: sr, bottom: sb }),
                         None,
                     );
                 }
@@ -502,7 +512,7 @@ impl Renderer {
         self.d2d.DrawTextLayout(origin, &layout, &self.white, D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 
-    unsafe fn blit(&mut self, tex: &ID3D11Texture2D, index: u32, crop: (u32, u32)) -> Result<()> {
+    unsafe fn blit(&mut self, tex: &ID3D11Texture2D, index: u32, crop: (u32, u32), zoom: Zoom) -> Result<()> {
         let (Some(vd), Some(vc)) = (self.video_device.clone(), self.video_context.clone()) else {
             return Err(windows::Win32::Foundation::E_NOTIMPL.into());
         };
@@ -560,8 +570,10 @@ impl Renderer {
                 v
             }
         };
-        let src = RECT { left: 0, top: 0, right: crop.0 as i32, bottom: crop.1 as i32 };
-        let (l, t, r, b) = fit(crop, self.size);
+        // The zoomed part at the full resolution of the stream: the video processor scales it.
+        let (sl, st, sr, sb) = part(crop, zoom);
+        let src = RECT { left: sl.round() as i32, top: st.round() as i32, right: sr.round() as i32, bottom: sb.round() as i32 };
+        let (l, t, r, b) = fit(((src.right - src.left).max(1) as u32, (src.bottom - src.top).max(1) as u32), self.size);
         let dst = RECT { left: l.round() as i32, top: t.round() as i32, right: r.round() as i32, bottom: b.round() as i32 };
         let full = RECT { left: 0, top: 0, right: self.size.0 as i32, bottom: self.size.1 as i32 };
         vc.VideoProcessorSetStreamSourceRect(&vp.proc, 0, true, Some(&src));
@@ -576,7 +588,13 @@ impl Renderer {
 
 #[cfg(test)]
 mod tests {
-    use super::fit;
+    use super::{fit, part, Zoom};
+
+    #[test]
+    fn zoomed_part() {
+        assert_eq!(part((1920, 1080), Zoom::FULL), (0.0, 0.0, 1920.0, 1080.0));
+        assert_eq!(part((1920, 1080), Zoom { x: 0.5, y: 0.25, size: 0.25 }), (960.0, 270.0, 1440.0, 540.0));
+    }
 
     #[test]
     fn letterbox_fit() {

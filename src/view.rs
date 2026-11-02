@@ -84,9 +84,84 @@ fn union<'a>(base: impl Iterator<Item = &'a String>, extra: &'a [String]) -> Vec
     out
 }
 
+/// The caption of a window with its state: pinned, zoomed (the same on Windows and Linux).
+pub fn state_caption(caption: &str, pinned: bool, zoom: Zoom) -> String {
+    let mut text = caption.to_string();
+    if pinned {
+        text = format!("{text} · {}", i18n::t().overlay_pinned);
+    }
+    if let Some(z) = zoom.label() {
+        text = format!("{text} · {z}");
+    }
+    text
+}
+
+/// Zoom of a preview window (Ctrl + mouse wheel): the part of the picture that is shown —
+/// its left and top edge and its size, as fractions of the whole picture. The part keeps
+/// the picture's aspect ratio.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Zoom {
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+}
+
+impl Zoom {
+    pub const FULL: Zoom = Zoom { x: 0.0, y: 0.0, size: 1.0 };
+    /// The largest magnification.
+    pub const MAX: f32 = 8.0;
+    /// Magnification per wheel notch.
+    const STEP: f32 = 1.25;
+
+    pub fn is_full(self) -> bool {
+        self.size >= 1.0
+    }
+
+    /// Zoomed in (`notches` > 0) or out around the point (`u`, `v`) of the shown part
+    /// (0–1 across and down): that point of the picture stays under the mouse (unless the
+    /// part would reach past the picture's edge).
+    pub fn at(self, notches: f32, u: f32, v: f32) -> Zoom {
+        let (u, v) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+        let factor = (Self::STEP.powf(notches) / self.size).clamp(1.0, Self::MAX);
+        if factor < 1.001 {
+            return Zoom::FULL;
+        }
+        let size = 1.0 / factor;
+        let (px, py) = (self.x + u * self.size, self.y + v * self.size);
+        Zoom { x: (px - u * size).clamp(0.0, 1.0 - size), y: (py - v * size).clamp(0.0, 1.0 - size), size }
+    }
+
+    /// For the caption: "2.4×" (nothing at 1×).
+    pub fn label(self) -> Option<String> {
+        (!self.is_full()).then(|| format!("{:.1}×", 1.0 / self.size))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoom_keeps_the_point_under_the_mouse() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        // Two notches in at a point a quarter across, two thirds down.
+        let z = Zoom::FULL.at(2.0, 0.25, 0.66);
+        assert!(close(1.0 / z.size, 1.5625));
+        assert!(close(z.x + 0.25 * z.size, 0.25) && close(z.y + 0.66 * z.size, 0.66));
+        // Again elsewhere: the picture point under the mouse stays.
+        let (u, v) = (0.8, 0.1);
+        let (px, py) = (z.x + u * z.size, z.y + v * z.size);
+        let z2 = z.at(3.0, u, v);
+        assert!(close(z2.x + u * z2.size, px) && close(z2.y + v * z2.size, py));
+        // Never past the edge, never more than 8×, back to the whole picture when zoomed out.
+        let corner = Zoom::FULL.at(30.0, 1.0, 1.0);
+        assert!(close(corner.size, 1.0 / Zoom::MAX) && close(corner.x + corner.size, 1.0));
+        assert_eq!(z2.at(-40.0, 0.5, 0.5), Zoom::FULL);
+        assert_eq!(Zoom::FULL.at(-1.0, 0.5, 0.5), Zoom::FULL);
+        assert_eq!((z.label().as_deref(), Zoom::FULL.label()), (Some("1.6×"), None));
+        assert_eq!(state_caption("Gate", false, Zoom { x: 0.0, y: 0.0, size: 0.5 }), "Gate · 2.0×");
+        assert_eq!(state_caption("Gate", false, Zoom::FULL), "Gate");
+    }
 
     #[test]
     fn slot_choice_new_replace_or_skip() {
