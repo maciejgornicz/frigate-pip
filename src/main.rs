@@ -24,9 +24,7 @@ mod ws;
 mod app;
 #[cfg(windows)]
 mod decoder;
-#[cfg(windows)]
 mod hub;
-#[cfg(windows)]
 mod icon;
 #[cfg(windows)]
 mod player;

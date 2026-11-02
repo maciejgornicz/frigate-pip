@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=FrigatePiP
+Comment=Camera windows for Frigate NVR detections
+Comment[pl]=Okna kamer przy wykryciach Frigate NVR
+Comment[de]=Kamerafenster bei Erkennungen von Frigate NVR
+Comment[es]=Ventanas de cámaras para las detecciones de Frigate NVR
+Comment[pt]=Janelas das câmaras para as deteções do Frigate NVR
+Comment[fr]=Fenêtres des caméras pour les détections de Frigate NVR
+Exec=frigate-pip --output window
+Icon=frigate-pip
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=Frigate;camera;NVR;
+StartupNotify=false

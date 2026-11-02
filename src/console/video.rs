@@ -3,16 +3,18 @@
 
 use super::canvas::Image;
 use super::ffmpeg::{adts_header, read_frames, Ffmpeg, Proc};
-use crate::audio::AudioCodec;
+use crate::audio::{AudioCodec, AudioTrack};
 use crate::config::LiveMode;
-use crate::rtp::Codec;
+use crate::hub::{Feed, Hub};
+use crate::rtp::{AccessUnit, Codec, VideoTrack};
 use crate::rtsp::{self, Media};
 use crate::util::Cancel;
 use std::cell::RefCell;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// State shared between the window's threads and the screen loop.
 #[derive(Default)]
@@ -22,8 +24,10 @@ pub struct Shared {
     pub dirty: AtomicBool,
     /// The frame comes from live video (red dot).
     pub live: AtomicBool,
-    /// Camera audio muted by the user (key m): its frames are not played.
+    /// Camera audio muted by the user (key m, sound button): its frames are not played.
     pub muted: AtomicBool,
+    /// The camera audio is being played.
+    pub audio: AtomicBool,
     pub cancel: Cancel,
 }
 
@@ -31,6 +35,10 @@ pub struct Params {
     pub camera: String,
     pub frigate_url: String,
     pub rtsp_url: Option<String>,
+    /// The camera's prebuffer (`prebuffer`), if it runs.
+    pub hub: Option<Arc<Hub>>,
+    /// `rtsp_url` is the camera's main stream (for `hwaccel = auto`).
+    pub main: bool,
     pub live: LiveMode,
     /// Picture size in pixels.
     pub size: (u32, u32),
@@ -57,11 +65,7 @@ pub fn start(p: Params, ff: Arc<Ffmpeg>, wake: Wake) -> Arc<Shared> {
         }
         LiveMode::Mjpeg => mjpeg(&p, &ff, &s, &wake),
         LiveMode::Rtsp => {
-            let result = match &p.rtsp_url {
-                Some(url) => rtsp(url, &p, &ff, &s, &wake),
-                None => Err("no RTSP stream".into()),
-            };
-            if let Err(e) = result {
+            if let Err(e) = rtsp_live(&p, &ff, &s, &wake) {
                 if !s.cancel.is_set() {
                     crate::log!("{}: RTSP video unavailable ({e}) - MJPEG from Frigate instead", p.camera);
                     mjpeg(&p, &ff, &s, &wake);
@@ -128,8 +132,29 @@ fn kill_on_cancel(shared: &Shared, proc: Arc<Mutex<Option<Proc>>>) {
 const AUD_H264: [u8; 6] = [0, 0, 0, 1, 0x09, 0xF0];
 const AUD_HEVC: [u8; 7] = [0, 0, 0, 1, 0x46, 0x01, 0x50];
 
-#[derive(Default)]
-struct Pipes {
+/// Who shows the picture when the prebuffer and a direct stream run side by side.
+#[derive(Clone, Copy, PartialEq)]
+enum Role {
+    /// The window's only video source.
+    Only,
+    /// The prebuffer (sub stream) while the wanted stream connects: no audio, it stops
+    /// at the first frame of the other one.
+    Bridge,
+    /// The wanted stream next to the prebuffer: its first frame ends the bridge.
+    Takeover,
+}
+
+/// Feeds one RTSP stream (direct or from the prebuffer) to the ffmpeg decoder and player.
+struct Feeder<'a> {
+    p: &'a Params,
+    ff: &'a Ffmpeg,
+    shared: &'a Arc<Shared>,
+    wake: &'a Wake,
+    role: Role,
+    /// Set by the first frame of the `Takeover` stream.
+    handover: Arc<AtomicBool>,
+    /// For the log: where the stream comes from.
+    via: &'static str,
     video: Option<(Arc<Mutex<Option<Proc>>>, std::process::ChildStdin)>,
     audio: Option<(Proc, std::process::ChildStdin)>,
     /// AAC: AudioSpecificConfig for the ADTS headers.
@@ -138,30 +163,46 @@ struct Pipes {
     started: bool,
 }
 
-/// RTSP from go2rtc: our client receives the stream, ffmpeg decodes it.
-fn rtsp(url: &str, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake) -> Result<(), String> {
-    let pipes = RefCell::new(Pipes::default());
-    let on_track = |track: &crate::rtp::VideoTrack, audio: Option<&crate::audio::AudioTrack>| {
-        let mut pp = pipes.borrow_mut();
+impl<'a> Feeder<'a> {
+    fn new(p: &'a Params, ff: &'a Ffmpeg, shared: &'a Arc<Shared>, wake: &'a Wake, role: Role, handover: Arc<AtomicBool>, via: &'static str) -> Self {
+        Feeder { p, ff, shared, wake, role, handover, via, video: None, audio: None, asc: None, aud: &[], started: false }
+    }
+
+    /// Still wanted: the window is open and (for the bridge) the other stream has no picture yet.
+    fn alive(&self) -> bool {
+        !self.shared.cancel.is_set() && !(self.role == Role::Bridge && self.handover.load(Ordering::Relaxed))
+    }
+
+    fn track(&mut self, track: &VideoTrack, audio: Option<&AudioTrack>) {
+        let p = self.p;
         let format = match track.codec {
             Codec::H264 => "h264",
             Codec::H265 => "hevc",
         };
-        pp.aud = if track.codec == Codec::H264 { &AUD_H264 } else { &AUD_HEVC };
-        crate::log!("{}: RTSP ready after {} ms ({format})", p.camera, p.t0.elapsed().as_millis());
-        match ff.video_pipe(format, p.size) {
+        self.aud = if track.codec == Codec::H264 { &AUD_H264 } else { &AUD_HEVC };
+        crate::log!("{}: RTSP ready after {} ms ({format}){}", p.camera, p.t0.elapsed().as_millis(), self.via);
+        // The bridge carries the prebuffer's sub stream, not the window's.
+        let main = p.main && self.role != Role::Bridge;
+        match self.ff.video_pipe(format, p.size, main) {
             Ok(mut proc) => {
                 if let (Some(stdin), Some(out)) = (proc.0.stdin.take(), proc.0.stdout.take()) {
                     let proc = Arc::new(Mutex::new(Some(proc)));
-                    kill_on_cancel(shared, proc.clone());
-                    pp.video = Some((proc, stdin));
-                    let (size, cam, t0, shared, wake) = (p.size, p.camera.clone(), p.t0, shared.clone(), wake.clone());
+                    kill_on_cancel(self.shared, proc.clone());
+                    self.video = Some((proc, stdin));
+                    let (size, cam, t0, via) = (p.size, p.camera.clone(), p.t0, self.via);
+                    let (shared, wake, role, handover) = (self.shared.clone(), self.wake.clone(), self.role, self.handover.clone());
                     let _ = std::thread::Builder::new().name(format!("decode-{cam}")).spawn(move || {
                         let mut first = true;
                         read_frames(out, size, |img| {
+                            if role == Role::Bridge && handover.load(Ordering::Relaxed) {
+                                return false;
+                            }
                             if first {
                                 first = false;
-                                crate::log!("{cam}: video {}x{} after {} ms", img.w, img.h, t0.elapsed().as_millis());
+                                crate::log!("{cam}: video {}x{} after {} ms{via}", img.w, img.h, t0.elapsed().as_millis());
+                                if role == Role::Takeover {
+                                    handover.store(true, Ordering::Relaxed);
+                                }
                             }
                             store(&shared, img, true, &wake);
                             !shared.cancel.is_set()
@@ -171,66 +212,140 @@ fn rtsp(url: &str, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake) -
             }
             Err(e) => crate::log!("{}: cannot start ffmpeg: {e}", p.camera),
         }
-        if let Some(a) = audio {
+        if let Some(a) = audio.filter(|_| self.role != Role::Bridge) {
             let input: Vec<String> = match &a.codec {
                 AudioCodec::Aac { config, .. } => {
-                    pp.asc = Some(config.clone());
+                    self.asc = Some(config.clone());
                     vec!["-f".into(), "aac".into()]
                 }
                 AudioCodec::Pcmu => vec!["-f".into(), "mulaw".into(), "-ar".into(), a.rate.to_string(), "-ac".into(), a.channels.to_string()],
                 AudioCodec::Pcma => vec!["-f".into(), "alaw".into(), "-ar".into(), a.rate.to_string(), "-ac".into(), a.channels.to_string()],
             };
-            match ff.audio_pipe(&input) {
+            match self.ff.audio_pipe(&input) {
                 Ok(mut proc) => {
                     if let Some(stdin) = proc.0.stdin.take() {
                         crate::log!("{}: audio {} Hz", p.camera, a.rate);
-                        pp.audio = Some((proc, stdin));
+                        self.audio = Some((proc, stdin));
+                        self.shared.audio.store(true, Ordering::Relaxed);
                     }
                 }
                 Err(e) => crate::log!("{}: no audio: {e}", p.camera),
             }
         }
-    };
-    let on_media = |m: Media| {
-        let mut pp = pipes.borrow_mut();
-        match m {
-            Media::Video(au) => {
-                if !pp.started && !au.key {
-                    return !shared.cancel.is_set();
-                }
-                if !pp.started {
-                    crate::log!("{}: key frame after {} ms", p.camera, p.t0.elapsed().as_millis());
-                }
-                pp.started = true;
-                let aud = pp.aud;
-                match pp.video.as_mut() {
-                    Some((_, stdin)) => stdin.write_all(&au.data).and_then(|_| stdin.write_all(aud)).is_ok() && !shared.cancel.is_set(),
-                    None => false,
-                }
-            }
-            Media::Audio(_) if shared.muted.load(Ordering::Relaxed) => !shared.cancel.is_set(),
-            Media::Audio(frame) => {
-                let header = pp.asc.as_deref().map(|asc| adts_header(asc, frame.len()));
-                if let Some((_, stdin)) = pp.audio.as_mut() {
-                    let ok = match header {
-                        Some(Some(h)) => stdin.write_all(&h).and_then(|_| stdin.write_all(&frame)).is_ok(),
-                        Some(None) => false,
-                        None => stdin.write_all(&frame).is_ok(),
-                    };
-                    if !ok {
-                        pp.audio = None;
-                    }
-                }
-                !shared.cancel.is_set()
+    }
+
+    /// `false` = stop (window closed, decoder gone, or the bridge is no longer needed).
+    fn video(&mut self, au: &AccessUnit) -> bool {
+        if !self.started && !au.key {
+            return self.alive();
+        }
+        if !self.started {
+            crate::log!("{}: key frame after {} ms{}", self.p.camera, self.p.t0.elapsed().as_millis(), self.via);
+        }
+        self.started = true;
+        let aud = self.aud;
+        match self.video.as_mut() {
+            Some((_, stdin)) => stdin.write_all(&au.data).and_then(|_| stdin.write_all(aud)).is_ok() && self.alive(),
+            None => false,
+        }
+    }
+
+    fn audio(&mut self, frame: &[u8]) -> bool {
+        if self.shared.muted.load(Ordering::Relaxed) {
+            return self.alive();
+        }
+        let header = self.asc.as_deref().map(|asc| adts_header(asc, frame.len()));
+        if let Some((_, stdin)) = self.audio.as_mut() {
+            let ok = match header {
+                Some(Some(h)) => stdin.write_all(&h).and_then(|_| stdin.write_all(frame)).is_ok(),
+                Some(None) => false,
+                None => stdin.write_all(frame).is_ok(),
+            };
+            if !ok {
+                self.audio = None;
             }
         }
-    };
-    let result = rtsp::run(url, &shared.cancel, p.audio, on_track, on_media);
-    let pp = pipes.into_inner();
-    let had_video = pp.started;
-    drop(pp);
+        self.alive()
+    }
+}
+
+/// Live RTSP video. With the prebuffer the picture is there at once: its stream alone when
+/// the window wants it, otherwise it bridges the time until the wanted stream's first frame.
+fn rtsp_live(p: &Arc<Params>, ff: &Arc<Ffmpeg>, shared: &Arc<Shared>, wake: &Wake) -> Result<(), String> {
+    let Some(url) = p.rtsp_url.as_deref() else { return Err("no RTSP stream".into()) };
+    let handover = Arc::new(AtomicBool::new(false));
+    match &p.hub {
+        Some(hub) if hub.url() == url => match prebuffered(hub, p, ff, shared, wake, Role::Only, handover.clone()) {
+            Err(e) if !shared.cancel.is_set() => {
+                crate::log!("{}: prebuffer: {e} - direct RTSP", p.camera);
+                direct(url, p, ff, shared, wake, Role::Only, handover)
+            }
+            _ => Ok(()),
+        },
+        Some(hub) => {
+            let bridge = {
+                let (hub, p, ff, shared, wake, handover) = (hub.clone(), p.clone(), ff.clone(), shared.clone(), wake.clone(), handover.clone());
+                std::thread::Builder::new()
+                    .name(format!("bridge-{}", p.camera))
+                    .spawn(move || prebuffered(&hub, &p, &ff, &shared, &wake, Role::Bridge, handover))
+                    .ok()
+            };
+            let result = direct(url, p, ff, shared, wake, Role::Takeover, handover);
+            // The wanted stream failed: the prebuffer's picture stays while it lasts. It may
+            // still be on its way (the wanted stream can fail within milliseconds), so the
+            // bridge decides: its end is the result — MJPEG follows only when the prebuffer
+            // fails (at once or later), never next to it.
+            match (result, bridge) {
+                (Err(_), Some(b)) => b.join().unwrap_or_else(|_| Err("prebuffer bridge stopped".into())),
+                (result, _) => result,
+            }
+        }
+        None => direct(url, p, ff, shared, wake, Role::Only, handover),
+    }
+}
+
+/// RTSP from go2rtc: our client receives the stream, ffmpeg decodes it.
+fn direct(url: &str, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake, role: Role, handover: Arc<AtomicBool>) -> Result<(), String> {
+    let feeder = RefCell::new(Feeder::new(p, ff, shared, wake, role, handover, ""));
+    let result = rtsp::run(
+        url,
+        &shared.cancel,
+        p.audio,
+        |video, audio| feeder.borrow_mut().track(video, audio),
+        |m| match m {
+            Media::Video(au) => feeder.borrow_mut().video(&au),
+            Media::Audio(frame) => feeder.borrow_mut().audio(&frame),
+        },
+    );
     match result {
-        Err(e) if !had_video => Err(e),
+        Err(e) if !feeder.into_inner().started => Err(e),
         _ => Ok(()),
     }
+}
+
+/// The stream from the prebuffer: its last GOP at once (decoded in a moment), then live.
+/// `Err` when the prebuffer is down, now or later.
+fn prebuffered(hub: &Hub, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake, role: Role, handover: Arc<AtomicBool>) -> Result<(), String> {
+    let (tx, rx) = mpsc::channel();
+    if !hub.subscribe(Box::new(move |feed| tx.send(feed).is_ok())) {
+        return Err("not connected yet".into());
+    }
+    let mut feeder = Feeder::new(p, ff, shared, wake, role, handover, " (prebuffer)");
+    while feeder.alive() {
+        let more = match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(Feed::Track(video, audio)) => {
+                feeder.track(&video, audio.as_ref());
+                true
+            }
+            Ok(Feed::Au(au)) => feeder.video(&au),
+            Ok(Feed::Audio(frame)) => feeder.audio(&frame),
+            Ok(Feed::Failed(e)) => return Err(e),
+            Err(RecvTimeoutError::Timeout) => true,
+            Err(RecvTimeoutError::Disconnected) => return Err("stopped".into()),
+        };
+        if !more {
+            break;
+        }
+    }
+    Ok(())
 }

@@ -122,7 +122,7 @@ impl Output for Tmux {
         (u32::MAX / 4, u32::MAX / 4)
     }
 
-    fn draw(&mut self, _id: u64, _rect: Rect, _img: &Image, _caption: &str, _live: bool) {}
+    fn draw(&mut self, _id: u64, _rect: Rect, _img: Image, _caption: &str, _live: bool) {}
 
     fn clear(&mut self, id: u64) {
         if let Some(p) = self.popups.remove(&id) {
@@ -160,6 +160,9 @@ impl Output for Tmux {
         cmd.extend(["--view-lock".into(), quote(&lock.to_string_lossy())]);
         if view.muted {
             cmd.push("--view-muted".into());
+        }
+        if view.main {
+            cmd.push("--view-main".into());
         }
         let spawned = Command::new("tmux")
             .args(["display-popup", "-c", &client, "-w", &w.to_string(), "-h", &h.to_string(), "-x", &x, "-y", &y, "-E", &cmd.join(" ")])

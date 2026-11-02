@@ -16,7 +16,7 @@ The log contains your Frigate address and camera names — remove anything you d
 
 - [Rust](https://rustup.rs) stable, 1.87 or later.
 - **Windows application:** Windows 10 or 11, 64-bit, with either the MSVC (`x86_64-pc-windows-msvc`, default) or the GNU (`x86_64-pc-windows-gnu`) toolchain. Its only dependency is the [`windows`](https://crates.io/crates/windows) crate. Optional: [Inno Setup 6](https://jrsoftware.org/isinfo.php) to build the installer.
-- **Linux console version:** Linux (or WSL on Windows) with `ffmpeg`; its dependencies are the `libc` and `fontdue` crates. Optional: `musl-tools` for a static binary and [cargo-deb](https://crates.io/crates/cargo-deb) for the Debian package — see [Testing the Linux console version](#testing-the-linux-console-version).
+- **Linux version:** Linux (or WSL on Windows) with `ffmpeg`; its dependencies are the `libc` and `fontdue` crates. Optional: `musl-tools` for a static binary and [cargo-deb](https://crates.io/crates/cargo-deb) for the Debian package — see [Testing the Linux version](#testing-the-linux-version).
 - Optional: a Frigate server with go2rtc to try things for real.
 
 The Windows application:
@@ -48,7 +48,7 @@ To try the behaviour of Windows "N" editions without Media Foundation, start the
 
 To try the update path, start the installed app with `FRIGATEPIP_FAKE_VERSION=1.0.0`: it then treats the latest GitHub release as newer and offers to install it (**Settings → Connection → Check now**).
 
-### Testing the Linux console version
+### Testing the Linux version
 
 Build and test on Linux (WSL works well: it has a terminal with Sixel in Windows Terminal, and X11/Wayland/PulseAudio through WSLg):
 
@@ -66,6 +66,10 @@ ffmpeg -f rawvideo -pix_fmt bgra -s 1280x720 -i /tmp/fakefb screen.png
 ```
 
 Note that the window's background is put back when FrigatePiP exits, so copy the file while it runs. `FRIGATEPIP_FFMPEG_LOG=/tmp/ff.log` collects ffmpeg's messages; `FRIGATEPIP_AUDIO_OUT=wav:/tmp/a.wav` records the camera audio to a file instead of playing it.
+
+Desktop windows can be tested without a desktop on a virtual X server: `Xvfb :5 -screen 0 1600x900x24 -ac &`, then `DISPLAY=:5 ./target/release/frigate-pip --output window --test front_door`; a picture of the screen: `ffmpeg -f x11grab -video_size 1600x900 -i :5 -frames:v 1 screen.png`. Under WSLg the windows are created in the right place, but their picture does not appear on the Windows screen, so use Xvfb there.
+
+The tray icon can be checked without a panel: start a session bus with `dbus-launch`, run the desktop windows with that `DBUS_SESSION_BUS_ADDRESS`, and call them like a panel does, e.g. `busctl --user call <name> /MenuBar com.canonical.dbusmenu GetLayout iias 0 10 0` or `… Event isvu 53 clicked i 0 0`.
 
 tmux popups need a tmux client: start tmux in a terminal, then `./target/release/frigate-pip --output tmux --test front_door` from another tmux window.
 
@@ -98,6 +102,7 @@ Shared by both versions:
 | `src/filter.rs` | Decides whether a Frigate `events` / `reviews` message opens a window. |
 | `src/rtsp.rs`, `src/rtp.rs` | RTSP client (TCP interleaved, Basic/Digest auth), SDP and RTP depacketizing. |
 | `src/audio.rs` | Camera audio: AAC / G.711 depacketizing and decoding; WASAPI playback on Windows. |
+| `src/hub.rs` | Prebuffer: persistent RTSP connections that keep the last GOP; the Windows player and the Linux ffmpeg pipeline subscribe to it. |
 | `src/ws.rs`, `src/mqtt.rs`, `src/net.rs` | Minimal WebSocket, MQTT and HTTP clients. |
 | `src/json.rs`, `src/util.rs` | JSON parser, small utilities and logging. |
 | `src/i18n/` | Translations: `mod.rs` (the `Strings` struct and language selection) and one file per language. |
@@ -112,8 +117,7 @@ Windows application:
 | `src/render.rs` | Drawing: Direct3D 11 swap chain, video processor, Direct2D/DirectWrite caption, GDI quick paint. |
 | `src/decoder.rs` | H.264 / H.265 decoding with Media Foundation (hardware or software). |
 | `src/h264.rs` | Rewrites the H.264 SPS so the Windows decoder outputs frames without delay. |
-| `src/hub.rs` | Prebuffer: persistent RTSP connections that keep the last GOP. |
-| `src/icon.rs` | Tray icon drawn in code. |
+| `src/icon.rs` | Tray icon drawn in code (also the pixels of the Linux tray icon). |
 | `src/update.rs` | Update check on GitHub (HTTPS via WinHTTP), download with SHA-256 check, silent installer run. |
 | `installer/frigate-pip.iss` | Inno Setup script. |
 | `build.rs`, `.cargo/config.toml` | MSVC builds: delay-loaded `mfplat.dll` and a statically linked C runtime, so the exe starts on any Windows 10/11 PC. |
@@ -122,8 +126,8 @@ Linux console version:
 
 | Path | Contents |
 |---|---|
-| `src/console/` | `mod.rs` (main loop, windows, keys, viewer mode for tmux popups), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `tmux.rs` (tmux popups), `canvas.rs` (pictures and captions). |
-| `packaging/` | Debian package: `frigate-pip@.service` and the maintainer scripts; the APT repository's public key and the GitHub Pages start page. |
+| `src/console/` | `mod.rs` (main loop, windows, keys, mouse actions, viewer mode for tmux popups), `video.rs` (snapshot, RTSP → ffmpeg, MJPEG), `ffmpeg.rs`, `desktop.rs` (desktop windows), `x11.rs` (a minimal X11 client: windows, pictures, mouse events, monitors), `dbus.rs` (a minimal D-Bus client), `tray.rs` (tray icon with its menu, desktop notifications), `web.rs` (the settings page), `fb.rs` (framebuffer), `term.rs` (Kitty, Sixel, half blocks, status line), `tmux.rs` (tmux popups), `canvas.rs` (pictures, captions and buttons). |
+| `packaging/` | Debian package: `frigate-pip@.service`, the menu entry and icon, and the maintainer scripts; the APT repository's public key and the GitHub Pages start page. |
 
 Everything else:
 

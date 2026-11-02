@@ -1,13 +1,23 @@
 //! Prebuffer: a persistent RTSP connection to the camera and the last GOP in memory (not decoded).
-//! Audio (when enabled) is only forwarded live, without buffering.
+//! Audio (when enabled) is only forwarded live, without buffering. Shared by the Windows player
+//! and the Linux ffmpeg pipeline: subscribers are plain functions.
 
 use crate::audio::AudioTrack;
-use crate::player::{Input, SRC_PREBUF};
 use crate::rtp::{AccessUnit, VideoTrack};
 use crate::rtsp::Media;
 use crate::util::Cancel;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
+
+/// What a subscriber gets: the tracks, video access units, audio frames, or the end.
+pub enum Feed {
+    Track(VideoTrack, Option<AudioTrack>),
+    Au(Arc<AccessUnit>),
+    Audio(Arc<Vec<u8>>),
+    Failed(String),
+}
+
+/// A subscriber; `false` = it is gone (the window closed).
+pub type Sink = Box<dyn Fn(Feed) -> bool + Send>;
 
 pub struct Hub {
     inner: Arc<Inner>,
@@ -25,7 +35,7 @@ struct State {
     track: Option<(VideoTrack, Option<AudioTrack>)>,
     gop: Vec<Arc<AccessUnit>>,
     bytes: usize,
-    subs: Vec<Sender<Input>>,
+    subs: Vec<Sink>,
 }
 
 const MAX_GOP_BYTES: usize = 24 << 20;
@@ -47,18 +57,18 @@ impl Hub {
         self.inner.audio
     }
 
-    /// Attaches a receiver: it gets the tracks and current GOP at once, then subsequent frames.
+    /// Attaches a subscriber: it gets the tracks and current GOP at once, then subsequent frames.
     /// `false` if the stream is currently down.
-    pub fn subscribe(&self, tx: &Sender<Input>) -> bool {
+    pub fn subscribe(&self, sink: Sink) -> bool {
         let mut st = self.inner.state.lock().unwrap();
         let Some((video, audio)) = st.track.clone() else { return false };
-        if st.gop.is_empty() || tx.send(Input::Track(SRC_PREBUF, video, audio)).is_err() {
+        if st.gop.is_empty() || !sink(Feed::Track(video, audio)) {
             return false;
         }
         for au in &st.gop {
-            let _ = tx.send(Input::Au(SRC_PREBUF, au.clone()));
+            let _ = sink(Feed::Au(au.clone()));
         }
-        st.subs.push(tx.clone());
+        st.subs.push(sink);
         true
     }
 }
@@ -84,7 +94,7 @@ fn run(inner: Arc<Inner>, camera: String) {
                 st.track = Some((video.clone(), audio.cloned()));
                 st.gop.clear();
                 st.bytes = 0;
-                st.subs.retain(|s| s.send(Input::Track(SRC_PREBUF, video.clone(), audio.cloned())).is_ok());
+                st.subs.retain(|s| s(Feed::Track(video.clone(), audio.cloned())));
             },
             |media| {
                 let mut st = inner.state.lock().unwrap();
@@ -103,12 +113,12 @@ fn run(inner: Arc<Inner>, camera: String) {
                                 st.bytes = 0;
                             }
                         }
-                        st.subs.retain(|s| s.send(Input::Au(SRC_PREBUF, au.clone())).is_ok());
+                        st.subs.retain(|s| s(Feed::Au(au.clone())));
                     }
                     Media::Audio(frame) => {
                         if !st.subs.is_empty() {
                             let frame = Arc::new(frame);
-                            st.subs.retain(|s| s.send(Input::Audio(SRC_PREBUF, frame.clone())).is_ok());
+                            st.subs.retain(|s| s(Feed::Audio(frame.clone())));
                         }
                     }
                 }
@@ -125,7 +135,7 @@ fn run(inner: Arc<Inner>, camera: String) {
             st.gop.clear();
             st.bytes = 0;
             for s in st.subs.drain(..) {
-                let _ = s.send(Input::LiveFailed(SRC_PREBUF, err.clone()));
+                s(Feed::Failed(err.clone()));
             }
         }
         if inner.cancel.is_set() {

@@ -377,9 +377,19 @@ fn flag(b: bool) -> &'static str {
     }
 }
 
+/// A value as written to config.ini: quoted when it holds a comment sign or spaces at
+/// either end, so that it reads back unchanged (passwords, names).
+pub fn ini_value(v: &str) -> String {
+    if v.contains([';', '#']) || v != v.trim() {
+        format!("\"{v}\"")
+    } else {
+        v.to_string()
+    }
+}
+
 /// Writes all settings to the INI document (existing lines and comments are kept).
 pub fn write_all(c: &Config, d: &mut IniDoc) {
-    let quoted = |v: &str| if v.contains([';', '#']) || v != v.trim() { format!("\"{v}\"") } else { v.to_string() };
+    let quoted = ini_value;
     let pairs: [(&str, &str, String); 34] = [
         ("frigate", "url", c.url.clone()),
         ("frigate", "source", c.source.key().into()),
@@ -491,7 +501,8 @@ ignore_stationary = true
 min_score = 0
 
 [display]
-; Windows only: primary = primary monitor, 1, 2, 3... = monitor number from the left
+; primary = primary monitor, 1, 2, 3... = monitor number from the left
+; (Windows and Linux desktop windows)
 monitor = primary
 ; top-left, top-right, bottom-left, bottom-right
 position = bottom-right
@@ -503,9 +514,9 @@ width = 480
 duration = 15
 ; Maximum time (s) a window is shown, even if the object keeps moving
 max_duration = 120
-; Windows only: keep windows above all other windows
+; Keep windows above all other windows (Windows and Linux desktop windows)
 topmost = true
-; Windows only: short system sound when a window appears (not the camera audio)
+; Short notification sound when a window appears (not the camera audio)
 sound = false
 ; Camera, object and time caption on the picture
 overlay = true
@@ -514,7 +525,8 @@ max_popups = 4
 ; When all windows are in use: true = the new event replaces the oldest window
 ; (same place on the screen), false = the new event is skipped
 replace = true
-; Windows only: do not show windows while a full-screen game or presentation is running
+; Do not show windows while a full-screen game or presentation is running
+; (Windows and Linux desktop windows)
 skip_fullscreen = false
 
 [video]
@@ -526,8 +538,8 @@ live = rtsp
 ; sub / main = always this stream
 stream = auto
 auto_main_width = 800
-; Windows only - prebuffer: keeps a connection to every camera's sub stream so live video
-; starts at once (~0.15 s) instead of at the next key frame (up to ~1 s).
+; Prebuffer: keeps a connection to every camera's sub stream so live video starts at once
+; (~0.15 s) instead of at the next key frame (up to ~1 s). Linux: not for tmux popups.
 ; Cost: about 0.1-0.5 Mbit/s of local network traffic per camera, all the time.
 prebuffer = false
 ; Windows only: keep the graphics device ready - video starts ~130 ms sooner,
@@ -538,11 +550,12 @@ gpu_warm = false
 camera_audio = false
 
 [console]
-; Linux console version only (not used on Windows):
-; output = auto, framebuffer, terminal or tmux
+; Linux version only (not used on Windows):
+; output = auto, window (desktop), framebuffer, terminal or tmux
 ; graphics = auto, kitty, sixel or blocks (pictures in a terminal)
 ; framebuffer = /dev/fb0
 ; ffmpeg = ffmpeg
+; hwaccel = auto (video decoding on the graphics card for the main stream), on or off
 ; font = TrueType font for captions on the framebuffer (default: DejaVu Sans Bold)
 
 ; Per-camera overrides (optional):

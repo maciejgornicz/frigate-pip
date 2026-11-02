@@ -348,6 +348,60 @@ pub struct Strings {
     /// `--list`: how to use the names.
     #[cfg_attr(windows, allow(dead_code))]
     pub console_list_hint: &'static str,
+    /// Printed when the desktop windows start in a terminal.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_window_running: &'static str,
+    /// A second start of the desktop windows.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_already_running: &'static str,
+    /// `--quit` when nothing runs.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_not_running: &'static str,
+    /// `--autostart on`: {0} = the desktop entry written.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_autostart_on: &'static str,
+    /// `--autostart off`.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_autostart_off: &'static str,
+    /// Settings page: shown after saving.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_settings_saved: &'static str,
+    /// Settings page: saving failed, {0} = the reason.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_settings_not_saved: &'static str,
+    /// Settings page: the automatic language (from LANG).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_language_auto: &'static str,
+    /// Settings page: start with the desktop session.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_autostart: &'static str,
+    /// Settings page: its description.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_tip_autostart: &'static str,
+    /// Settings page: description of the language.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_tip_language: &'static str,
+    /// Settings page: RTSP (decoded by ffmpeg).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_live_rtsp: &'static str,
+    /// Settings page: description of the live picture.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_tip_live: &'static str,
+    /// Settings page: what the mouse does in a window.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_window_hint: &'static str,
+    /// Settings page: description of the window width.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_tip_width: &'static str,
+    /// Settings page: description of the notification sound.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_tip_sound: &'static str,
+    /// Notification at the first start.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_notify_setup: &'static str,
+    /// Notification when the desktop has no tray.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_notify_no_tray: &'static str,
 
     /// Frigate labels: (label, translation)
     pub labels: &'static [(&'static str, &'static str)],
@@ -398,6 +452,8 @@ mod tests {
                 (en.test_audio, s.test_audio),
                 (en.test_rtsp_fail, s.test_rtsp_fail),
                 (en.console_list_title, s.console_list_title),
+                (en.console_autostart_on, s.console_autostart_on),
+                (en.linux_settings_not_saved, s.linux_settings_not_saved),
                 (en.status_connected, s.status_connected),
                 (en.status_disconnected, s.status_disconnected),
                 (en.menu_update, s.menu_update),
