@@ -1,6 +1,6 @@
 [package]
 name = "frigate-pip"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 rust-version = "1.87"
 description = "Instant picture-in-picture camera windows for Frigate NVR on Windows"
