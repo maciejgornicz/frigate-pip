@@ -93,6 +93,10 @@ pub trait Output {
     fn monitors(&self) -> Vec<(i32, u32, u32, bool)> {
         Vec::new()
     }
+    /// A full-screen application is active (desktop windows; `skip_fullscreen`).
+    fn fullscreen(&mut self) -> bool {
+        false
+    }
 }
 
 /// What the user did with a desktop window.
@@ -108,6 +112,8 @@ pub enum Action {
     Hover(bool),
     /// Dragged to this place (in the usable area).
     Moved(i32, i32),
+    /// The mouse wheel: bigger (+1) or smaller (-1).
+    Wheel(i32),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -177,9 +183,10 @@ Usage: frigate-pip [options]
 Where the windows appear (--output):
   window       On the desktop (X11, or Wayland with XWayland): borderless windows above
                the others in a corner of the screen; runs in the background. Mouse: x
-               closes, the speaker mutes, drag moves, a click pins, a double click
-               opens the camera in Frigate, the right button closes. A tray icon has
-               the menu known from Windows; the settings open in the browser.
+               closes, the speaker mutes, drag moves, the wheel resizes, a click pins,
+               a double click opens the camera in Frigate, the right button closes.
+               A tray icon has the menu known from Windows; the settings open in the
+               browser.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
                with a monitor). Runs in the background, e.g. as a systemd service.
   terminal     Inside this terminal window (Kitty graphics, Sixel or half blocks).
@@ -489,7 +496,7 @@ fn open_output(c: &ConsoleCfg, cfg: &Config, tx: &Sender<Ev>) -> Result<(Box<dyn
     if matches!(output, "window" | "desktop") || (auto && std::env::var_os("DISPLAY").is_some()) {
         let tx = tx.clone();
         let font = canvas::Font::load(c.font.as_deref());
-        match desktop::Desktop::open(&cfg.monitor, font, move |e| {
+        match desktop::Desktop::open(cfg, font, move |e| {
             let _ = tx.send(Ev::Pointer(e));
         }) {
             Ok(d) => {
@@ -622,8 +629,13 @@ struct Win {
     hard: Instant,
     shared: Arc<video::Shared>,
     rect: Option<Rect>,
-    /// Picture size the decoder was started with.
+    /// Size of the window's picture (the mouse wheel changes it).
     size: (u32, u32),
+    /// Picture size the decoder was started with, and its go2rtc stream.
+    dec_size: (u32, u32),
+    stream: Option<String>,
+    /// Resized with the wheel: the decoder follows once the wheel stops.
+    resized: Option<Instant>,
     last_draw: Option<Instant>,
     /// Desktop windows: the mouse is over it, pinned with a click, dragged by the user.
     hovered: bool,
@@ -963,8 +975,59 @@ impl App {
                     (r.x, r.y) = (x, y);
                 }
             }
+            Action::Wheel(step) => {
+                // Like on Windows: 12 % per notch, from 160 px to the width of the screen.
+                let scale = self.out.scale();
+                let max = self.out.size().0.saturating_sub(2 * self.margin()).max(64);
+                let w = &mut self.wins[i];
+                let aspect = w.size.0 as f32 / w.size.1.max(1) as f32;
+                let factor = if step > 0 { 1.12 } else { 1.0 / 1.12 };
+                let width = ((w.size.0 as f32 * factor) as u32).clamp(((160.0 * scale) as u32).min(max), max);
+                w.size = (width & !1, ((width as f32 / aspect).round() as u32).max(2) & !1);
+                w.resized = Some(Instant::now());
+                if w.user_moved {
+                    let (width, height) = (w.size.0, w.size.1 + self.out.caption_height());
+                    if let Some(r) = w.rect.as_mut() {
+                        (r.w, r.h) = (width, height);
+                    }
+                }
+                w.shared.dirty.store(true, Ordering::Relaxed);
+                self.layout();
+                return;
+            }
         }
         w.shared.dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// The decoder of window `i` again, at the window's current size (after the wheel).
+    fn restart_video(&mut self, i: usize) {
+        let w = &mut self.wins[i];
+        let params = video::Params {
+            camera: w.camera.clone(),
+            frigate_url: self.cfg.url.clone(),
+            rtsp_url: w.stream.as_ref().map(|s| self.cfg.rtsp_url(s)),
+            live: self.cfg.live,
+            size: w.size,
+            audio: self.cfg.camera_audio,
+            t0: Instant::now(),
+        };
+        let tx = self.tx.clone();
+        let shared = video::start(
+            params,
+            self.ff.clone(),
+            Arc::new(move || {
+                let _ = tx.send(Ev::Wake);
+            }),
+        );
+        shared.muted.store(w.shared.muted.load(Ordering::Relaxed), Ordering::Relaxed);
+        // The last picture stays on the screen until the new one comes.
+        if let Some(frame) = w.shared.frame.lock().unwrap().clone() {
+            *shared.frame.lock().unwrap() = Some(frame);
+        }
+        w.shared.cancel.cancel();
+        w.shared = shared;
+        w.dec_size = w.size;
+        crate::log!("{}: video resized to {}x{}", w.camera, w.size.0, w.size.1);
     }
 
     /// A camera at once (`--test`, number keys): like a detection, also while paused.
@@ -982,6 +1045,10 @@ impl App {
     fn on_detection(&mut self, d: Detection, t0: Instant, test: bool) {
         if self.paused() && !test {
             crate::log!("{}: skipped (paused)", d.camera);
+            return;
+        }
+        if self.cfg.skip_fullscreen && !test && self.out.fullscreen() {
+            crate::log!("{}: skipped (full screen)", d.camera);
             return;
         }
         let info = self.cameras.iter().find(|c| c.name == d.camera).cloned();
@@ -1029,7 +1096,7 @@ impl App {
                 let params = video::Params {
                     camera: d.camera.clone(),
                     frigate_url: self.cfg.url.clone(),
-                    rtsp_url: stream.map(|s| self.cfg.rtsp_url(&s)),
+                    rtsp_url: stream.as_ref().map(|s| self.cfg.rtsp_url(s)),
                     live: self.cfg.live,
                     size,
                     audio: self.cfg.camera_audio,
@@ -1056,6 +1123,9 @@ impl App {
             shared,
             rect: None,
             size,
+            dec_size: size,
+            stream,
+            resized: None,
             last_draw: None,
             hovered: false,
             pinned: false,
@@ -1067,6 +1137,9 @@ impl App {
             None => self.wins.push(win),
         }
         self.layout();
+        if self.cfg.sound {
+            self.ff.play_notification_sound();
+        }
     }
 
     /// Picture size for a camera with this aspect ratio, within the screen.
@@ -1160,6 +1233,13 @@ impl App {
             (0..self.wins.len()).filter(|&i| now >= self.wins[i].deadline && !self.wins[i].hovered && !self.wins[i].pinned).collect();
         for i in expired.into_iter().rev() {
             self.close(i);
+        }
+        let settled: Vec<usize> = (0..self.wins.len())
+            .filter(|&i| self.wins[i].resized.is_some_and(|t| t.elapsed() > Duration::from_millis(700)) && self.wins[i].dec_size != self.wins[i].size)
+            .collect();
+        for i in settled {
+            self.wins[i].resized = None;
+            self.restart_video(i);
         }
         if self.out.refresh() {
             for w in &mut self.wins {

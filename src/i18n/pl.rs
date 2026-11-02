@@ -188,8 +188,9 @@ pub static STRINGS: Strings = Strings {
     linux_tip_language: "Język aplikacji. „Automatycznie” oznacza język systemu (LANG; angielski, jeśli nie jest obsługiwany).",
     linux_live_rtsp: "RTSP z go2rtc – płynny, dekodowany przez ffmpeg",
     linux_tip_live: "Skąd pochodzi obraz na żywo: RTSP z go2rtc (płynny, dekodowany przez ffmpeg), MJPEG z Frigate (ok. 5 kl./s) albo tylko odświeżane klatki.",
-    linux_window_hint: "W oknie: przeciągnij – przesuń, klik – przypnij, × lub prawy przycisk – zamknij, głośnik – dźwięk wł./wył., dwuklik – kamera we Frigate.",
-    linux_tip_width: "Szerokość okna podglądu w pikselach (pomnożona przez skalowanie pulpitu); wysokość wynika z proporcji obrazu kamery.",
+    linux_window_hint: "W oknie: przeciągnij – przesuń, klik – przypnij, kółko – rozmiar, × lub prawy przycisk – zamknij, głośnik – dźwięk wł./wył., dwuklik – kamera we Frigate.",
+    linux_tip_width: "Szerokość okna podglądu w pikselach (pomnożona przez skalowanie pulpitu); wysokość wynika z proporcji obrazu kamery. Rozmiar okna zmienisz też kółkiem myszy.",
+    linux_tip_sound: "Odtwarza dźwięk powiadomienia pulpitu, gdy pojawia się nowe okno. To nie jest dźwięk z kamery.",
     linux_notify_setup: "Wpisz w ustawieniach adres swojego serwera Frigate.",
     linux_notify_no_tray: "FrigatePiP działa w tle. Ten pulpit nie ma zasobnika na jego ikonę: uruchom FrigatePiP ponownie z menu aplikacji, aby otworzyć ustawienia.",
 

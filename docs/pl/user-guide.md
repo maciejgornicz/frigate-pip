@@ -414,7 +414,8 @@ Na pulpicie Linuksa okna podglądu działają jak w Windows: okna bez ramek nad 
 - **Uruchomienie:** menu aplikacji → **FrigatePiP** (po instalacji przez apt) albo `frigate-pip` w terminalu na pulpicie. Program działa w tle, bez terminala; na użytkownika działa jedna kopia. Ponowne uruchomienie (albo `frigate-pip --settings`) otwiera ustawienia działającej kopii.
 - **Razem z sesją pulpitu:** `frigate-pip --autostart on` (wyłączenie: `frigate-pip --autostart off`). Zatrzymanie: `frigate-pip --quit`.
 - **Ikona w zasobniku:** z tym samym menu co w Windows (zob. [Ikona w zasobniku](#4-ikona-w-zasobniku)); jej kolor pokazuje stan: niebieski — połączono, szary — brak połączenia, pomarańczowy — wstrzymano. Pojawia się w KDE Plasma, Xfce, Cinnamon, MATE i Budgie, a w GNOME z rozszerzeniem AppIndicator (jest w Ubuntu).
-- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, przeciągnięcie przesuwa okno, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
+- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
+- **Opcje okien:** `topmost` (przy `false` okna są zwykłymi oknami, które inne mogą zasłonić), `sound` (dźwięk powiadomienia pulpitu) i `skip_fullscreen` (nic, gdy aktywne okno jest na pełnym ekranie) działają jak w Windows.
 - **Ustawienia:** kliknięcie ikony (albo **Ustawienia…** w jej menu) otwiera je w przeglądarce — te same opcje, opisy i test połączenia co w Windows; strona otwiera się tylko na tym komputerze. Przy pierwszym uruchomieniu otwiera się sama. Zapisują się w `~/.config/frigate-pip/config.ini` (opisane niżej).
 
 ### Okienka tmux
@@ -460,7 +461,7 @@ Gdy FrigatePiP działa w terminalu lub w konsoli:
 
 ### Ustawienia
 
-Wersja dla Linuksa używa tego samego pliku `config.ini` (w `~/.config/frigate-pip/` lub `$XDG_CONFIG_HOME/frigate-pip/`) co wersja dla Windows — zob. [Plik ustawień](#7-plik-ustawień). Zmiany są stosowane w ciągu dwóch sekund od zapisania pliku. Używane są następujące ustawienia: wszystko w `[app]` (język), `[frigate]`, `[mqtt]`, `[trigger]`, a w `[display]`: `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`; w `[video]`: `live`, `stream`, `auto_main_width`, `camera_audio`; oraz sekcje `[camera.<name>]`. Ustawienia dostępne tylko w Windows (`topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) są pomijane. `frigate-pip --list` pokazuje nazwy Twoich kamer, obiektów i stref do filtrów w `[trigger]`.
+Wersja dla Linuksa używa tego samego pliku `config.ini` (w `~/.config/frigate-pip/` lub `$XDG_CONFIG_HOME/frigate-pip/`) co wersja dla Windows — zob. [Plik ustawień](#7-plik-ustawień). Zmiany są stosowane w ciągu dwóch sekund od zapisania pliku. Używane są następujące ustawienia: wszystko w `[app]` (język), `[frigate]`, `[mqtt]`, `[trigger]`, a w `[display]`: `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen`; w `[video]`: `live`, `stream`, `auto_main_width`, `camera_audio`; oraz sekcje `[camera.<name>]`. Ustawienia dostępne tylko w Windows (`prebuffer`, `gpu_warm`, `check_updates`) są pomijane. `frigate-pip --list` pokazuje nazwy Twoich kamer, obiektów i stref do filtrów w `[trigger]`.
 
 Dodatkowe ustawienia w sekcji `[console]`:
 

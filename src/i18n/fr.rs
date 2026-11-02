@@ -188,8 +188,9 @@ pub static STRINGS: Strings = Strings {
     linux_tip_language: "Langue de l’application. « Automatique » suit la langue du système (LANG ; anglais si elle n’est pas prise en charge).",
     linux_live_rtsp: "RTSP depuis go2rtc – fluide, décodé par ffmpeg",
     linux_tip_live: "Mode de réception de l’image en direct : RTSP depuis go2rtc (fluide, décodé par ffmpeg), MJPEG depuis Frigate (environ 5 i/s) ou uniquement des instantanés actualisés.",
-    linux_window_hint: "Dans la fenêtre : glisser – déplacer, clic – épingler, × ou clic droit – fermer, haut-parleur – son oui/non, double-clic – caméra dans Frigate.",
-    linux_tip_width: "Largeur d’une fenêtre d’aperçu en pixels (multipliée par la mise à l’échelle du bureau). La hauteur suit les proportions de l’image de la caméra.",
+    linux_window_hint: "Dans la fenêtre : glisser – déplacer, clic – épingler, molette – redimensionner, × ou clic droit – fermer, haut-parleur – son oui/non, double-clic – caméra dans Frigate.",
+    linux_tip_width: "Largeur d’une fenêtre d’aperçu en pixels (multipliée par la mise à l’échelle du bureau). La hauteur suit les proportions de l’image de la caméra. Vous pouvez aussi redimensionner une fenêtre avec la molette de la souris.",
+    linux_tip_sound: "Joue le son de notification du bureau lorsqu’une nouvelle fenêtre apparaît. Ce n’est pas le son de la caméra.",
     linux_notify_setup: "Saisissez dans les paramètres l’adresse de votre serveur Frigate.",
     linux_notify_no_tray: "FrigatePiP s’exécute en arrière-plan. Ce bureau n’a pas de zone de notification pour son icône : relancez FrigatePiP depuis le menu des applications pour ouvrir les paramètres.",
 

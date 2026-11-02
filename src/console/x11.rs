@@ -77,7 +77,11 @@ const ATOM: u32 = 4;
 const CARDINAL: u32 = 6;
 const RESOURCE_MANAGER: u32 = 23;
 const STRING: u32 = 31;
+const WINDOW: u32 = 33;
+const WM_HINTS: u32 = 35;
 const WM_NAME: u32 = 39;
+const WM_NORMAL_HINTS: u32 = 40;
+const WM_SIZE_HINTS: u32 = 41;
 const WM_CLASS: u32 = 67;
 
 pub struct X11 {
@@ -406,7 +410,12 @@ impl X11 {
 
     /// A property of the root window: (format, value).
     fn root_property(&mut self, property: u32, kind: u32) -> Option<(u8, Vec<u8>)> {
-        let s = self.send(&Req::new(20, 0).u32(self.root).u32(property).u32(kind).u32(0).u32(4096).done());
+        self.property(self.root, property, kind)
+    }
+
+    /// A property of a window: (format, value).
+    fn property(&mut self, window: u32, property: u32, kind: u32) -> Option<(u8, Vec<u8>)> {
+        let s = self.send(&Req::new(20, 0).u32(window).u32(property).u32(kind).u32(0).u32(4096).done());
         let r = self.reply(s)?;
         let (format, len) = (r[1], u32le(&r, 16) as usize);
         let bytes = len * (format as usize / 8).max(1);
@@ -435,15 +444,31 @@ impl X11 {
         (format == 32 && v.len() >= 16).then(|| (u32le(&v, 0) as i32, u32le(&v, 4) as i32, u32le(&v, 8), u32le(&v, 12)))
     }
 
+    /// The active window is in full-screen mode (a game, a video, a presentation).
+    pub fn fullscreen_active(&mut self) -> bool {
+        let active = self.atom("_NET_ACTIVE_WINDOW");
+        let Some((32, v)) = self.root_property(active, WINDOW) else { return false };
+        let window = if v.len() >= 4 { u32le(&v, 0) } else { 0 };
+        if window == 0 {
+            return false;
+        }
+        let (state, full) = (self.atom("_NET_WM_STATE"), self.atom("_NET_WM_STATE_FULLSCREEN"));
+        match self.property(window, state, ATOM) {
+            Some((32, v)) => v.chunks_exact(4).any(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]) == full),
+            _ => false,
+        }
+    }
+
     /// Desktop scaling from `Xft.dpi` (192 = 2×); 1.0 when not set.
     pub fn scale(&mut self) -> f32 {
         let dpi = self.root_property(RESOURCE_MANAGER, STRING).and_then(|(_, v)| xft_dpi(&String::from_utf8_lossy(&v)));
         dpi.map_or(1.0, |d| (d / 96.0).clamp(1.0, 4.0))
     }
 
-    /// A borderless window above the others that never takes the keyboard focus
-    /// (override-redirect: the window manager leaves it alone).
-    pub fn create_window(&mut self, x: i32, y: i32, w: u32, h: u32) -> u32 {
+    /// A borderless window that never takes the keyboard focus. `on_top`: above all others
+    /// (override-redirect: the window manager leaves it alone); otherwise an ordinary
+    /// window the desktop manages (without frame or taskbar entry), which others can cover.
+    pub fn create_window(&mut self, x: i32, y: i32, w: u32, h: u32, on_top: bool) -> u32 {
         let id = self.new_id();
         // Exposure, ButtonPress, ButtonRelease, EnterWindow, LeaveWindow, PointerMotion.
         let events: u32 = (1 << 15) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6);
@@ -460,17 +485,34 @@ impl X11 {
             // back-pixel, override-redirect, event-mask
             .u32((1 << 1) | (1 << 9) | (1 << 11))
             .u32(0)
-            .u32(1)
+            .u32(on_top as u32)
             .u32(events)
             .done();
         self.send(&req);
         let utf8 = self.atom("UTF8_STRING");
-        let (net_name, kind, notification) =
-            (self.atom("_NET_WM_NAME"), self.atom("_NET_WM_WINDOW_TYPE"), self.atom("_NET_WM_WINDOW_TYPE_NOTIFICATION"));
+        let (net_name, kind) = (self.atom("_NET_WM_NAME"), self.atom("_NET_WM_WINDOW_TYPE"));
         self.set_property(id, WM_NAME, STRING, 8, b"FrigatePiP");
         self.set_property(id, net_name, utf8, 8, b"FrigatePiP");
         self.set_property(id, WM_CLASS, STRING, 8, b"frigate-pip\0FrigatePiP\0");
-        self.set_property(id, kind, ATOM, 32, &notification.to_le_bytes());
+        if on_top {
+            let notification = self.atom("_NET_WM_WINDOW_TYPE_NOTIFICATION");
+            self.set_property(id, kind, ATOM, 32, &notification.to_le_bytes());
+        } else {
+            // Hints for the window manager: no frame, no taskbar entry, no focus, our place.
+            let utility = self.atom("_NET_WM_WINDOW_TYPE_UTILITY");
+            self.set_property(id, kind, ATOM, 32, &utility.to_le_bytes());
+            let (state, skip_taskbar, skip_pager) =
+                (self.atom("_NET_WM_STATE"), self.atom("_NET_WM_STATE_SKIP_TASKBAR"), self.atom("_NET_WM_STATE_SKIP_PAGER"));
+            self.set_property(id, state, ATOM, 32, &words(&[skip_taskbar, skip_pager]));
+            let motif = self.atom("_MOTIF_WM_HINTS");
+            self.set_property(id, motif, motif, 32, &words(&[2, 0, 0, 0, 0]));
+            self.set_property(id, WM_HINTS, WM_HINTS, 32, &words(&[1, 0, 0, 0, 0, 0, 0, 0, 0]));
+            let mut size = [0u32; 18];
+            size[..5].copy_from_slice(&[1 | 2 | 4 | 8, x as u32, y as u32, w, h]);
+            self.set_property(id, WM_NORMAL_HINTS, WM_SIZE_HINTS, 32, &words(&size));
+            let user_time = self.atom("_NET_WM_USER_TIME");
+            self.set_property(id, user_time, CARDINAL, 32, &words(&[0]));
+        }
         self.send(&Req::new(8, 0).u32(id).done());
         id
     }
@@ -481,10 +523,14 @@ impl X11 {
         self.send(&req);
     }
 
-    /// Moves and resizes a window and puts it on top.
-    pub fn configure(&mut self, window: u32, x: i32, y: i32, w: u32, h: u32) {
-        let req = Req::new(12, 0).u32(window).u16(1 | 2 | 4 | 8 | 64).pad(2).u32(x as u32).u32(y as u32).u32(w.max(1)).u32(h.max(1)).u32(0).done();
-        self.send(&req);
+    /// Moves and resizes a window (and puts it on top with `raise`).
+    pub fn configure(&mut self, window: u32, x: i32, y: i32, w: u32, h: u32, raise: bool) {
+        let mask = 1 | 2 | 4 | 8 | if raise { 64 } else { 0 };
+        let mut req = Req::new(12, 0).u32(window).u16(mask).pad(2).u32(x as u32).u32(y as u32).u32(w.max(1)).u32(h.max(1));
+        if raise {
+            req = req.u32(0);
+        }
+        self.send(&req.done());
     }
 
     /// Puts a window above the others again.
@@ -520,6 +566,11 @@ impl X11 {
             y += n;
         }
     }
+}
+
+/// 32-bit property values.
+fn words(v: &[u32]) -> Vec<u8> {
+    v.iter().flat_map(|w| w.to_le_bytes()).collect()
 }
 
 fn parse_monitors(r: &[u8]) -> Vec<Monitor> {
@@ -618,6 +669,23 @@ mod tests {
         assert_eq!((s.root, s.root_size, s.max_request, s.id_base), (0x1234, (1920, 1080), 262140, 0x0040_0000));
         b[22] = 1;
         assert!(parse_setup(&b).is_err());
+    }
+
+    /// Needs an X server: `DISPLAY=:5 cargo test --release -- --ignored fullscreen` (e.g. Xvfb).
+    #[test]
+    #[ignore]
+    fn fullscreen_detection_on_a_real_display() {
+        let mut x = X11::connect(|_| {}).expect("an X display in DISPLAY");
+        let w = x.create_window(0, 0, 10, 10, true);
+        let (state, full, active) = (x.atom("_NET_WM_STATE"), x.atom("_NET_WM_STATE_FULLSCREEN"), x.atom("_NET_ACTIVE_WINDOW"));
+        let root = x.root;
+        x.set_property(w, state, ATOM, 32, &words(&[full]));
+        x.set_property(root, active, WINDOW, 32, &words(&[w]));
+        assert!(x.fullscreen_active());
+        x.set_property(w, state, ATOM, 32, &[]);
+        assert!(!x.fullscreen_active());
+        x.set_property(root, active, WINDOW, 32, &words(&[0]));
+        x.destroy(w);
     }
 
     #[test]

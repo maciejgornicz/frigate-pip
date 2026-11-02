@@ -504,9 +504,9 @@ width = 480
 duration = 15
 ; Maximum time (s) a window is shown, even if the object keeps moving
 max_duration = 120
-; Windows only: keep windows above all other windows
+; Keep windows above all other windows (Windows and Linux desktop windows)
 topmost = true
-; Windows only: short system sound when a window appears (not the camera audio)
+; Short notification sound when a window appears (not the camera audio)
 sound = false
 ; Camera, object and time caption on the picture
 overlay = true
@@ -515,7 +515,8 @@ max_popups = 4
 ; When all windows are in use: true = the new event replaces the oldest window
 ; (same place on the screen), false = the new event is skipped
 replace = true
-; Windows only: do not show windows while a full-screen game or presentation is running
+; Do not show windows while a full-screen game or presentation is running
+; (Windows and Linux desktop windows)
 skip_fullscreen = false
 
 [video]

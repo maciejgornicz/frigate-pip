@@ -390,6 +390,9 @@ pub struct Strings {
     /// Settings page: description of the window width.
     #[cfg_attr(windows, allow(dead_code))]
     pub linux_tip_width: &'static str,
+    /// Settings page: description of the notification sound.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub linux_tip_sound: &'static str,
     /// Notification at the first start.
     #[cfg_attr(windows, allow(dead_code))]
     pub linux_notify_setup: &'static str,

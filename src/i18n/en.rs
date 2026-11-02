@@ -188,8 +188,9 @@ pub static STRINGS: Strings = Strings {
     linux_tip_language: "Language of the application. “Automatic” follows the system language (LANG; English if it is not supported).",
     linux_live_rtsp: "RTSP from go2rtc – smooth, decoded by ffmpeg",
     linux_tip_live: "How the live picture is received: RTSP from go2rtc (smooth, decoded by ffmpeg), MJPEG from Frigate (about 5 fps) or only refreshed snapshots.",
-    linux_window_hint: "In the window: drag – move, click – pin, × or right click – close, speaker – sound on/off, double-click – camera in Frigate.",
-    linux_tip_width: "Width of a preview window in pixels (multiplied by the desktop scaling); the height follows the camera’s aspect ratio.",
+    linux_window_hint: "In the window: drag – move, click – pin, wheel – resize, × or right click – close, speaker – sound on/off, double-click – camera in Frigate.",
+    linux_tip_width: "Width of a preview window in pixels (multiplied by the desktop scaling); the height follows the camera’s aspect ratio. You can also resize a window with the mouse wheel.",
+    linux_tip_sound: "Plays the desktop’s notification sound when a new window appears. This is not the camera audio.",
     linux_notify_setup: "Enter the address of your Frigate server in the settings.",
     linux_notify_no_tray: "FrigatePiP runs in the background. This desktop has no tray for its icon: start FrigatePiP again from the applications menu to open the settings.",
 

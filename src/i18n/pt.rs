@@ -188,8 +188,9 @@ pub static STRINGS: Strings = Strings {
     linux_tip_language: "Idioma da aplicação. «Automático» segue o idioma do sistema (LANG; inglês, se não for suportado).",
     linux_live_rtsp: "RTSP do go2rtc – fluido, descodificado pelo ffmpeg",
     linux_tip_live: "Como é recebida a imagem ao vivo: RTSP do go2rtc (fluido, descodificado pelo ffmpeg), MJPEG do Frigate (cerca de 5 fps) ou apenas instantâneos atualizados.",
-    linux_window_hint: "Na janela: arrastar – mover, clique – fixar, × ou clique direito – fechar, altifalante – som sim/não, duplo clique – câmara no Frigate.",
-    linux_tip_width: "Largura da janela de pré-visualização em pixels (multiplicada pela escala do ambiente de trabalho); a altura segue a proporção da câmara.",
+    linux_window_hint: "Na janela: arrastar – mover, clique – fixar, roda – tamanho, × ou clique direito – fechar, altifalante – som sim/não, duplo clique – câmara no Frigate.",
+    linux_tip_width: "Largura da janela de pré-visualização em pixels (multiplicada pela escala do ambiente de trabalho); a altura segue a proporção da câmara. Também pode redimensionar a janela com a roda do rato.",
+    linux_tip_sound: "Reproduz o som de notificação do ambiente de trabalho quando aparece uma nova janela. Não é o áudio da câmara.",
     linux_notify_setup: "Introduza nas configurações o endereço do seu servidor Frigate.",
     linux_notify_no_tray: "O FrigatePiP funciona em segundo plano. Este ambiente de trabalho não tem área de notificação para o seu ícone: inicie o FrigatePiP de novo a partir do menu de aplicações para abrir as configurações.",
 

@@ -189,7 +189,7 @@ fn parse_form(s: &str) -> Vec<(String, String)> {
 }
 
 /// Settings fields of the page: `section.key` as in config.ini.
-const FIELDS: [&str; 23] = [
+const FIELDS: [&str; 26] = [
     "frigate.url",
     "frigate.source",
     "frigate.rtsp",
@@ -210,6 +210,9 @@ const FIELDS: [&str; 23] = [
     "display.max_popups",
     "display.replace",
     "display.overlay",
+    "display.topmost",
+    "display.sound",
+    "display.skip_fullscreen",
     "video.live",
     "video.stream",
     "video.auto_main_width",
@@ -448,7 +451,10 @@ fn page(c: &Config, info: &Info, saved: bool) -> String {
     );
     window += &row("display.max_popups", s.max_windows, number("display.max_popups", c.max_popups, 1, 16, ""), s.tip_max_windows);
     window += &row("display.replace", s.when_full, replace, s.tip_when_full);
+    window += &row("display.topmost", "", checkbox("display.topmost", c.topmost, s.topmost), s.tip_topmost);
     window += &row("display.overlay", "", checkbox("display.overlay", c.overlay, s.overlay), s.tip_overlay);
+    window += &row("display.sound", "", checkbox("display.sound", c.sound, s.sound), s.linux_tip_sound);
+    window += &row("display.skip_fullscreen", "", checkbox("display.skip_fullscreen", c.skip_fullscreen, s.skip_fullscreen), s.tip_skip_fullscreen);
     window += &format!("<p class=\"note\">{}</p>\n", esc(s.linux_window_hint));
 
     let mut video = String::new();

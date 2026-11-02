@@ -36,6 +36,8 @@ struct Win {
     press: Option<Press>,
     /// Time and place of the last left click (double clicks).
     last_click: Option<(u32, i32, i32)>,
+    /// Above all other windows (`topmost`), or an ordinary managed window.
+    on_top: bool,
 }
 
 pub struct Desktop {
@@ -45,6 +47,8 @@ pub struct Desktop {
     scale: f32,
     monitor: String,
     monitors: Vec<Monitor>,
+    /// New windows stay above all others (`topmost`).
+    topmost: bool,
     changed: bool,
     /// Calls of `refresh` (every 0.5 s).
     ticks: u32,
@@ -94,14 +98,15 @@ fn usable(m: Monitor, work: Option<(i32, i32, u32, u32)>) -> Rect {
 
 impl Desktop {
     /// Connects to the desktop; pointer events go to `on_event` (from another thread).
-    pub fn open(monitor: &str, font: Option<Font>, on_event: impl Fn(Event) + Send + 'static) -> Result<Desktop, String> {
+    pub fn open(cfg: &crate::config::Config, font: Option<Font>, on_event: impl Fn(Event) + Send + 'static) -> Result<Desktop, String> {
         let x = X11::connect(on_event)?;
         let mut d = Desktop {
             x,
             area: Rect { x: 0, y: 0, w: 0, h: 0 },
             scale: 1.0,
-            monitor: monitor.to_string(),
+            monitor: cfg.monitor.clone(),
             monitors: Vec::new(),
+            topmost: cfg.topmost,
             changed: false,
             ticks: 0,
             font,
@@ -171,9 +176,9 @@ impl Output for Desktop {
 
     fn draw(&mut self, id: u64, rect: Rect, img: &Image, caption: &str, live: bool) {
         let r = Rect { x: self.area.x + rect.x, y: self.area.y + rect.y, w: rect.w, h: rect.h };
-        let Desktop { x, wins, .. } = self;
+        let Desktop { x, wins, topmost, .. } = self;
         let w = wins.entry(id).or_insert_with(|| Win {
-            xid: x.create_window(r.x, r.y, r.w, r.h),
+            xid: x.create_window(r.x, r.y, r.w, r.h, *topmost),
             rect: r,
             last: None,
             hover: false,
@@ -181,10 +186,11 @@ impl Output for Desktop {
             sound: 0,
             press: None,
             last_click: None,
+            on_top: *topmost,
         });
         // Not while the user drags it.
         if w.rect != r && w.press.as_ref().is_none_or(|p| !p.moved) {
-            x.configure(w.xid, r.x, r.y, r.w, r.h);
+            x.configure(w.xid, r.x, r.y, r.w, r.h, w.on_top);
             w.rect = r;
         }
         w.last = Some((img.clone(), caption.to_string(), live));
@@ -202,7 +208,7 @@ impl Output for Desktop {
         // above ours; GNOME and KDE keep such windows on top themselves.
         self.ticks += 1;
         if self.ticks.is_multiple_of(4) {
-            let xids: Vec<u32> = self.wins.values().filter(|w| w.press.is_none()).map(|w| w.xid).collect();
+            let xids: Vec<u32> = self.wins.values().filter(|w| w.on_top && w.press.is_none()).map(|w| w.xid).collect();
             for xid in xids {
                 self.x.raise(xid);
             }
@@ -211,11 +217,17 @@ impl Output for Desktop {
     }
 
     fn configure(&mut self, cfg: &crate::config::Config) {
+        // Windows opened from now on.
+        self.topmost = cfg.topmost;
         if cfg.monitor != self.monitor {
             self.monitor = cfg.monitor.clone();
             self.find_area();
             self.changed = true;
         }
+    }
+
+    fn fullscreen(&mut self) -> bool {
+        self.x.fullscreen_active()
     }
 
     fn set_sound(&mut self, id: u64, state: u8) {
@@ -307,6 +319,9 @@ impl Output for Desktop {
                 }
             }
             Event::Release { button: 3, .. } => actions.push(Action::Close),
+            // The wheel: 4 = up (bigger), 5 = down (smaller).
+            Event::Press { button: 4, .. } => actions.push(Action::Wheel(1)),
+            Event::Press { button: 5, .. } => actions.push(Action::Wheel(-1)),
             _ => {}
         }
         if repaint {

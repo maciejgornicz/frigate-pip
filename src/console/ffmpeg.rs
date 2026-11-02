@@ -106,6 +106,32 @@ impl Ffmpeg {
         c.spawn().map(Proc)
     }
 
+    /// The desktop's notification sound (`sound`): libcanberra's player when installed (it
+    /// follows the sound theme and its volume), otherwise the freedesktop sound file played
+    /// by ffmpeg. Never waits.
+    pub fn play_notification_sound(&self) {
+        let canberra = Command::new("canberra-gtk-play")
+            .args(["--id=message-new-instant", "--description=FrigatePiP"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let child = canberra.ok().or_else(|| {
+            let sounds = ["message-new-instant.oga", "message.oga", "bell.oga"];
+            let file = sounds.iter().map(|f| format!("/usr/share/sounds/freedesktop/stereo/{f}")).find(|p| std::path::Path::new(p).exists());
+            let Some(file) = file else {
+                crate::log!("No notification sound (install sound-theme-freedesktop or libcanberra-gtk3-module)");
+                return None;
+            };
+            let mut c = self.command();
+            c.args(["-nostdin", "-i", &file, "-vn", "-f", self.audio_out.0, self.audio_out.1]);
+            c.stdin(Stdio::null()).stdout(Stdio::null()).spawn().ok()
+        });
+        if let Some(mut child) = child {
+            let _ = std::thread::Builder::new().name("sound".into()).spawn(move || child.wait());
+        }
+    }
+
     /// Audio player fed through stdin; `input` = input format options.
     pub fn audio_pipe(&self, input: &[String]) -> std::io::Result<Proc> {
         let mut c = self.command();
