@@ -161,6 +161,9 @@ impl Output for Tmux {
         if view.muted {
             cmd.push("--view-muted".into());
         }
+        if view.main {
+            cmd.push("--view-main".into());
+        }
         let spawned = Command::new("tmux")
             .args(["display-popup", "-c", &client, "-w", &w.to_string(), "-h", &h.to_string(), "-x", &x, "-y", &y, "-E", &cmd.join(" ")])
             .stdin(Stdio::null())

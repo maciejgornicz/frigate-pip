@@ -528,8 +528,8 @@ live = rtsp
 ; sub / main = always this stream
 stream = auto
 auto_main_width = 800
-; Windows only - prebuffer: keeps a connection to every camera's sub stream so live video
-; starts at once (~0.15 s) instead of at the next key frame (up to ~1 s).
+; Prebuffer: keeps a connection to every camera's sub stream so live video starts at once
+; (~0.15 s) instead of at the next key frame (up to ~1 s). Linux: not for tmux popups.
 ; Cost: about 0.1-0.5 Mbit/s of local network traffic per camera, all the time.
 prebuffer = false
 ; Windows only: keep the graphics device ready - video starts ~130 ms sooner,
@@ -545,6 +545,7 @@ camera_audio = false
 ; graphics = auto, kitty, sixel or blocks (pictures in a terminal)
 ; framebuffer = /dev/fb0
 ; ffmpeg = ffmpeg
+; hwaccel = auto (video decoding on the graphics card for the main stream), on or off
 ; font = TrueType font for captions on the framebuffer (default: DejaVu Sans Bold)
 
 ; Per-camera overrides (optional):

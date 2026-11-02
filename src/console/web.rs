@@ -223,7 +223,7 @@ const FIELDS: [&str; 26] = [
 /// objects added to Frigate later), as on Windows.
 fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> Option<bool> {
     let last = |name: &str| form.iter().rev().find(|(k, _)| k == name).map(|(_, v)| v.trim().to_string());
-    for f in FIELDS.iter().chain(["video.camera_audio"].iter()) {
+    for f in FIELDS.iter().chain(["video.prebuffer", "video.camera_audio"].iter()) {
         if let (Some(v), Some((section, key))) = (last(f), f.split_once('.')) {
             doc.set(section, key, &v);
         }
@@ -471,6 +471,7 @@ fn page(c: &Config, info: &Info, saved: bool) -> String {
         number("video.auto_main_width", c.auto_main_width, 64, 8000, s.auto_main_hint),
         s.tip_auto_main_width,
     );
+    video += &row("video.prebuffer", "", checkbox("video.prebuffer", c.prebuffer, s.prebuffer), s.tip_prebuffer);
     video += &row("video.camera_audio", "", checkbox("video.camera_audio", c.camera_audio, s.camera_audio), s.tip_camera_audio);
 
     let saved = if saved { format!("<p class=\"saved\">{}</p>", esc(s.linux_settings_saved)) } else { String::new() };
@@ -587,14 +588,14 @@ mod tests {
         let mut doc = IniDoc::parse(config::DEFAULT_INI);
         let known = [cam("front", &["person", "car"]), cam("garden", &["person"])];
         let form = parse_form(
-            "frigate.url=http%3A%2F%2F10.0.0.5%3A5000&display.overlay=false&display.overlay=true&video.camera_audio=false\
+            "frigate.url=http%3A%2F%2F10.0.0.5%3A5000&display.overlay=false&display.overlay=true&video.camera_audio=false&video.prebuffer=false&video.prebuffer=true\
              &trigger.cameras=&trigger.cameras=front&trigger.labels=&trigger.labels=person&trigger.labels=car\
              &trigger.zones=&trigger.zones=drive&trigger.min_score=55&autostart=false&autostart=true&display.width=abc",
         );
         assert_eq!(apply(&form, &mut doc, &known), Some(true));
         let c = Config::from_ini(&doc);
         assert_eq!(c.url, "http://10.0.0.5:5000");
-        assert!(c.overlay && !c.camera_audio);
+        assert!(c.overlay && !c.camera_audio && c.prebuffer);
         // One camera of two: a list; every known object: "all" (empty).
         assert_eq!(c.cameras, vec!["front".to_string()]);
         assert!(c.labels.is_empty());

@@ -451,6 +451,7 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 | `--output auto\|window\|framebuffer\|terminal\|tmux` | Où dessiner les fenêtres (voir le tableau des modes ci-dessus). |
 | `--graphics auto\|kitty\|sixel\|blocks` | Mode de dessin des images dans un terminal. |
 | `--framebuffer /dev/fb0` | Périphérique framebuffer. |
+| `--hwaccel auto\|on\|off` | Décodage vidéo sur la carte graphique (voir `hwaccel` plus bas). |
 | `--test <camera>` | Afficher une caméra juste après le démarrage. |
 | `--test-connection` | Vérifier la connexion à Frigate (comme **Tester la connexion** sous Windows), puis quitter. |
 | `--list` | Affiche les caméras avec leurs objets et zones — les noms pour `cameras`, `labels` et `zones` dans `[trigger]` — puis quitte. |
@@ -461,7 +462,7 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 
 ### Paramètres
 
-La version Linux utilise le même `config.ini` (dans `~/.config/frigate-pip/` ou `$XDG_CONFIG_HOME/frigate-pip/`) que la version Windows — voir [Fichier de paramètres](#7-fichier-de-paramètres). Les modifications sont appliquées dans les deux secondes qui suivent l’enregistrement du fichier. Les paramètres suivants sont utilisés : tout ce qui se trouve dans `[app]` (langue), `[frigate]`, `[mqtt]` et `[trigger]`, ainsi que, dans `[display]` : `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen` ; dans `[video]` : `live`, `stream`, `auto_main_width`, `camera_audio` ; et les sections `[camera.<name>]`. Les paramètres propres à Windows (`prebuffer`, `gpu_warm`, `check_updates`) sont ignorés. `frigate-pip --list` affiche les noms de vos caméras, objets et zones pour les filtres de `[trigger]`.
+La version Linux utilise le même `config.ini` (dans `~/.config/frigate-pip/` ou `$XDG_CONFIG_HOME/frigate-pip/`) que la version Windows — voir [Fichier de paramètres](#7-fichier-de-paramètres). Les modifications sont appliquées dans les deux secondes qui suivent l’enregistrement du fichier. Les paramètres suivants sont utilisés : tout ce qui se trouve dans `[app]` (langue), `[frigate]`, `[mqtt]` et `[trigger]`, ainsi que, dans `[display]` : `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen` ; dans `[video]` : `live`, `stream`, `auto_main_width`, `prebuffer` (pas pour les popups tmux), `camera_audio` ; et les sections `[camera.<name>]`. Les paramètres propres à Windows (`gpu_warm`, `check_updates`) sont ignorés. `frigate-pip --list` affiche les noms de vos caméras, objets et zones pour les filtres de `[trigger]`.
 
 Paramètres supplémentaires de la section `[console]` :
 
@@ -471,6 +472,7 @@ Paramètres supplémentaires de la section `[console]` :
 | `graphics` | `auto` | `auto`, `kitty`, `sixel` ou `blocks` (images dans un terminal). |
 | `framebuffer` | `/dev/fb0` | Périphérique framebuffer. |
 | `ffmpeg` | `ffmpeg` | Programme ffmpeg (nom ou chemin complet). |
+| `hwaccel` | `auto` | Décodage vidéo sur la carte graphique (VAAPI, VDPAU, NVIDIA… ce que ffmpeg trouve ; sinon sur le processeur) : `auto` = pour le flux main, où il économise le plus (la première image d’une telle fenêtre peut arriver environ 0,2 s plus tard ; le préchargement le masque), `on` = toujours, `off` = jamais. |
 | `font` | *(DejaVu Sans Bold)* | Police TrueType des légendes sur le framebuffer. |
 
 La langue suit les paramètres régionaux du système (`LANG`), sauf si `language` est défini dans `[app]`. Le son de la caméra est lu via PulseAudio/PipeWire lorsqu’ils sont disponibles, sinon via ALSA.

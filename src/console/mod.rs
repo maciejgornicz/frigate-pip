@@ -15,14 +15,16 @@ mod video;
 mod web;
 mod x11;
 
-use crate::config::{self, Config, Corner, IniDoc};
+use crate::config::{self, Config, Corner, IniDoc, LiveMode};
 use crate::filter::Detection;
 use crate::frigate::{self, CameraInfo, Notice};
+use crate::hub::Hub;
 use crate::i18n::{self, t};
 use crate::util::Cancel;
 use crate::view::{choose_slot, choose_stream, Slot};
 use canvas::Image;
 use ffmpeg::Ffmpeg;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -125,6 +127,8 @@ pub struct View {
     pub caption: String,
     /// Start with the camera audio muted.
     pub muted: bool,
+    /// `stream` is the camera's main stream (see `ffmpeg::HwAccel`).
+    pub main: bool,
 }
 
 /// How the console version shows its windows.
@@ -143,6 +147,7 @@ struct ConsoleCfg {
     framebuffer: String,
     framebuffer_size: Option<String>,
     ffmpeg: String,
+    hwaccel: String,
     font: Option<String>,
 }
 
@@ -160,6 +165,7 @@ impl ConsoleCfg {
             framebuffer: get("framebuffer", "/dev/fb0"),
             framebuffer_size: Some(get("framebuffer_size", "")).filter(|v| !v.is_empty()),
             ffmpeg: get("ffmpeg", "ffmpeg"),
+            hwaccel: get("hwaccel", "auto"),
             font: Some(get("font", "")).filter(|v| !v.is_empty()),
         }
     }
@@ -200,6 +206,8 @@ Options:
   --output auto|window|framebuffer|terminal|tmux   see above
   --graphics auto|kitty|sixel|blocks        pictures in a terminal (default: auto)
   --framebuffer /dev/fb0                    framebuffer device
+  --hwaccel auto|on|off                     video decoding on the graphics card (default:
+                                            auto = for the main stream)
   --test CAMERA                             show a camera right after the start
   --test-connection                         check the connection to Frigate and exit
   --list                                    list the cameras with their objects and zones
@@ -340,7 +348,7 @@ pub fn main() {
         return;
     }
     let console = ConsoleCfg::read(&doc, &args);
-    let ff = match Ffmpeg::find(&console.ffmpeg) {
+    let ff = match Ffmpeg::find(&console.ffmpeg, ffmpeg::HwAccel::parse(&console.hwaccel)) {
         Ok(f) => Arc::new(f),
         Err(e) => {
             eprintln!("FrigatePiP: {e}\nffmpeg is needed for video - install it, e.g.: sudo apt install ffmpeg");
@@ -394,6 +402,8 @@ pub fn main() {
     });
     let mut app = App::new(cfg, path, out, ff, tx);
     app.pending_test = arg(&args, "--test");
+    // tmux popups are separate processes: they cannot use this one's prebuffer.
+    app.prebuffer_possible = mode != Mode::Tmux;
     app.start_listener();
     if mode == Mode::Window {
         app.start_desktop(first_start, open_settings, args.iter().any(|a| a == "--session"));
@@ -563,6 +573,8 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         camera: camera.to_string(),
         frigate_url: cfg.url.clone(),
         rtsp_url: stream.map(|s| cfg.rtsp_url(&s)),
+        hub: None,
+        main: args.iter().any(|a| a == "--view-main"),
         live: cfg.live,
         size,
         audio: cfg.camera_audio,
@@ -667,6 +679,9 @@ struct App {
     tray: Option<tray::Tray>,
     web: Option<web::Web>,
     info: Arc<std::sync::Mutex<web::Info>>,
+    /// `prebuffer`: a connection to every camera's sub stream, by camera name.
+    hubs: HashMap<String, Arc<Hub>>,
+    prebuffer_possible: bool,
 }
 
 impl App {
@@ -692,6 +707,8 @@ impl App {
             tray: None,
             web: None,
             info: Arc::default(),
+            hubs: HashMap::new(),
+            prebuffer_possible: false,
         }
     }
 
@@ -926,6 +943,7 @@ impl App {
             Notice::Cameras(list) => {
                 self.info.lock().unwrap().cameras = list.clone();
                 self.cameras = list;
+                self.update_hubs();
                 self.update_tray();
                 if let Some(cam) = self.pending_test.take() {
                     self.test(&cam);
@@ -1001,11 +1019,15 @@ impl App {
 
     /// The decoder of window `i` again, at the window's current size (after the wheel).
     fn restart_video(&mut self, i: usize) {
+        let main = self.is_main(&self.wins[i].camera, self.wins[i].stream.as_deref());
+        let hub = self.hubs.get(&self.wins[i].camera).cloned();
         let w = &mut self.wins[i];
         let params = video::Params {
             camera: w.camera.clone(),
             frigate_url: self.cfg.url.clone(),
             rtsp_url: w.stream.as_ref().map(|s| self.cfg.rtsp_url(s)),
+            hub,
+            main,
             live: self.cfg.live,
             size: w.size,
             audio: self.cfg.camera_audio,
@@ -1085,7 +1107,8 @@ impl App {
         }
         let id = self.next_id;
         self.next_id += 1;
-        let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone(), muted: self.muted };
+        let main = self.is_main(&d.camera, stream.as_deref());
+        let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone(), muted: self.muted, main };
         let shared = match self.out.open_external(id, &view) {
             Some(true) => Arc::new(video::Shared::default()),
             Some(false) => {
@@ -1097,6 +1120,8 @@ impl App {
                     camera: d.camera.clone(),
                     frigate_url: self.cfg.url.clone(),
                     rtsp_url: stream.as_ref().map(|s| self.cfg.rtsp_url(s)),
+                    hub: self.hubs.get(&d.camera).cloned(),
+                    main,
                     live: self.cfg.live,
                     size,
                     audio: self.cfg.camera_audio,
@@ -1311,6 +1336,42 @@ impl App {
         self.out.status(&text);
     }
 
+    /// `stream` is the camera's main stream (larger than the sub stream).
+    fn is_main(&self, camera: &str, stream: Option<&str>) -> bool {
+        let info = self.cameras.iter().find(|c| c.name == camera);
+        stream.is_some() && info.is_some_and(|c| c.main.as_deref() == stream)
+    }
+
+    /// `prebuffer`: keeps a connection to the sub stream of every camera (like on Windows),
+    /// so a window shows live video at once instead of at the next key frame.
+    fn update_hubs(&mut self) {
+        if !self.cfg.prebuffer || self.cfg.live != LiveMode::Rtsp || !self.prebuffer_possible {
+            if !self.hubs.is_empty() {
+                crate::log!("Prebuffer disabled");
+            }
+            self.hubs.clear();
+            return;
+        }
+        let mut want: HashMap<String, String> = HashMap::new();
+        for c in &self.cameras {
+            if !self.cfg.cameras.is_empty() && !self.cfg.cameras.iter().any(|x| x.eq_ignore_ascii_case(&c.name)) {
+                continue;
+            }
+            if let Some(s) = c.sub.clone().or_else(|| c.main.clone()) {
+                want.insert(c.name.clone(), self.cfg.rtsp_url(&s));
+            }
+        }
+        let audio = self.cfg.camera_audio;
+        self.hubs.retain(|k, h| want.get(k).is_some_and(|u| u == h.url()) && h.audio() == audio);
+        for (cam, url) in want {
+            if let std::collections::hash_map::Entry::Vacant(slot) = self.hubs.entry(cam) {
+                crate::log!("Prebuffer {}: {url}", slot.key());
+                let hub = Arc::new(Hub::start(url, slot.key(), audio));
+                slot.insert(hub);
+            }
+        }
+    }
+
     /// Applies the settings file when it was saved (checked every 2 s).
     fn reload_if_changed(&mut self) {
         let modified = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok();
@@ -1326,6 +1387,7 @@ impl App {
         i18n::set(i18n::resolve(&cfg.language));
         self.cfg = cfg;
         self.out.configure(&self.cfg);
+        self.update_hubs();
         // The listener also applies the filters (cameras, objects, zones…).
         self.start_listener();
         self.layout();

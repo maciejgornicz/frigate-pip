@@ -3,7 +3,7 @@
 use crate::audio::{AudioMsg, AudioTrack, Sound};
 use crate::config::LiveMode;
 use crate::decoder::{Decoder, Frame};
-use crate::hub::Hub;
+use crate::hub::{Feed, Hub, Sink};
 use crate::render::{Overlay, Renderer};
 use crate::rtp::{AccessUnit, VideoTrack};
 use crate::util::Cancel;
@@ -149,6 +149,19 @@ fn spawn_rtsp(url: String, audio: bool, tx: Sender<Input>, cancel: Cancel, camer
     });
 }
 
+/// Forwards the prebuffer to this window's input as source `SRC_PREBUF`.
+fn prebuf_sink(tx: Sender<Input>) -> Sink {
+    Box::new(move |feed| {
+        let input = match feed {
+            Feed::Track(v, a) => Input::Track(SRC_PREBUF, v, a),
+            Feed::Au(au) => Input::Au(SRC_PREBUF, au),
+            Feed::Audio(f) => Input::Audio(SRC_PREBUF, f),
+            Feed::Failed(e) => Input::LiveFailed(SRC_PREBUF, e),
+        };
+        tx.send(input).is_ok()
+    })
+}
+
 /// Finds consecutive JPEG images (SOI…EOI) in an MJPEG stream.
 fn spawn_mjpeg(url: String, tx: Sender<Input>, cancel: Cancel) {
     let _ = std::thread::Builder::new().name("mjpeg".into()).spawn(move || {
@@ -258,7 +271,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         LiveMode::Rtsp => {
             // The prebuffer (sub) gives a picture at once; if the window wants another stream
             // (main), we connect directly in parallel and switch over after the first frame.
-            src[SRC_PREBUF].active = p.hub.as_ref().is_some_and(|h| h.subscribe(&tx));
+            src[SRC_PREBUF].active = p.hub.as_ref().is_some_and(|h| h.subscribe(prebuf_sink(tx.clone())));
             let hub_is_target = src[SRC_PREBUF].active && p.hub.as_ref().map(|h| h.url()) == p.rtsp_url.as_deref();
             if !hub_is_target {
                 if let Some(url) = &p.rtsp_url {

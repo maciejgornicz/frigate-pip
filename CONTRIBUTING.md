@@ -102,6 +102,7 @@ Shared by both versions:
 | `src/filter.rs` | Decides whether a Frigate `events` / `reviews` message opens a window. |
 | `src/rtsp.rs`, `src/rtp.rs` | RTSP client (TCP interleaved, Basic/Digest auth), SDP and RTP depacketizing. |
 | `src/audio.rs` | Camera audio: AAC / G.711 depacketizing and decoding; WASAPI playback on Windows. |
+| `src/hub.rs` | Prebuffer: persistent RTSP connections that keep the last GOP; the Windows player and the Linux ffmpeg pipeline subscribe to it. |
 | `src/ws.rs`, `src/mqtt.rs`, `src/net.rs` | Minimal WebSocket, MQTT and HTTP clients. |
 | `src/json.rs`, `src/util.rs` | JSON parser, small utilities and logging. |
 | `src/i18n/` | Translations: `mod.rs` (the `Strings` struct and language selection) and one file per language. |
@@ -116,7 +117,6 @@ Windows application:
 | `src/render.rs` | Drawing: Direct3D 11 swap chain, video processor, Direct2D/DirectWrite caption, GDI quick paint. |
 | `src/decoder.rs` | H.264 / H.265 decoding with Media Foundation (hardware or software). |
 | `src/h264.rs` | Rewrites the H.264 SPS so the Windows decoder outputs frames without delay. |
-| `src/hub.rs` | Prebuffer: persistent RTSP connections that keep the last GOP. |
 | `src/icon.rs` | Tray icon drawn in code (also the pixels of the Linux tray icon). |
 | `src/update.rs` | Update check on GitHub (HTTPS via WinHTTP), download with SHA-256 check, silent installer run. |
 | `installer/frigate-pip.iss` | Inno Setup script. |

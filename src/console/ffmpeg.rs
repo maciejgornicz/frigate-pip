@@ -14,6 +14,36 @@ pub struct Ffmpeg {
     fps_flag: &'static str,
     /// Audio output: (format, device).
     audio_out: (&'static str, &'static str),
+    hwaccel: HwAccel,
+}
+
+/// `[console] hwaccel`: video decoding on the graphics card (VAAPI, VDPAU, NVDEC… whatever
+/// ffmpeg finds; without one it decodes on the processor as before).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HwAccel {
+    /// Only the main stream: the sub stream is decoded faster by the processor.
+    Auto,
+    On,
+    Off,
+}
+
+impl HwAccel {
+    pub fn parse(v: &str) -> HwAccel {
+        match v.to_ascii_lowercase().as_str() {
+            "on" | "true" | "yes" | "1" => HwAccel::On,
+            "off" | "false" | "no" | "0" => HwAccel::Off,
+            _ => HwAccel::Auto,
+        }
+    }
+
+    /// `main` = the camera's main (high-resolution) stream.
+    pub fn wanted(self, main: bool) -> bool {
+        match self {
+            HwAccel::Auto => main,
+            HwAccel::On => true,
+            HwAccel::Off => false,
+        }
+    }
 }
 
 /// A running ffmpeg, killed when dropped.
@@ -28,7 +58,7 @@ impl Drop for Proc {
 
 impl Ffmpeg {
     /// Checks that ffmpeg can be started and reads its version.
-    pub fn find(path: &str) -> Result<Ffmpeg, String> {
+    pub fn find(path: &str, hwaccel: HwAccel) -> Result<Ffmpeg, String> {
         let out = Command::new(path)
             .args(["-hide_banner", "-version"])
             .stdin(Stdio::null())
@@ -52,7 +82,7 @@ impl Ffmpeg {
             None if pulse => ("pulse", "FrigatePiP"),
             None => ("alsa", "default"),
         };
-        Ok(Ffmpeg { path: path.to_string(), fps_flag: if modern { "-fps_mode" } else { "-vsync" }, audio_out })
+        Ok(Ffmpeg { path: path.to_string(), fps_flag: if modern { "-fps_mode" } else { "-vsync" }, audio_out, hwaccel })
     }
 
     fn command(&self) -> Command {
@@ -78,11 +108,15 @@ impl Ffmpeg {
         c.args(["-an", "-vf", &scale, "-pix_fmt", "bgra", self.fps_flag, "passthrough", "-flush_packets", "1", "-f", "rawvideo", "pipe:1"]);
     }
 
-    /// Decoder fed through stdin with an elementary stream (`h264` or `hevc`).
-    pub fn video_pipe(&self, format: &str, size: (u32, u32)) -> std::io::Result<Proc> {
+    /// Decoder fed through stdin with an elementary stream (`h264` or `hevc`); `main` = the
+    /// camera's main stream (see `HwAccel`).
+    pub fn video_pipe(&self, format: &str, size: (u32, u32), main: bool) -> std::io::Result<Proc> {
         let mut c = self.command();
         // No "-fflags nobuffer": it drops what was read while probing — the first key frame.
         c.args(["-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0", "-threads", "1"]);
+        if self.hwaccel.wanted(main) {
+            c.args(["-hwaccel", "auto"]);
+        }
         c.args(["-f", format, "-i", "pipe:0"]);
         self.raw_out(&mut c, size);
         c.stdin(Stdio::piped()).stdout(Stdio::piped());
@@ -184,6 +218,15 @@ pub fn adts_header(asc: &[u8], frame_len: usize) -> Option<[u8; 7]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hwaccel_auto_means_the_main_stream_only() {
+        assert_eq!(HwAccel::parse("AUTO"), HwAccel::Auto);
+        assert_eq!(HwAccel::parse("off"), HwAccel::Off);
+        assert_eq!(HwAccel::parse("on"), HwAccel::On);
+        assert!(HwAccel::Auto.wanted(true) && !HwAccel::Auto.wanted(false));
+        assert!(HwAccel::On.wanted(false) && !HwAccel::Off.wanted(true));
+    }
 
     #[test]
     fn adts_header_matches_a_reolink_frame() {
