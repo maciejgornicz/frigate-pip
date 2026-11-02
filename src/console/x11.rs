@@ -510,8 +510,8 @@ impl X11 {
             let mut size = [0u32; 18];
             size[..5].copy_from_slice(&[1 | 2 | 4 | 8, x as u32, y as u32, w, h]);
             self.set_property(id, WM_NORMAL_HINTS, WM_SIZE_HINTS, 32, &words(&size));
-            let user_time = self.atom("_NET_WM_USER_TIME");
-            self.set_property(id, user_time, CARDINAL, 32, &words(&[0]));
+            // No _NET_WM_USER_TIME = 0: GNOME (mutter) reads it as "do not raise" and puts
+            // the window under the active one, out of sight. WM_HINTS already keeps the focus.
         }
         self.send(&Req::new(8, 0).u32(id).done());
         id
