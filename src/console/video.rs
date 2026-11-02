@@ -22,6 +22,8 @@ pub struct Shared {
     pub dirty: AtomicBool,
     /// The frame comes from live video (red dot).
     pub live: AtomicBool,
+    /// Camera audio muted by the user (key m): its frames are not played.
+    pub muted: AtomicBool,
     pub cancel: Cancel,
 }
 
@@ -206,6 +208,7 @@ fn rtsp(url: &str, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake) -
                     None => false,
                 }
             }
+            Media::Audio(_) if shared.muted.load(Ordering::Relaxed) => !shared.cancel.is_set(),
             Media::Audio(frame) => {
                 let header = pp.asc.as_deref().map(|asc| adts_header(asc, frame.len()));
                 if let Some((_, stdin)) = pp.audio.as_mut() {

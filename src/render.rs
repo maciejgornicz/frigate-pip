@@ -21,8 +21,11 @@ use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
 pub struct Overlay {
     pub text: String,
     pub live: bool,
-    /// Close button: 0 = hidden, 1 = shown (mouse over the window), 2 = highlighted (mouse over the button).
+    /// Close button: 0 = hidden, 1 = shown (mouse over the window), 2 = highlighted (mouse over the button),
+    /// 3 = shown with the sound button highlighted (mouse over that one).
     pub close: u8,
+    /// Sound button: 0 = no camera audio (no button), 1 = sound on, 2 = muted.
+    pub sound: u8,
 }
 
 /// Close button in the top-right corner of the window, in client pixels (left, top, right, bottom).
@@ -32,6 +35,13 @@ pub fn close_button_rect(client_width: i32, dpi: u32) -> (i32, i32, i32, i32) {
     let size = (24.0 * scale).round() as i32;
     let margin = (8.0 * scale).round() as i32;
     (client_width - margin - size, margin, client_width - margin, margin + size)
+}
+
+/// Sound (mute) button, left of the close button and of the same size.
+pub fn sound_button_rect(client_width: i32, dpi: u32) -> (i32, i32, i32, i32) {
+    let (l, t, r, b) = close_button_rect(client_width, dpi);
+    let gap = (6.0 * dpi.max(96) as f32 / 96.0).round() as i32;
+    (l - gap - (r - l), t, l - gap, b)
 }
 
 enum Last {
@@ -56,6 +66,7 @@ pub struct Renderer {
     video_device: Option<ID3D11VideoDevice>,
     video_context: Option<ID3D11VideoContext>,
     d2d: ID2D1DeviceContext,
+    d2f: ID2D1Factory1,
     target: Option<ID2D1Bitmap1>,
     dwrite: IDWriteFactory,
     font: IDWriteTextFormat,
@@ -64,6 +75,8 @@ pub struct Renderer {
     shade: ID2D1SolidColorBrush,
     red: ID2D1SolidColorBrush,
     grey: ID2D1SolidColorBrush,
+    /// Lightens a button under the mouse.
+    light: ID2D1SolidColorBrush,
     wic: IWICImagingFactory,
     size: (u32, u32),
     vp: Option<Vp>,
@@ -207,6 +220,7 @@ impl Renderer {
             let shade = brush(color(0.0, 0.0, 0.0, 0.55))?;
             let red = brush(color(0.94, 0.27, 0.27, 1.0))?;
             let grey = brush(color(0.75, 0.75, 0.75, 1.0))?;
+            let light = brush(color(1.0, 1.0, 1.0, 0.3))?;
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
@@ -238,6 +252,7 @@ impl Renderer {
                 video_device,
                 video_context,
                 d2d,
+                d2f,
                 target: None,
                 dwrite,
                 font,
@@ -246,6 +261,7 @@ impl Renderer {
                 shade,
                 red,
                 grey,
+                light,
                 wic,
                 size,
                 vp: None,
@@ -383,10 +399,13 @@ impl Renderer {
 
     unsafe fn draw_overlay(&self, ov: &Overlay) {
         self.d2d.SetTransform(&Matrix3x2::identity());
-        let button = (ov.close > 0).then(|| close_button_rect(self.size.0 as i32, GetDpiForWindow(self.hwnd)));
+        let dpi = GetDpiForWindow(self.hwnd);
+        let button = (ov.close > 0).then(|| close_button_rect(self.size.0 as i32, dpi));
+        // The sound button comes with the close button, and stays while muted so that it is clear why it is quiet.
+        let sound = (ov.sound > 0 && (ov.close > 0 || ov.sound == 2)).then(|| sound_button_rect(self.size.0 as i32, dpi));
         if !ov.text.is_empty() {
-            // The caption must not run under the close button.
-            self.draw_caption(ov, button.map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
+            // The caption must not run under the buttons.
+            self.draw_caption(ov, sound.or(button).map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
         }
         if let Some((l, t, r, b)) = button {
             let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
@@ -398,6 +417,58 @@ impl Renderer {
             self.d2d.DrawLine(p(cx - arm, cy - arm), p(cx + arm, cy + arm), &self.white, width, None);
             self.d2d.DrawLine(p(cx - arm, cy + arm), p(cx + arm, cy - arm), &self.white, width, None);
         }
+        if let Some(rect) = sound {
+            let _ = self.draw_sound_button(rect, ov.sound == 2, ov.close == 3);
+        }
+    }
+
+    /// A speaker in a circle: with sound waves, or crossed out when muted.
+    unsafe fn draw_sound_button(&self, (l, t, r, b): (i32, i32, i32, i32), muted: bool, hot: bool) -> Result<()> {
+        let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
+        let circle = D2D1_ELLIPSE { point: D2D_POINT_2F { x: cx, y: cy }, radiusX: rad, radiusY: rad };
+        self.d2d.FillEllipse(&circle, &self.shade);
+        if hot {
+            self.d2d.FillEllipse(&circle, &self.light);
+        }
+        let s = rad * 0.46;
+        let o = cx - 0.2 * s;
+        let width = (rad / 7.0).max(1.5);
+        let p = |x: f32, y: f32| D2D_POINT_2F { x, y };
+        let speaker = self.d2f.CreatePathGeometry()?;
+        let sink = speaker.Open()?;
+        sink.BeginFigure(p(o - 0.75 * s, cy - 0.32 * s), D2D1_FIGURE_BEGIN_FILLED);
+        sink.AddLines(&[
+            p(o - 0.25 * s, cy - 0.32 * s),
+            p(o + 0.3 * s, cy - 0.8 * s),
+            p(o + 0.3 * s, cy + 0.8 * s),
+            p(o - 0.25 * s, cy + 0.32 * s),
+            p(o - 0.75 * s, cy + 0.32 * s),
+        ]);
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        sink.Close()?;
+        self.d2d.FillGeometry(&speaker, &self.white, None);
+        if muted {
+            let (x, arm) = (o + 0.85 * s, 0.3 * s);
+            self.d2d.DrawLine(p(x - arm, cy - arm), p(x + arm, cy + arm), &self.white, width, None);
+            self.d2d.DrawLine(p(x - arm, cy + arm), p(x + arm, cy - arm), &self.white, width, None);
+        } else {
+            let waves = self.d2f.CreatePathGeometry()?;
+            let sink = waves.Open()?;
+            for (x, half, radius) in [(o + 0.55 * s, 0.32 * s, 0.4 * s), (o + 0.8 * s, 0.62 * s, 0.75 * s)] {
+                sink.BeginFigure(p(x, cy - half), D2D1_FIGURE_BEGIN_HOLLOW);
+                sink.AddArc(&D2D1_ARC_SEGMENT {
+                    point: p(x, cy + half),
+                    size: D2D_SIZE_F { width: radius, height: radius },
+                    rotationAngle: 0.0,
+                    sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                    arcSize: D2D1_ARC_SIZE_SMALL,
+                });
+                sink.EndFigure(D2D1_FIGURE_END_OPEN);
+            }
+            sink.Close()?;
+            self.d2d.DrawGeometry(&waves, &self.white, width, None);
+        }
+        Ok(())
     }
 
     /// Camera, object and time in the top-left corner; `reserve` = pixels kept free on the right.

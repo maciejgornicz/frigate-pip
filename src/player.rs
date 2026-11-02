@@ -1,6 +1,6 @@
 //! PiP window thread: an instant snapshot, then live video.
 
-use crate::audio::{AudioMsg, AudioTrack};
+use crate::audio::{AudioMsg, AudioTrack, Sound};
 use crate::config::LiveMode;
 use crate::decoder::{Decoder, Frame};
 use crate::hub::Hub;
@@ -40,6 +40,8 @@ pub struct Shared {
     /// Close button state, see `render::Overlay::close`.
     close_button: AtomicU8,
     dirty: AtomicBool,
+    /// Camera audio of this window and its mute button.
+    pub sound: Arc<Sound>,
 }
 
 impl Shared {
@@ -50,6 +52,7 @@ impl Shared {
             overlay_on: AtomicBool::new(overlay_on),
             close_button: AtomicU8::new(0),
             dirty: AtomicBool::new(false),
+            sound: Arc::default(),
         })
     }
 
@@ -241,7 +244,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let quick = QuickPaint { hwnd: p.hwnd, renderer_ready: renderer_ready.clone(), camera: cam.clone(), t0: p.t0 };
     spawn_snapshot(snapshot_url.clone(), tx.clone(), cancel.clone(), Some(quick));
     // Audio lives on its own thread; here we only hand it frames without waiting.
-    let audio_tx = p.audio.then(|| crate::audio::spawn(cam.clone(), cancel.clone()));
+    let audio_tx = p.audio.then(|| crate::audio::spawn(cam.clone(), cancel.clone(), shared.sound.clone()));
 
     let mut src: [Source; 2] = Default::default();
     let mut mjpeg_active = false;
@@ -288,6 +291,11 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         text: if shared.overlay_on.load(Ordering::Relaxed) { shared.overlay.lock().unwrap().clone() } else { String::new() },
         live,
         close: shared.close_button.load(Ordering::Relaxed),
+        sound: match (shared.sound.playing.load(Ordering::Relaxed), shared.sound.muted.load(Ordering::Relaxed)) {
+            (false, _) => 0,
+            (true, false) => 1,
+            (true, true) => 2,
+        },
     };
     let _ = r.redraw(&overlay_text(false));
 

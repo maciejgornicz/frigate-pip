@@ -230,6 +230,7 @@ mod playback {
     use super::*;
     use crate::util::Cancel;
     use std::mem::ManuallyDrop;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{self, RecvTimeoutError, Sender};
     use std::sync::Arc;
     use std::time::Duration;
@@ -486,6 +487,15 @@ mod playback {
         Frame(usize, Arc<Vec<u8>>),
     }
 
+    /// Sound of one window, shared with its mute button.
+    #[derive(Default)]
+    pub struct Sound {
+        /// Muted by the user: silence is played, so the sound comes back at once.
+        pub muted: AtomicBool,
+        /// Sound is playing (the mute button is shown only then).
+        pub playing: AtomicBool,
+    }
+
     fn open_out(camera: &str, d: &AudioDecoder) -> Option<AudioOut> {
         match AudioOut::new(d.rate, d.channels) {
             Ok(o) => Some(o),
@@ -497,7 +507,7 @@ mod playback {
     }
 
     /// Starts the audio playback thread; it ends on cancellation or when the channel closes.
-    pub fn spawn(camera: String, cancel: Cancel) -> Sender<AudioMsg> {
+    pub fn spawn(camera: String, cancel: Cancel, sound: Arc<Sound>) -> Sender<AudioMsg> {
         let (tx, rx) = mpsc::channel::<AudioMsg>();
         let _ = std::thread::Builder::new().name(format!("audio-{camera}")).spawn(move || unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -551,9 +561,13 @@ mod playback {
                                 out = open_out(&camera, d);
                             }
                             let Some(o) = out.as_mut() else { continue };
+                            if sound.muted.load(Ordering::Relaxed) {
+                                pcm.fill(0);
+                            }
                             match decoded.and_then(|_| o.write(&pcm)) {
                                 Ok(()) if first => {
                                     first = false;
+                                    sound.playing.store(true, Ordering::Relaxed);
                                     crate::log!("{camera}: audio {} Hz, {} ch", d.rate, d.channels);
                                 }
                                 Ok(()) => {}

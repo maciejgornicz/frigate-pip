@@ -333,6 +333,21 @@ pub struct Strings {
     /// Printed when the tmux mode starts.
     #[cfg_attr(windows, allow(dead_code))]
     pub console_tmux_running: &'static str,
+    /// Shown in the caption and the status line while the camera audio is muted (key m).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_sound_off: &'static str,
+    /// `--list`: {0} = Frigate address, {1} = number of cameras.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_list_title: &'static str,
+    /// `--list`: label before a camera's objects.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_list_objects: &'static str,
+    /// `--list`: label before a camera's zones.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_list_zones: &'static str,
+    /// `--list`: how to use the names.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub console_list_hint: &'static str,
 
     /// Frigate labels: (label, translation)
     pub labels: &'static [(&'static str, &'static str)],
@@ -382,6 +397,7 @@ mod tests {
                 (en.test_rtsp_ok, s.test_rtsp_ok),
                 (en.test_audio, s.test_audio),
                 (en.test_rtsp_fail, s.test_rtsp_fail),
+                (en.console_list_title, s.console_list_title),
                 (en.status_connected, s.status_connected),
                 (en.status_disconnected, s.status_disconnected),
                 (en.menu_update, s.menu_update),

@@ -508,23 +508,41 @@ fn window_rect(hwnd: HWND) -> RECT {
     r
 }
 
+/// Hit-test code of the sound button: one without default behaviour (HTHELP, for example,
+/// would start the "?" context help mode and swallow the next click).
+const HT_SOUND: u32 = HTOBJECT;
+
 unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_NCHITTEST => {
-            // The close button in the top-right corner; the rest of the window drags it.
+            // The close button in the top-right corner, the sound button left of it (only with
+            // camera audio); the rest of the window drags it.
             let mut pt = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
             let _ = ScreenToClient(hwnd, &mut pt);
             let mut rc = RECT::default();
             let _ = GetClientRect(hwnd, &mut rc);
-            let (l, t, r, b) = crate::render::close_button_rect(rc.right, GetDpiForWindow(hwnd));
-            let on_close = pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
-            LRESULT(if on_close { HTCLOSE } else { HTCAPTION } as isize)
+            let dpi = GetDpiForWindow(hwnd);
+            let inside = |(l, t, r, b): (i32, i32, i32, i32)| pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
+            let hit = if inside(crate::render::close_button_rect(rc.right, dpi)) {
+                HTCLOSE
+            } else if inside(crate::render::sound_button_rect(rc.right, dpi)) && with_app(|a| a.has_sound(hwnd)) == Some(true) {
+                HT_SOUND
+            } else {
+                HTCAPTION
+            };
+            LRESULT(hit as isize)
         }
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HTCLOSE => {
             // Closes at once, on the press (an emergency must not wait for the button release).
             with_app(|a| a.close_hwnd(hwnd));
             LRESULT(0)
         }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HT_SOUND => {
+            with_app(|a| a.toggle_sound(hwnd));
+            LRESULT(0)
+        }
+        // The release on a button is ours too (the default handling has nothing to do there).
+        WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND) => LRESULT(0),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_NCLBUTTONDOWN => {
             // Dragging moves the window; a plain click pins / unpins it.
@@ -546,11 +564,11 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             LRESULT(0)
         }
         WM_NCMOUSEMOVE => {
-            with_app(|a| a.hover(hwnd, true, wp.0 as u32 == HTCLOSE));
+            with_app(|a| a.hover(hwnd, true, wp.0 as u32));
             DefWindowProcW(hwnd, msg, wp, lp)
         }
         WM_NCMOUSELEAVE => {
-            with_app(|a| a.hover(hwnd, false, false));
+            with_app(|a| a.hover(hwnd, false, HTNOWHERE));
             LRESULT(0)
         }
         WM_MOUSEWHEEL => {
@@ -1279,13 +1297,14 @@ impl App {
         }
     }
 
-    /// Mouse over the window (`on`) and over its close button (`on_close`).
-    fn hover(&mut self, hwnd: HWND, on: bool, on_close: bool) {
+    /// Mouse over the window (`on`); `hit` = the part under it (`HTCLOSE`, `HT_SOUND`).
+    fn hover(&mut self, hwnd: HWND, on: bool, hit: u32) {
         let Some(p) = self.find(hwnd) else { return };
-        p.shared.set_close_button(match (on, on_close) {
+        p.shared.set_close_button(match (on, hit) {
             (false, _) => 0,
-            (true, false) => 1,
-            (true, true) => 2,
+            (true, HTCLOSE) => 2,
+            (true, HT_SOUND) => 3,
+            (true, _) => 1,
         });
         if on && !p.hovered {
             p.hovered = true;
@@ -1303,6 +1322,20 @@ impl App {
             p.deadline = p.deadline.max(Instant::now() + Duration::from_secs(3));
             Self::arm(p);
         }
+    }
+
+    /// The window plays camera audio (then it has a sound button).
+    fn has_sound(&mut self, hwnd: HWND) -> bool {
+        self.find(hwnd).is_some_and(|p| p.shared.sound.playing.load(Ordering::Relaxed))
+    }
+
+    /// Sound button: mutes / unmutes this window.
+    fn toggle_sound(&mut self, hwnd: HWND) {
+        let Some(p) = self.find(hwnd) else { return };
+        let muted = !p.shared.sound.muted.load(Ordering::Relaxed);
+        p.shared.sound.muted.store(muted, Ordering::Relaxed);
+        p.shared.request_redraw();
+        crate::log!("{}: sound {}", p.camera, if muted { "muted" } else { "on" });
     }
 
     fn after_click(&mut self, hwnd: HWND, moved: bool) {

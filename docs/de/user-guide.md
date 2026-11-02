@@ -118,6 +118,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 | **Klicken** | Das Fenster wird **angeheftet**: Es bleibt geöffnet, bis Sie es schließen (die Beschriftung zeigt *angeheftet*). Erneut klicken, um es zu lösen. |
 | **Mausrad** | Vergrößert oder verkleinert das Fenster. |
 | **×** (oben rechts) | Schließt das Fenster sofort. Die Schaltfläche erscheint, wenn Sie mit der Maus auf das Fenster zeigen. |
+| **Lautsprecher** (links neben ×) | Schaltet den Ton des Fensters aus; ein weiterer Klick schaltet ihn wieder ein. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Kameraton zeigen; solange der Ton aus ist, bleibt der durchgestrichene Lautsprecher sichtbar. |
 | **Rechtsklick** | Schließt das Fenster. |
 | **Doppelklick** | Öffnet diese Kamera in der Frigate-Weboberfläche. |
 | **Darauf zeigen** | Solange sich der Mauszeiger über dem Fenster befindet, schließt es sich nicht. Nachdem Sie die Maus wegbewegt haben, bleibt es noch mindestens 3 Sekunden geöffnet. |
@@ -206,7 +207,7 @@ FrigatePiP ermittelt die go2rtc-Streams jeder Kamera aus der Frigate-Konfigurati
 
 #### Kameraton
 
-**Kameraton** gibt den Ton der Kamera (AAC oder G.711 aus dem RTSP-Stream) in jedem geöffneten Fenster wieder. Er läuft separat und verzögert daher nie das Fenster oder das Video. Die Lautstärke lässt sich im Lautstärkemixer von Windows einstellen (*FrigatePiP*). Erfordert **RTSP von go2rtc**.
+**Kameraton** gibt den Ton der Kamera (AAC oder G.711 aus dem RTSP-Stream) in jedem geöffneten Fenster wieder. Er läuft separat und verzögert daher nie das Fenster oder das Video. Die Lautstärke lässt sich im Lautstärkemixer von Windows einstellen (*FrigatePiP*). Erfordert **RTSP von go2rtc**. Um ein einzelnes Fenster stummzuschalten, klicken Sie auf die Lautsprecher-Schaltfläche oben rechts im Fenster (siehe [Mausaktionen](#mausaktionen)).
 
 #### Vorpuffer
 
@@ -414,7 +415,7 @@ In diesem Modus hat FrigatePiP kein eigenes Fenster: Es wartet im Hintergrund au
 2. Öffnen Sie tmux für Ihre eigene Arbeit — `tmux` startet eine neue Sitzung — und arbeiten Sie dort. Die Popups erscheinen über diesem Fenster.
 
 - Zum Beenden von FrigatePiP: `tmux kill-session -t frigate-pip`. Um seine Tasten zu verwenden (Pause, Kamera anzeigen): `tmux attach -t frigate-pip`.
-- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**.
+- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein.
 - tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen).
 - Für die vollen Farben des Bildes muss tmux 24-Bit-Farbe weitergeben: Fügen Sie `set -as terminal-features ",xterm-256color:RGB"` zu `~/.tmux.conf` hinzu (verwenden Sie dabei Ihren `$TERM` außerhalb von tmux) und starten Sie tmux neu. FrigatePiP schreibt diesen Hinweis in sein Protokoll, wenn die Farben fehlen.
 
@@ -427,6 +428,7 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 | **q** (oder Strg+C) | Beenden. |
 | **x** (oder Esc) | Alle Vorschaufenster schließen. |
 | **p** | Benachrichtigungen pausieren / fortsetzen. |
+| **m** | Ton aus / ein (bei `camera_audio = true`) für alle Fenster, auch später geöffnete; die Beschriftung zeigt dann *Ton aus*. |
 | **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). |
 
 ### Befehlszeile
@@ -438,11 +440,12 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 | `--framebuffer /dev/fb0` | Framebuffer-Gerät. |
 | `--test <camera>` | Eine Kamera direkt nach dem Start anzeigen. |
 | `--test-connection` | Die Verbindung zu Frigate prüfen (wie **Verbindung testen** unter Windows) und beenden. |
+| `--list` | Listet die Kameras mit ihren Objekten und Zonen auf — die Namen für `cameras`, `labels` und `zones` in `[trigger]` — und beendet sich. |
 | `--version`, `--help` | Version, Kurzhilfe. |
 
 ### Einstellungen
 
-Die Linux-Version verwendet dieselbe `config.ini` (in `~/.config/frigate-pip/` oder `$XDG_CONFIG_HOME/frigate-pip/`) wie die Windows-Version — siehe [Die Einstellungsdatei](#7-die-einstellungsdatei). Änderungen werden innerhalb von zwei Sekunden nach dem Speichern der Datei übernommen. Folgende Einstellungen werden verwendet: alles in `[app]` (Sprache), `[frigate]`, `[mqtt]`, `[trigger]`, in `[display]`: `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`; in `[video]`: `live`, `stream`, `auto_main_width`, `camera_audio`; sowie die Abschnitte `[camera.<name>]`. Die nur unter Windows verfügbaren Einstellungen (`monitor`, `topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) werden ignoriert.
+Die Linux-Version verwendet dieselbe `config.ini` (in `~/.config/frigate-pip/` oder `$XDG_CONFIG_HOME/frigate-pip/`) wie die Windows-Version — siehe [Die Einstellungsdatei](#7-die-einstellungsdatei). Änderungen werden innerhalb von zwei Sekunden nach dem Speichern der Datei übernommen. Folgende Einstellungen werden verwendet: alles in `[app]` (Sprache), `[frigate]`, `[mqtt]`, `[trigger]`, in `[display]`: `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`; in `[video]`: `live`, `stream`, `auto_main_width`, `camera_audio`; sowie die Abschnitte `[camera.<name>]`. Die nur unter Windows verfügbaren Einstellungen (`monitor`, `topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) werden ignoriert. `frigate-pip --list` zeigt die Namen Ihrer Kameras, Objekte und Zonen für die Filter in `[trigger]`.
 
 Zusätzliche Einstellungen im Abschnitt `[console]`:
 

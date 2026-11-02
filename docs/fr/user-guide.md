@@ -118,6 +118,7 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 | **Clic** | **Épingle** la fenêtre : elle reste ouverte jusqu’à ce que vous la fermiez (la légende affiche *épinglé*). Cliquez à nouveau pour la désépingler. |
 | **Molette de la souris** | Agrandit ou réduit la fenêtre. |
 | **×** (coin supérieur droit) | Ferme immédiatement la fenêtre. Le bouton apparaît lorsque vous pointez la souris sur la fenêtre. |
+| **Haut-parleur** (à gauche de ×) | Coupe le son de la fenêtre ; un nouveau clic le rétablit. Le bouton apparaît lorsque vous pointez une fenêtre qui diffuse le son de la caméra ; tant que le son est coupé, le haut-parleur barré reste visible. |
 | **Clic droit** | Ferme la fenêtre. |
 | **Double-clic** | Ouvre cette caméra dans l’interface web de Frigate. |
 | **Survol** | Tant que le pointeur de la souris se trouve sur la fenêtre, celle-ci ne se ferme pas. Une fois le pointeur éloigné, elle reste encore au moins 3 secondes. |
@@ -206,7 +207,7 @@ FrigatePiP trouve les flux go2rtc de chaque caméra dans la configuration de Fri
 
 #### Son de la caméra
 
-L’option **Son de la caméra** joue le son de la caméra (AAC ou G.711 issu du flux RTSP) dans chaque fenêtre ouverte. Il est traité séparément et ne retarde donc jamais la fenêtre ni la vidéo. Le volume se règle dans le Mélangeur de volume de Windows (*FrigatePiP*). Cette option nécessite **RTSP depuis go2rtc**.
+L’option **Son de la caméra** joue le son de la caméra (AAC ou G.711 issu du flux RTSP) dans chaque fenêtre ouverte. Il est traité séparément et ne retarde donc jamais la fenêtre ni la vidéo. Le volume se règle dans le Mélangeur de volume de Windows (*FrigatePiP*). Cette option nécessite **RTSP depuis go2rtc**. Pour couper le son d’une seule fenêtre, cliquez sur le bouton haut-parleur dans son coin supérieur droit (voir [Actions de la souris](#actions-de-la-souris)).
 
 #### Préchargement
 
@@ -414,7 +415,7 @@ Dans ce mode, FrigatePiP n’a pas de fenêtre propre : il attend les détectio
 2. Ouvrez tmux pour votre propre travail — `tmux` démarre une nouvelle session — et travaillez-y. Les popups apparaissent par-dessus cette fenêtre.
 
 - Pour arrêter FrigatePiP : `tmux kill-session -t frigate-pip`. Pour utiliser ses touches (pause, affichage d’une caméra) : `tmux attach -t frigate-pip`.
-- La popup apparaît dans le **coin** choisi (`position`) et sa taille suit la **largeur de la fenêtre** (`width`). Elle se ferme d’elle-même après le délai habituel (`duration`, `max_duration`), ou immédiatement avec **q**, **x** ou **Échap**.
+- La popup apparaît dans le **coin** choisi (`position`) et sa taille suit la **largeur de la fenêtre** (`width`). Elle se ferme d’elle-même après le délai habituel (`duration`, `max_duration`), ou immédiatement avec **q**, **x** ou **Échap**. **m** coupe et rétablit son son.
 - tmux n’affiche qu’une popup à la fois : une détection sur une autre caméra remplace la popup ouverte (ou est ignorée si `replace = false`).
 - Pour obtenir toutes les couleurs de l’image, tmux doit transmettre les couleurs 24 bits : ajoutez `set -as terminal-features ",xterm-256color:RGB"` à `~/.tmux.conf` (en indiquant la valeur de votre `$TERM` hors de tmux) et redémarrez tmux. FrigatePiP inscrit cette indication dans son journal lorsque les couleurs manquent.
 
@@ -427,6 +428,7 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 | **q** (ou Ctrl+C) | Quitter. |
 | **x** (ou Échap) | Fermer toutes les fenêtres d’aperçu. |
 | **p** | Suspendre / reprendre les notifications. |
+| **m** | Coupe / rétablit le son (avec `camera_audio = true`) dans toutes les fenêtres, y compris celles ouvertes ensuite ; la légende affiche alors *son coupé*. |
 | **1**–**9** | Afficher la caméra 1 à 9 (dans l’ordre de la configuration de Frigate). |
 
 ### Ligne de commande
@@ -438,11 +440,12 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 | `--framebuffer /dev/fb0` | Périphérique framebuffer. |
 | `--test <camera>` | Afficher une caméra juste après le démarrage. |
 | `--test-connection` | Vérifier la connexion à Frigate (comme **Tester la connexion** sous Windows), puis quitter. |
+| `--list` | Affiche les caméras avec leurs objets et zones — les noms pour `cameras`, `labels` et `zones` dans `[trigger]` — puis quitte. |
 | `--version`, `--help` | Version, aide succincte. |
 
 ### Paramètres
 
-La version Linux utilise le même `config.ini` (dans `~/.config/frigate-pip/` ou `$XDG_CONFIG_HOME/frigate-pip/`) que la version Windows — voir [Fichier de paramètres](#7-fichier-de-paramètres). Les modifications sont appliquées dans les deux secondes qui suivent l’enregistrement du fichier. Les paramètres suivants sont utilisés : tout ce qui se trouve dans `[app]` (langue), `[frigate]`, `[mqtt]` et `[trigger]`, ainsi que, dans `[display]` : `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace` ; dans `[video]` : `live`, `stream`, `auto_main_width`, `camera_audio` ; et les sections `[camera.<name>]`. Les paramètres propres à Windows (`monitor`, `topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) sont ignorés.
+La version Linux utilise le même `config.ini` (dans `~/.config/frigate-pip/` ou `$XDG_CONFIG_HOME/frigate-pip/`) que la version Windows — voir [Fichier de paramètres](#7-fichier-de-paramètres). Les modifications sont appliquées dans les deux secondes qui suivent l’enregistrement du fichier. Les paramètres suivants sont utilisés : tout ce qui se trouve dans `[app]` (langue), `[frigate]`, `[mqtt]` et `[trigger]`, ainsi que, dans `[display]` : `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace` ; dans `[video]` : `live`, `stream`, `auto_main_width`, `camera_audio` ; et les sections `[camera.<name>]`. Les paramètres propres à Windows (`monitor`, `topmost`, `sound`, `skip_fullscreen`, `prebuffer`, `gpu_warm`, `check_updates`) sont ignorés. `frigate-pip --list` affiche les noms de vos caméras, objets et zones pour les filtres de `[trigger]`.
 
 Paramètres supplémentaires de la section `[console]` :
 

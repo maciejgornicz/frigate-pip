@@ -169,8 +169,13 @@ pub static STRINGS: Strings = Strings {
     tip_check_updates: "Once a day FrigatePiP asks GitHub whether a new version exists (no data about you or your cameras is sent) and offers to install it.",
     tip_update: "Checks for a new version now, or downloads and installs the version found. Your settings are kept.",
 
-    console_keys: "q quit · x close windows · p pause · 1–9 show camera",
+    console_keys: "q quit · x close windows · p pause · m sound · 1–9 show camera",
     console_tmux_running: "running in the background: camera windows open as tmux popups (Ctrl+C stops it).",
+    console_sound_off: "sound off",
+    console_list_title: "Cameras in Frigate ({0}): {1}",
+    console_list_objects: "objects",
+    console_list_zones: "zones",
+    console_list_hint: "Use these names in config.ini, section [trigger]: cameras = …, labels = … (objects), zones = …; frigate-pip --test <camera> shows a camera.",
 
     labels: &[
         ("person", "person"),

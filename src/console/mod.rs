@@ -77,6 +77,8 @@ pub struct View {
     pub stream: Option<String>,
     pub aspect: f32,
     pub caption: String,
+    /// Start with the camera audio muted.
+    pub muted: bool,
 }
 
 /// How the console version shows its windows.
@@ -147,11 +149,14 @@ Options:
   --framebuffer /dev/fb0                    framebuffer device
   --test CAMERA                             show a camera right after the start
   --test-connection                         check the connection to Frigate and exit
+  --list                                    list the cameras with their objects and zones
+                                            (the names for cameras, labels, zones in config.ini)
   --version                                 print the version
   --help                                    this help
 
 Keys (when started in a terminal or on a console): q quit, x close windows,
-p pause / resume, 1-9 show camera 1-9. In a tmux popup: q, x or Esc close it.
+p pause / resume, m sound on / off, 1-9 show camera 1-9.
+In a tmux popup: q, x or Esc close it, m sound on / off.
 Settings: ~/.config/frigate-pip/config.ini - user guide:
 https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md#12-linux-console-version";
 
@@ -182,8 +187,10 @@ pub fn main() {
         println!("FrigatePiP {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    // Without a terminal (e.g. a systemd service) the log also goes to stderr (the journal).
-    crate::util::init_log(!is_tty(libc::STDOUT_FILENO));
+    // Without a terminal (e.g. a systemd service) the log also goes to stderr (the journal);
+    // not for the commands that only print something (their output may be piped).
+    let report_only = args.iter().any(|a| a == "--list" || a == "--test-connection");
+    crate::util::init_log(!report_only && !is_tty(libc::STDOUT_FILENO));
     crate::log!("FrigatePiP {} (Linux console) - start", env!("CARGO_PKG_VERSION"));
     let path = config::config_path();
     let first_start = !path.exists();
@@ -198,6 +205,16 @@ pub fn main() {
     }
     if args.iter().any(|a| a == "--test-connection") {
         frigate::connection_test(&cfg, &Cancel::new(), &mut |line| println!("{line}"));
+        return;
+    }
+    if args.iter().any(|a| a == "--list") {
+        match frigate::cameras(&cfg, &Cancel::new()) {
+            Ok(cams) => print!("{}", camera_list(&cfg.url, &cams)),
+            Err(e) => {
+                eprintln!("{}", i18n::fmt(t().test_config_fail, &[&e]));
+                std::process::exit(1);
+            }
+        }
         return;
     }
     let console = ConsoleCfg::read(&doc, &args);
@@ -239,6 +256,30 @@ pub fn main() {
     drop(app);
     drop(keys);
     crate::log!("Stopped");
+}
+
+/// `--list`: every camera with the objects and zones Frigate knows, for the filters in config.ini.
+fn camera_list(url: &str, cams: &[CameraInfo]) -> String {
+    let s = t();
+    let mut out = i18n::fmt(s.console_list_title, &[&url, &cams.len()]);
+    out.push('\n');
+    let width = s.console_list_objects.chars().count().max(s.console_list_zones.chars().count()) + 1;
+    for c in cams {
+        out.push('\n');
+        out.push_str(&c.name);
+        if c.title != c.name {
+            out.push_str(&format!(" ({})", c.title));
+        }
+        out.push('\n');
+        for (label, names) in [(s.console_list_objects, &c.labels), (s.console_list_zones, &c.zones)] {
+            let names = if names.is_empty() { "—".to_string() } else { names.join(", ") };
+            out.push_str(&format!("  {:<width$} {names}\n", format!("{label}:")));
+        }
+    }
+    out.push('\n');
+    out.push_str(s.console_list_hint);
+    out.push('\n');
+    out
 }
 
 fn install_signals() {
@@ -321,11 +362,17 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
             let _ = wake.send(Ev::Wake);
         }),
     );
+    shared.muted.store(args.iter().any(|a| a == "--view-muted"), Ordering::Relaxed);
     let rect = Rect { x: 0, y: 0, w: sw, h: sh };
     let mut last: Option<Instant> = None;
     while !QUIT.load(Ordering::Relaxed) {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(Ev::Key(b'q' | b'Q' | b'x' | b'X' | 27 | 3)) | Err(RecvTimeoutError::Disconnected) => break,
+            Ok(Ev::Key(b'm' | b'M')) if cfg.camera_audio => {
+                let muted = !shared.muted.fetch_xor(true, Ordering::Relaxed);
+                crate::log!("{camera}: sound {}", if muted { "muted" } else { "on" });
+                shared.dirty.store(true, Ordering::Relaxed);
+            }
             _ => {}
         }
         if last.is_some_and(|t| t.elapsed() < out.min_interval()) || !shared.dirty.swap(false, Ordering::Relaxed) {
@@ -333,11 +380,21 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         }
         let frame = shared.frame.lock().unwrap().clone();
         if let Some(frame) = frame {
-            out.draw(1, rect, &frame, &caption, shared.live.load(Ordering::Relaxed));
+            let text = with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed));
+            out.draw(1, rect, &frame, &text, shared.live.load(Ordering::Relaxed));
             last = Some(Instant::now());
         }
     }
     shared.cancel.cancel();
+}
+
+/// The caption, marked when the camera audio is muted.
+fn with_sound(caption: &str, muted: bool) -> String {
+    if muted {
+        format!("{caption} · {}", t().console_sound_off)
+    } else {
+        caption.to_string()
+    }
 }
 
 struct Win {
@@ -364,6 +421,8 @@ struct App {
     wins: Vec<Win>,
     next_id: u64,
     paused: bool,
+    /// Camera audio muted (key m), also for windows opened later.
+    muted: bool,
     connected: bool,
     status: String,
     listener: Cancel,
@@ -385,6 +444,7 @@ impl App {
             wins: Vec::new(),
             next_id: 1,
             paused: false,
+            muted: false,
             connected: false,
             status: t().status_connecting.to_string(),
             listener: Cancel::new(),
@@ -515,7 +575,7 @@ impl App {
         }
         let id = self.next_id;
         self.next_id += 1;
-        let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone() };
+        let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone(), muted: self.muted };
         let shared = match self.out.open_external(id, &view) {
             Some(true) => Arc::new(video::Shared::default()),
             Some(false) => {
@@ -542,6 +602,7 @@ impl App {
                 )
             }
         };
+        shared.muted.store(self.muted, Ordering::Relaxed);
         crate::log!("{}: window after {} ms", d.camera, t0.elapsed().as_millis());
         let win = Win { id, camera: d.camera, caption, deadline: now + dur, hard: now + max, shared, rect: None, size, last_draw: None };
         match replace_at {
@@ -593,8 +654,8 @@ impl App {
             let Some(frame) = w.shared.frame.lock().unwrap().clone() else {
                 continue;
             };
-            let caption = if self.cfg.overlay || caption_h > 0 { w.caption.as_str() } else { "" };
-            self.out.draw(w.id, rect, &frame, caption, w.shared.live.load(Ordering::Relaxed));
+            let caption = if self.cfg.overlay || caption_h > 0 { with_sound(&w.caption, self.muted && self.cfg.camera_audio) } else { String::new() };
+            self.out.draw(w.id, rect, &frame, &caption, w.shared.live.load(Ordering::Relaxed));
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).
@@ -652,6 +713,16 @@ impl App {
                 crate::log!("{}", if self.paused { "Paused" } else { "Resumed" });
                 self.show_status();
             }
+            b'm' | b'M' if self.cfg.camera_audio => {
+                // Open tmux popups have their own m; new ones start muted.
+                self.muted = !self.muted;
+                crate::log!("Sound {}", if self.muted { "muted" } else { "on" });
+                for w in &self.wins {
+                    w.shared.muted.store(self.muted, Ordering::Relaxed);
+                    w.shared.dirty.store(true, Ordering::Relaxed);
+                }
+                self.show_status();
+            }
             b'1'..=b'9' => {
                 if let Some(c) = self.cameras.get((k - b'1') as usize) {
                     let name = c.name.clone();
@@ -664,13 +735,16 @@ impl App {
     }
 
     fn show_status(&mut self) {
-        let state = if self.paused {
+        let mut state = if self.paused {
             t().status_paused_forever.to_string()
         } else if self.connected {
             i18n::fmt(t().status_connected, &[&self.status])
         } else {
             i18n::fmt(t().status_disconnected, &[&self.status])
         };
+        if self.muted && self.cfg.camera_audio {
+            state = format!("{state} · {}", t().console_sound_off);
+        }
         let text = format!(" FrigatePiP {} · {state} · {}", env!("CARGO_PKG_VERSION"), t().console_keys);
         self.out.status(&text);
     }
@@ -724,6 +798,36 @@ fn stack(screen: (u32, u32), corner: Corner, margin: u32, sizes: &[(u32, u32)]) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_list_shows_objects_and_zones() {
+        i18n::set(i18n::Lang::En);
+        let cam = |name: &str, title: &str, labels: &[&str], zones: &[&str]| CameraInfo {
+            name: name.into(),
+            title: title.into(),
+            main: None,
+            sub: None,
+            aspect: 16.0 / 9.0,
+            labels: labels.iter().map(|s| s.to_string()).collect(),
+            zones: zones.iter().map(|s| s.to_string()).collect(),
+        };
+        let text = camera_list(
+            "http://frigate:5000",
+            &[cam("front_door", "Front door", &["person", "car"], &["driveway"]), cam("garden", "garden", &[], &[])],
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "Cameras in Frigate (http://frigate:5000): 2");
+        assert_eq!(&lines[2..5], ["front_door (Front door)", "  objects: person, car", "  zones:   driveway"]);
+        assert_eq!(&lines[6..9], ["garden", "  objects: —", "  zones:   —"]);
+        assert!(lines[10].contains("[trigger]"));
+    }
+
+    #[test]
+    fn muted_caption() {
+        i18n::set(i18n::Lang::En);
+        assert_eq!(with_sound("Garden · person", true), "Garden · person · sound off");
+        assert_eq!(with_sound("Garden · person", false), "Garden · person");
+    }
 
     #[test]
     fn windows_stack_from_the_corner() {

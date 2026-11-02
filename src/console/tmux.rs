@@ -158,6 +158,9 @@ impl Output for Tmux {
         cmd.extend(["--view-aspect".into(), format!("{:.4}", view.aspect)]);
         cmd.extend(["--view-caption".into(), quote(&view.caption)]);
         cmd.extend(["--view-lock".into(), quote(&lock.to_string_lossy())]);
+        if view.muted {
+            cmd.push("--view-muted".into());
+        }
         let spawned = Command::new("tmux")
             .args(["display-popup", "-c", &client, "-w", &w.to_string(), "-h", &h.to_string(), "-x", &x, "-y", &y, "-E", &cmd.join(" ")])
             .stdin(Stdio::null())

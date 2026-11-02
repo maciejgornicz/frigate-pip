@@ -81,6 +81,13 @@ pub fn camera_infos(j: &Json, cfg: &Config) -> Vec<CameraInfo> {
     out
 }
 
+/// The cameras from `/api/config` (the error is the reason, or "JSON" for an unreadable answer).
+pub fn cameras(cfg: &Config, cancel: &Cancel) -> Result<Vec<CameraInfo>, String> {
+    let b = crate::net::get_bytes(&format!("{}/api/config", cfg.url), Duration::from_secs(4), Some(cancel), 16 << 20).map_err(|e| e.to_string())?;
+    let j = Json::parse(&String::from_utf8_lossy(&b)).ok_or("JSON")?;
+    Ok(camera_infos(&j, cfg))
+}
+
 /// Connection test for the settings window. Every step is reported with its time.
 pub fn connection_test(cfg: &Config, cancel: &Cancel, report: &mut dyn FnMut(String)) {
     use crate::i18n::{fmt, t as tr};
@@ -97,19 +104,10 @@ pub fn connection_test(cfg: &Config, cancel: &Cancel, report: &mut dyn FnMut(Str
         }
     }
     let t = Instant::now();
-    let cams = match crate::net::get_bytes(&format!("{}/api/config", cfg.url), timeout, Some(cancel), 16 << 20) {
-        Ok(b) => match Json::parse(&String::from_utf8_lossy(&b)) {
-            Some(j) => camera_infos(&j, cfg),
-            None => {
-                report(fmt(s.test_config_fail, &[&"JSON"]));
-                Vec::new()
-            }
-        },
-        Err(e) => {
-            report(fmt(s.test_config_fail, &[&e]));
-            Vec::new()
-        }
-    };
+    let cams = cameras(cfg, cancel).unwrap_or_else(|e| {
+        report(fmt(s.test_config_fail, &[&e]));
+        Vec::new()
+    });
     if !cams.is_empty() {
         let names: Vec<&str> = cams.iter().map(|c| c.title.as_str()).collect();
         report(fmt(s.test_cameras, &[&cams.len(), &names.join(", "), &ms(t)]));
