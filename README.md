@@ -48,7 +48,7 @@ Three ways to run it:
 |---|---|---|
 | `--output framebuffer` | on the screen of a console without a desktop (Raspberry Pi with a monitor; user in the `video` group) | yes, as a systemd service |
 | `--output terminal` (default in a terminal) | inside the terminal window FrigatePiP runs in | no — it occupies the terminal |
-| `--output tmux` | as tmux popups over your work in tmux | yes: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` |
+| `--output tmux` | as tmux popups over your work in tmux — only while you work inside tmux | yes: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, then work in tmux (`tmux`) |
 
 On a Windows PC (also in WSL) use the Windows application — it runs in the background and shows its windows over everything. Keys: **q** quit, **x** close windows, **p** pause, **1–9** show a camera. Running it as a systemd service, all options and troubleshooting: [user guide → Linux console version](docs/en/user-guide.md#12-linux-console-version).
 

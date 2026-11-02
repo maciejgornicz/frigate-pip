@@ -353,7 +353,7 @@ FrigatePiP también funciona en Linux **sin escritorio**, por ejemplo, en una Ra
 |---|---|---|---|---|
 | **Framebuffer** | En la pantalla de una consola de Linux sin X ni Wayland, en la esquina elegida, sobre el texto de la consola | **Sí** — como servicio de systemd | Una Raspberry Pi u otro equipo con monitor y sin escritorio (una pantalla de pared) | `frigate-pip --output framebuffer`; como servicio: consulte [Inicio automático](#inicio-automático-systemd) |
 | **Terminal** | Dentro de la ventana de terminal en la que se ejecuta FrigatePiP: una línea con el texto, la imagen y una línea de estado | **No** — la ventana de terminal muestra FrigatePiP mientras se ejecuta (como `top`) | Una ventana de terminal o un panel de tmux que se deja abierto como monitor de cámaras, también por SSH | `frigate-pip` |
-| **Ventanas emergentes de tmux** | Como ventana emergente de tmux sobre lo que esté haciendo en tmux; se cierra sola | **Sí** — en una ventana oculta de tmux | Trabajar en tmux (en local o por SSH) y querer que las cámaras aparezcan en ventanas emergentes | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` — consulte [Ventanas emergentes de tmux](#ventanas-emergentes-de-tmux) |
+| **Ventanas emergentes de tmux** | Como ventana emergente de tmux sobre lo que esté haciendo en tmux; se cierra sola | **Sí** — en una ventana oculta de tmux | Trabajar en tmux (en local o por SSH) y querer que las cámaras aparezcan en ventanas emergentes | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` y después trabaje dentro de tmux — consulte [Ventanas emergentes de tmux](#ventanas-emergentes-de-tmux) |
 
 **En un equipo con Windows — también si trabaja en WSL — use la aplicación de Windows:** se ejecuta en el área de notificación y sus ventanas aparecen por encima de todo, incluidas las ventanas de terminal. La versión de Linux en WSL solo es útil para probarla.
 
@@ -391,13 +391,17 @@ Con `--output auto` (el valor predeterminado), FrigatePiP usa el modo **framebuf
 
 ### Ventanas emergentes de tmux
 
-En este modo, FrigatePiP no tiene ventana propia: espera detecciones en segundo plano y, por cada una, abre una ventana emergente de [tmux](https://github.com/tmux/tmux) con la cámara sobre los paneles del cliente de tmux que usó por última vez. Requiere tmux 3.2 o posterior.
+En este modo, FrigatePiP no tiene ventana propia: espera detecciones en segundo plano y, por cada una, abre una ventana emergente de [tmux](https://github.com/tmux/tmux) con la cámara sobre los paneles del cliente de tmux que usó por última vez. Requiere tmux 3.2 o posterior y FrigatePiP 1.3.0 o posterior (las versiones anteriores no reconocen `--output tmux` y usan el modo terminal sin avisar).
 
-- Inícielo una vez, en una sesión oculta de tmux: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`. Para detenerlo: `tmux kill-session -t frigate-pip`. Para usar las teclas (pausa, mostrar una cámara): `tmux attach -t frigate-pip`.
+**Las ventanas emergentes solo aparecen mientras trabaja dentro de tmux.** tmux solo puede dibujarlas en su propia pantalla: en una ventana de terminal sin tmux — un shell normal o una sesión SSH fuera de tmux — no se muestra nada y las detecciones solo se escriben en el registro. Por eso no basta con iniciar el proceso en segundo plano; también necesita una sesión de tmux en la que trabajar:
+
+1. Inicie FrigatePiP una vez, en una sesión oculta de tmux: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`.
+2. Abra tmux para su propio trabajo — `tmux` inicia una sesión nueva — y trabaje allí. Las ventanas emergentes aparecen sobre esa ventana.
+
+- Para detener FrigatePiP: `tmux kill-session -t frigate-pip`. Para usar sus teclas (pausa, mostrar una cámara): `tmux attach -t frigate-pip`.
 - La ventana emergente aparece en la **esquina** elegida (`position`) y su tamaño sigue el **ancho de la ventana** (`width`). Se cierra sola tras el tiempo habitual (`duration`, `max_duration`) o al instante con **q**, **x** o **Esc**.
 - tmux muestra una sola ventana emergente a la vez: una detección en otra cámara reemplaza la ventana emergente abierta (o se omite si `replace = false`).
 - Para ver la imagen con todos sus colores, tmux debe transmitir el color de 24 bits: agregue `set -as terminal-features ",xterm-256color:RGB"` a `~/.tmux.conf` (use su `$TERM` de fuera de tmux) y reinicie tmux. FrigatePiP escribe esta sugerencia en su registro cuando faltan los colores.
-- Si no hay ningún cliente de tmux conectado, las detecciones solo se escriben en el registro.
 
 ### Teclas
 
@@ -465,7 +469,7 @@ Después: `sudo systemctl enable --now frigate-pip`. El registro se envía al jo
 - **"/dev/fb0: Permission denied"** — agregue el usuario al grupo `video` y vuelva a iniciar sesión (para el servicio: `SupplementaryGroups=video`).
 - **No aparece el texto en el framebuffer** — instale `fonts-dejavu-core` o configure `font` en `[console]`.
 - **La imagen en la ventana de terminal se ve pixelada** — es el modo de medios bloques; use un emulador de terminal compatible con gráficos de Kitty o Sixel (consulte más arriba) o configure `graphics`.
-- **No aparece ninguna ventana emergente de tmux** — compruebe que hay un cliente de tmux conectado (`tmux list-clients`), que la versión de tmux es la 3.2 o posterior (`tmux -V`) y que el proceso en segundo plano se está ejecutando (`tmux ls` muestra la sesión `frigate-pip`); el registro indica por qué no se mostró una ventana emergente.
+- **No aparece ninguna ventana emergente de tmux** — las ventanas emergentes solo aparecen mientras trabaja dentro de tmux, no en una ventana de terminal normal (consulte [Ventanas emergentes de tmux](#ventanas-emergentes-de-tmux)). Compruebe que hay un cliente de tmux conectado (`tmux list-clients` lo muestra), que `frigate-pip --version` indica 1.3.0 o posterior, que la versión de tmux es la 3.2 o posterior (`tmux -V`) y que el proceso en segundo plano se está ejecutando (`tmux ls` muestra la sesión `frigate-pip`); el registro indica por qué no se mostró una ventana emergente.
 - **Colores pálidos en las ventanas emergentes de tmux** — active el color de 24 bits en tmux (consulte [Ventanas emergentes de tmux](#ventanas-emergentes-de-tmux)).
 - **No hay sonido** — el audio de la cámara necesita PulseAudio/PipeWire o ALSA; el usuario del servicio debe pertenecer al grupo `audio`.
 - **Para obtener un informe detallado**, inicie FrigatePiP con `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` y adjunte a su issue el final de ese archivo y del registro.

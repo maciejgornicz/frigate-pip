@@ -353,7 +353,7 @@ FrigatePiP läuft auch unter Linux **ohne Desktop** — zum Beispiel auf einem R
 |---|---|---|---|---|
 | **Framebuffer** | Auf dem Bildschirm einer Linux-Konsole ohne X oder Wayland, in der gewählten Ecke, über dem Konsolentext | **Ja** — als systemd-Dienst | Ein Raspberry Pi oder ein anderer Computer mit Monitor und ohne Desktop (ein Wanddisplay) | `frigate-pip --output framebuffer`, als Dienst: siehe [Automatischer Start](#automatischer-start-systemd) |
 | **Terminal** | Im Terminalfenster, in dem FrigatePiP läuft: eine Beschriftungszeile, das Bild und eine Statuszeile | **Nein** — das Terminal zeigt FrigatePiP, solange es läuft (wie `top`) | Ein Terminalfenster oder tmux-Bereich, der als Kameramonitor geöffnet bleibt, auch per SSH | `frigate-pip` |
-| **tmux-Popups** | Als tmux-Popup über dem, woran Sie gerade in tmux arbeiten; es schließt sich von selbst | **Ja** — in einem verborgenen tmux-Fenster | Arbeit in tmux (lokal oder per SSH), wenn Kameras automatisch eingeblendet werden sollen | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` — siehe [tmux-Popups](#tmux-popups) |
+| **tmux-Popups** | Als tmux-Popup über dem, woran Sie gerade in tmux arbeiten; es schließt sich von selbst | **Ja** — in einem verborgenen tmux-Fenster | Arbeit in tmux (lokal oder per SSH), wenn Kameras automatisch eingeblendet werden sollen | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, danach in tmux arbeiten — siehe [tmux-Popups](#tmux-popups) |
 
 **Auf einem Windows-PC — auch wenn Sie in WSL arbeiten — verwenden Sie die Windows-Anwendung:** Sie läuft im Infobereich, und ihre Fenster erscheinen über allem, auch über Terminals. Die Linux-Version in WSL ist nur zum Ausprobieren sinnvoll.
 
@@ -391,13 +391,17 @@ Mit `--output auto` (Standard) verwendet FrigatePiP den **Framebuffer**, wenn es
 
 ### tmux-Popups
 
-In diesem Modus hat FrigatePiP kein eigenes Fenster: Es wartet im Hintergrund auf Erkennungen und öffnet für jede ein [tmux](https://github.com/tmux/tmux)-Popup mit der Kamera über den Bereichen des zuletzt verwendeten tmux-Clients. Erforderlich ist tmux 3.2 oder neuer.
+In diesem Modus hat FrigatePiP kein eigenes Fenster: Es wartet im Hintergrund auf Erkennungen und öffnet für jede ein [tmux](https://github.com/tmux/tmux)-Popup mit der Kamera über den Bereichen des zuletzt verwendeten tmux-Clients. Erforderlich sind tmux 3.2 oder neuer und FrigatePiP 1.3.0 oder neuer (ältere Versionen kennen `--output tmux` nicht und verwenden stillschweigend den Terminalmodus).
 
-- Starten Sie es einmal in einer verborgenen tmux-Sitzung: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`. Zum Beenden: `tmux kill-session -t frigate-pip`. Um die Tasten zu verwenden (Pause, Kamera anzeigen): `tmux attach -t frigate-pip`.
+**Die Popups erscheinen nur, während Sie in tmux arbeiten.** tmux kann sie nur auf seinem eigenen Bildschirm zeichnen: In einem Terminalfenster ohne tmux — einer normalen Shell oder einer SSH-Sitzung außerhalb von tmux — wird nichts angezeigt, und Erkennungen werden nur ins Protokoll geschrieben. Den Hintergrundprozess zu starten genügt daher nicht; Sie brauchen auch eine tmux-Sitzung, in der Sie arbeiten:
+
+1. Starten Sie FrigatePiP einmal in einer verborgenen tmux-Sitzung: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`.
+2. Öffnen Sie tmux für Ihre eigene Arbeit — `tmux` startet eine neue Sitzung — und arbeiten Sie dort. Die Popups erscheinen über diesem Fenster.
+
+- Zum Beenden von FrigatePiP: `tmux kill-session -t frigate-pip`. Um seine Tasten zu verwenden (Pause, Kamera anzeigen): `tmux attach -t frigate-pip`.
 - Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**.
 - tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen).
 - Für die vollen Farben des Bildes muss tmux 24-Bit-Farbe weitergeben: Fügen Sie `set -as terminal-features ",xterm-256color:RGB"` zu `~/.tmux.conf` hinzu (verwenden Sie dabei Ihren `$TERM` außerhalb von tmux) und starten Sie tmux neu. FrigatePiP schreibt diesen Hinweis in sein Protokoll, wenn die Farben fehlen.
-- Ist kein tmux-Client verbunden, werden Erkennungen nur ins Protokoll geschrieben.
 
 ### Tasten
 
@@ -465,7 +469,7 @@ Danach: `sudo systemctl enable --now frigate-pip`. Das Protokoll wird ins Journa
 - **„/dev/fb0: Permission denied“** — fügen Sie den Benutzer der Gruppe `video` hinzu und melden Sie sich neu an (für den Dienst: `SupplementaryGroups=video`).
 - **Keine Beschriftung im Framebuffer** — installieren Sie `fonts-dejavu-core` oder setzen Sie `font` in `[console]`.
 - **Das Bild im Terminal ist grob und blockig** — das ist der Halbblock-Modus; verwenden Sie ein Terminal mit Kitty-Grafik oder Sixel (siehe oben) oder setzen Sie `graphics`.
-- **Es erscheint kein tmux-Popup** — prüfen Sie, ob ein tmux-Client verbunden ist (`tmux list-clients`), ob tmux in Version 3.2 oder neuer vorliegt (`tmux -V`) und ob der Hintergrundprozess läuft (`tmux ls` zeigt die Sitzung `frigate-pip`); im Protokoll steht, warum ein Popup nicht angezeigt wurde.
+- **Es erscheint kein tmux-Popup** — Popups erscheinen nur, während Sie in tmux arbeiten, nicht in einem normalen Terminalfenster (siehe [tmux-Popups](#tmux-popups)). Prüfen Sie, ob ein tmux-Client verbunden ist (`tmux list-clients` führt ihn auf), ob `frigate-pip --version` 1.3.0 oder neuer anzeigt, ob tmux in Version 3.2 oder neuer vorliegt (`tmux -V`) und ob der Hintergrundprozess läuft (`tmux ls` zeigt die Sitzung `frigate-pip`); im Protokoll steht, warum ein Popup nicht angezeigt wurde.
 - **Blasse Farben in tmux-Popups** — aktivieren Sie 24-Bit-Farbe in tmux (siehe [tmux-Popups](#tmux-popups)).
 - **Kein Ton** — der Kameraton benötigt PulseAudio/PipeWire oder ALSA; der Benutzer des Dienstes muss Mitglied der Gruppe `audio` sein.
 - **Für einen ausführlichen Bericht** starten Sie FrigatePiP mit `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` und hängen Sie das Ende dieser Datei und des Protokolls an Ihr Issue an.

@@ -353,7 +353,7 @@ FrigatePiP also runs on Linux **without a desktop** — for example on a Raspber
 |---|---|---|---|---|
 | **Framebuffer** | On the screen of a Linux console without X or Wayland, in the chosen corner, over the console text | **Yes** — as a systemd service | A Raspberry Pi or another computer with a monitor and no desktop (a wall display) | `frigate-pip --output framebuffer`, as a service: see [Starting automatically](#starting-automatically-systemd) |
 | **Terminal** | Inside the terminal window FrigatePiP runs in: a caption line, the picture and a status line | **No** — the terminal shows FrigatePiP while it runs (like `top`) | A terminal window or tmux pane kept open as a camera monitor, also over SSH | `frigate-pip` |
-| **tmux popups** | As a tmux popup over whatever you are doing in tmux; it closes by itself | **Yes** — in a hidden tmux window | Working in tmux (locally or over SSH) and wanting cameras to pop up | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'` — see [tmux popups](#tmux-popups) |
+| **tmux popups** | As a tmux popup over whatever you are doing in tmux; it closes by itself | **Yes** — in a hidden tmux window | Working in tmux (locally or over SSH) and wanting cameras to pop up | `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, then work inside tmux — see [tmux popups](#tmux-popups) |
 
 **On a Windows PC — also when you work in WSL — use the Windows application:** it runs in the notification area and its windows appear over everything, terminals included. The Linux version in WSL is useful only for trying it out.
 
@@ -391,13 +391,17 @@ With `--output auto` (the default) FrigatePiP uses the **framebuffer** when it r
 
 ### tmux popups
 
-In this mode FrigatePiP has no window of its own: it waits for detections in the background and, for each one, opens a [tmux](https://github.com/tmux/tmux) popup with the camera over the panes of the tmux client you used last. It needs tmux 3.2 or later.
+In this mode FrigatePiP has no window of its own: it waits for detections in the background and, for each one, opens a [tmux](https://github.com/tmux/tmux) popup with the camera over the panes of the tmux client you used last. It needs tmux 3.2 or later and FrigatePiP 1.3.0 or later (older versions do not know `--output tmux` and silently use the terminal mode).
 
-- Start it once, in a hidden tmux session: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`. To stop it: `tmux kill-session -t frigate-pip`. To use the keys (pause, show a camera): `tmux attach -t frigate-pip`.
+**The popups appear only while you work inside tmux.** tmux can draw them only on its own screen: in a terminal window without tmux — a plain shell, an SSH session outside tmux — nothing is shown and detections are only written to the log. Starting the background process is therefore not enough; you also need a tmux session to work in:
+
+1. Start FrigatePiP once, in a hidden tmux session: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`.
+2. Open tmux for your own work — `tmux` starts a new session — and work there. The popups appear over this window.
+
+- To stop FrigatePiP: `tmux kill-session -t frigate-pip`. To use its keys (pause, show a camera): `tmux attach -t frigate-pip`.
 - The popup appears in the chosen **corner** (`position`) and its size follows the **window width** (`width`). It closes by itself after the usual time (`duration`, `max_duration`), or at once with **q**, **x** or **Esc**.
 - tmux shows one popup at a time: a detection on another camera replaces the open popup (or is skipped when `replace = false`).
 - For the full colours of the picture, tmux must pass 24-bit colour on: add `set -as terminal-features ",xterm-256color:RGB"` to `~/.tmux.conf` (use your `$TERM` outside tmux) and restart tmux. FrigatePiP writes this hint into its log when the colours are missing.
-- If no tmux client is attached, detections are only written to the log.
 
 ### Keys
 
@@ -465,7 +469,7 @@ Then: `sudo systemctl enable --now frigate-pip`. The log goes to the journal (`j
 - **"/dev/fb0: Permission denied"** — add the user to the `video` group and log in again (for the service: `SupplementaryGroups=video`).
 - **No caption on the framebuffer** — install `fonts-dejavu-core` or set `font` in `[console]`.
 - **The picture in a terminal is blocky** — that is the half-block mode; use a terminal with Kitty graphics or Sixel (see above) or set `graphics`.
-- **No tmux popup appears** — check that a tmux client is attached (`tmux list-clients`), that tmux is 3.2 or later (`tmux -V`) and that the background process runs (`tmux ls` shows the `frigate-pip` session); the log says why a popup was not shown.
+- **No tmux popup appears** — popups show only while you work inside tmux, not in a plain terminal window (see [tmux popups](#tmux-popups)). Check that a tmux client is attached (`tmux list-clients` lists it), that `frigate-pip --version` shows 1.3.0 or later, that tmux is 3.2 or later (`tmux -V`) and that the background process runs (`tmux ls` shows the `frigate-pip` session); the log says why a popup was not shown.
 - **Pale colours in tmux popups** — enable 24-bit colour in tmux (see [tmux popups](#tmux-popups)).
 - **No sound** — camera audio needs PulseAudio/PipeWire or ALSA; the user of the service must be in the `audio` group.
 - **For a detailed report**, start FrigatePiP with `FRIGATEPIP_FFMPEG_LOG=/tmp/ffmpeg.log frigate-pip` and attach the end of that file and of the log to your issue.
