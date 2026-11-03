@@ -242,16 +242,34 @@ impl EventFilter {
         let after = p.get("after");
         let id = after.get("id").str().unwrap_or("");
         let camera = after.get("camera").str().unwrap_or("").to_string();
-        if self.shown.iter().any(|s| s == id) {
-            return if typ == "update" { Verdict::Activity(camera) } else { Verdict::Ignore };
-        }
-        let first = !self.seen.has(id);
-        self.seen.note(id);
-        let data = after.get("data");
-        let tracked = data.get("detections").strs().any(|d| self.seen.has(d));
-        let objects = data.get("objects").strs().next().is_some();
-        if typ != "update" || !first || tracked || !objects || !self.recent(after) || !self.review_matches(after) {
+        if typ == "new" {
+            // A tracked object's item: its object comes through `events`.
+            self.seen.note(id);
             return Verdict::Ignore;
+        }
+        if typ != "update" {
+            return Verdict::Ignore;
+        }
+        if self.shown.iter().any(|s| s == id) {
+            return Verdict::Activity(camera);
+        }
+        if self.seen.has(id) {
+            return Verdict::Ignore;
+        }
+        let data = after.get("data");
+        let tracked = data.get("detections").strs().any(|d| self.known(d));
+        if tracked || data.get("objects").strs().next().is_none() {
+            // Objects already met on `events`, or sound only: never a manual event.
+            self.seen.note(id);
+            return Verdict::Ignore;
+        }
+        // Not remembered when filtered out: a later update may match.
+        if !self.review_matches(after) {
+            return Verdict::Ignore;
+        }
+        // Begun before this connection: it only keeps an open window open.
+        if !self.recent(after) {
+            return Verdict::Activity(camera);
         }
         self.mark_shown(id);
         Verdict::Show(self.review_detection(camera, after))
@@ -451,10 +469,12 @@ mod tests {
         let mut f = EventFilter::new(&cfg("cameras = ogrod"));
         let m = item(&f, "r1", "alert", &["person"], &["e1"], 1.0);
         assert_eq!(f.on_message("reviews", &event("update", &m, &m)), Verdict::Ignore);
-        // An item that began before FrigatePiP connected only goes on.
+        // An item that began before FrigatePiP connected (e.g. before a reconnect) opens no
+        // window, but keeps one open.
         let mut f = EventFilter::new(&cfg(""));
         let old = item(&f, "r2", "alert", &["person"], &["e2"], -60.0);
-        assert_eq!(f.on_message("reviews", &event("update", &old, &old)), Verdict::Ignore);
+        assert_eq!(f.on_message("reviews", &event("update", &old, &old)), Verdict::Activity("brama".into()));
+        assert_eq!(f.on_message("reviews", &event("update", &old, &old)), Verdict::Activity("brama".into()));
         // Sound only (no objects): not a manual event.
         let sound = item(&f, "r3", "detection", &[], &[], 1.0);
         assert_eq!(f.on_message("reviews", &event("update", &sound, &sound)), Verdict::Ignore);
@@ -477,6 +497,26 @@ mod tests {
         assert_eq!(f.on_message("reviews", &event("update", &bell, &bell)), Verdict::Ignore);
         let person = item(&f, "r2", "alert", &["person"], &["e2"], 1.0);
         assert!(matches!(f.on_message("reviews", &event("update", &person, &person)), Verdict::Show(_)));
+    }
+
+    #[test]
+    fn manual_item_filtered_out_at_first_can_match_later() {
+        let mut f = EventFilter::new(&cfg("zones = Droga"));
+        let outside = item(&f, "r1", "detection", &["license_plate"], &["e1"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &outside, &outside)), Verdict::Ignore);
+        let inside = outside.replace("\"zones\": []", "\"zones\": [\"Droga\"]");
+        assert!(matches!(f.on_message("reviews", &event("update", &outside, &inside)), Verdict::Show(_)));
+    }
+
+    #[test]
+    fn objects_still_remembered_as_shown_are_not_manual_events() {
+        let mut f = EventFilter::new(&cfg(""));
+        let a = obj("e1", "brama", "person", false, &[]);
+        assert!(matches!(f.on_message("events", &event("new", &a, &a)), Verdict::Show(_)));
+        // `seen` lost the object (many others came after it), `shown` still has it.
+        f.seen = Recent::default();
+        let r = item(&f, "r1", "alert", &["person"], &["e1"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Ignore);
     }
 
     #[test]
