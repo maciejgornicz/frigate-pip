@@ -1,10 +1,14 @@
 name: Build
 
 on:
+  # Changes to the documentation alone build nothing. Tags always build: GitHub does not
+  # apply path filters to them.
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["docs/**", "**.md"]
   pull_request:
+    paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
 
 permissions:
@@ -12,6 +16,8 @@ permissions:
 
 jobs:
   build:
+    # A "Release x.y.z" commit on main is built by its tag's run, which also publishes it.
+    if: github.event_name != 'push' || github.ref_type == 'tag' || !startsWith(github.event.head_commit.message, 'Release ')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +59,8 @@ jobs:
           path: dist/
 
   linux:
+    # A "Release x.y.z" commit on main is built by its tag's run, which also publishes it.
+    if: github.event_name != 'push' || github.ref_type == 'tag' || !startsWith(github.event.head_commit.message, 'Release ')
     strategy:
       matrix:
         include:
