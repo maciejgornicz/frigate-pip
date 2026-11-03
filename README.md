@@ -7,6 +7,8 @@
 
 **Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows — and on Linux.**
 
+![FrigatePiP on Windows: a Backyard window pops up in the corner, a Garden window with a fox opens above it, the Backyard window closes, and the Garden window is enlarged and zoomed in](docs/demo.gif)
+
 When Frigate detects a person, a car or any other object, FrigatePiP pops up a small window with that camera's live video in a corner of your screen — within milliseconds — and closes it again when nothing moves any more.
 
 - **[Windows](#windows):** a tray application whose windows appear over everything; it takes about 5–10 MB of memory and practically no CPU while waiting.
