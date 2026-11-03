@@ -170,6 +170,8 @@ La plupart des modifications s’appliquent **immédiatement** aux fenêtres d�
 
 Les faux positifs de Frigate sont toujours ignorés. Chaque objet n’ouvre une fenêtre qu’une seule fois ; lorsqu’il bouge à nouveau, il ne fait que prolonger la fenêtre ouverte.
 
+Les **événements manuels** ouvrent aussi une fenêtre : les événements créés par l’API de Frigate (`POST /api/events/<caméra>/<label>/create`, par exemple par une automatisation Home Assistant quand on sonne à la porte) et les éléments d’une caméra LPR dédiée. La légende affiche le label de l’événement. Cela fonctionne avec **Chaque objet détecté (le plus rapide)** et **Alertes et détections Review**, et avec **Alertes Review uniquement** quand Frigate fait de l’événement une alerte (son label fait partie des labels d’alerte de Review, par défaut `person` et `car`). Pour tester dans PowerShell : `Invoke-RestMethod -Method Post -ContentType application/json -Body '{"duration": 10}' http://<frigate>:5000/api/events/<camera>/doorbell/create` ; sous Linux : `curl -X POST -H "Content-Type: application/json" -d '{"duration": 10}' http://<frigate>:5000/api/events/<camera>/doorbell/create`. Les filtres de caméras, d’objets et de zones s’appliquent comme aux autres détections (un filtre d’objets `person, car` masque un événement `doorbell`) ; la confiance minimale non. Frigate ne crée l’élément de Review auquel FrigatePiP réagit que si la caméra enregistre (`record` activé).
+
 ### 6.3 Fenêtre d’aperçu
 
 | Option | Description |

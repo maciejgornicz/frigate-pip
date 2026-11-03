@@ -170,6 +170,8 @@ A maioria das alterações tem efeito **de imediato** nas janelas de pré-visual
 
 Os falsos positivos do Frigate são sempre ignorados. Cada objeto abre uma janela apenas uma vez; quando volta a mover-se, apenas prolonga a janela aberta.
 
+Os **eventos manuais** também abrem uma janela: eventos criados pela API do Frigate (`POST /api/events/<câmara>/<etiqueta>/create`, por exemplo por uma automatização do Home Assistant quando a campainha toca) e itens de uma câmara LPR dedicada. A legenda mostra a etiqueta do evento. Funciona com **Cada objeto detetado (mais rápido)** e **Alertas e deteções do Review**, e com **Apenas alertas do Review** quando o Frigate torna o evento um alerta (a etiqueta está entre as etiquetas de alerta do Review, por predefinição `person` e `car`). Para testar no PowerShell: `Invoke-RestMethod -Method Post -ContentType application/json -Body '{"duration": 10}' http://<frigate>:5000/api/events/<camera>/doorbell/create`; no Linux: `curl -X POST -H "Content-Type: application/json" -d '{"duration": 10}' http://<frigate>:5000/api/events/<camera>/doorbell/create`. Os filtros de câmaras, objetos e zonas aplicam-se como às outras deteções (um filtro de objetos `person, car` esconde um evento `doorbell`); a confiança mínima não. O Frigate só cria o item do Review a que o FrigatePiP reage se a câmara estiver a gravar (`record` ativado).
+
 ### 6.3 Janela de pré-visualização
 
 | Opção | Descrição |

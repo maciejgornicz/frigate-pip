@@ -170,6 +170,8 @@ La mayoría de los cambios se aplican **de inmediato** a las ventanas de vista p
 
 Los falsos positivos de Frigate siempre se ignoran. Cada objeto abre una ventana solo una vez; cuando vuelve a moverse, solo prolonga la ventana abierta.
 
+Los **eventos manuales** también abren una ventana: los eventos creados con la API de Frigate (`POST /api/events/<cámara>/<etiqueta>/create`, por ejemplo desde una automatización de Home Assistant cuando suena el timbre) y los elementos de una cámara LPR dedicada. El título de la ventana muestra la etiqueta del evento. Funciona con **Cada objeto detectado (lo más rápido)** y **Alertas y detecciones de Review**, y con **Solo alertas de Review** cuando Frigate convierte el evento en una alerta (su etiqueta está entre las etiquetas de alerta de Review, por defecto `person` y `car`). Para probarlo en PowerShell: `Invoke-RestMethod -Method Post -ContentType application/json -Body '{"duration": 10}' http://<frigate>:5000/api/events/<camera>/doorbell/create`; en Linux: `curl -X POST -H "Content-Type: application/json" -d '{"duration": 10}' http://<frigate>:5000/api/events/<camera>/doorbell/create`. Los filtros de cámaras, objetos y zonas se aplican igual que a otras detecciones (un filtro de objetos `person, car` oculta un evento `doorbell`); la confianza mínima no. Frigate solo crea el elemento de Review al que reacciona FrigatePiP si la cámara graba (`record` activado).
+
 ### 6.3 Ventana de vista previa
 
 | Opción | Descripción |
