@@ -35,6 +35,8 @@ pub struct EventFilter {
     /// neither — Frigate starts it with an "update" — is a manual event (Frigate's API, e.g.
     /// from a Home Assistant automation, or a dedicated LPR camera), with no `events` message.
     seen: Recent,
+    /// Review items holding manual events (`events` mode).
+    manual: Recent,
     /// Unix time this connection began (by Frigate's clock when known, see `set_since`):
     /// older review items do not open windows.
     since: f64,
@@ -95,6 +97,7 @@ impl EventFilter {
             min_score: cfg.min_score,
             shown: VecDeque::new(),
             seen: Recent::default(),
+            manual: Recent::default(),
             since: unix_now(),
         }
     }
@@ -237,38 +240,48 @@ impl EventFilter {
     /// `events` mode: a manual event has no `events` message, only a review item that
     /// starts with an "update" (the items of tracked objects start with "new", and their
     /// objects come through `events`). Such an item opens a window like a new object.
+    ///
+    /// Frigate adds a manual event to the review item already open on its camera (another
+    /// manual event, or a person in front of it), so the decision is made per event: an id in
+    /// `detections` that never came through `events` is a manual event, new if it was
+    /// created during this connection (the time is the start of its id).
     fn on_manual_review(&mut self, p: &Json) -> Verdict {
         let typ = p.get("type").str().unwrap_or("");
         let after = p.get("after");
         let id = after.get("id").str().unwrap_or("");
         let camera = after.get("camera").str().unwrap_or("").to_string();
+        let data = after.get("data");
+        let dets: Vec<&str> = data.get("detections").strs().collect();
         if typ == "new" {
-            // A tracked object's item: its object comes through `events`.
-            self.seen.note(id);
+            // A tracked object's item: its objects come through `events`.
+            for d in &dets {
+                self.seen.note(d);
+            }
             return Verdict::Ignore;
         }
         if typ != "update" {
             return Verdict::Ignore;
         }
-        if self.shown.iter().any(|s| s == id) {
-            return Verdict::Activity(camera);
-        }
-        if self.seen.has(id) {
-            return Verdict::Ignore;
-        }
-        let data = after.get("data");
-        let tracked = data.get("detections").strs().any(|d| self.known(d));
-        if tracked || data.get("objects").strs().next().is_none() {
-            // Objects already met on `events`, or sound only: never a manual event.
-            self.seen.note(id);
-            return Verdict::Ignore;
+        let fresh: Vec<&str> = dets.iter().copied().filter(|d| !self.known(d)).collect();
+        if fresh.is_empty() {
+            for d in &dets {
+                self.seen.note(d);
+            }
+            // An item with manual events keeps its window open.
+            return if self.manual.has(id) { Verdict::Activity(camera) } else { Verdict::Ignore };
         }
         // Not remembered when filtered out: a later update may match.
-        if !self.review_matches(after) {
+        if data.get("objects").strs().next().is_none() || !self.review_matches(after) {
             return Verdict::Ignore;
         }
-        // Begun before this connection: it only keeps an open window open.
-        if !self.recent(after) {
+        for d in &dets {
+            self.seen.note(d);
+        }
+        self.manual.note(id);
+        let created = |d: &str| d.split_once('-').and_then(|(t, _)| t.parse::<f64>().ok());
+        let new = fresh.iter().any(|d| created(d).map_or_else(|| self.recent(after), |t| t >= self.since - CLOCK_SLACK));
+        if !new {
+            // Only events from before this connection: they keep an open window open.
             return Verdict::Activity(camera);
         }
         self.mark_shown(id);
@@ -506,6 +519,42 @@ mod tests {
         assert_eq!(f.on_message("reviews", &event("update", &outside, &outside)), Verdict::Ignore);
         let inside = outside.replace("\"zones\": []", "\"zones\": [\"Droga\"]");
         assert!(matches!(f.on_message("reviews", &event("update", &outside, &inside)), Verdict::Show(_)));
+    }
+
+    /// An event id as Frigate makes them: creation time, a dash, 6 random letters.
+    fn eid(f: &EventFilter, at: f64, tag: &str) -> String {
+        format!("{:.6}-{tag}", f.since + at)
+    }
+
+    #[test]
+    fn manual_events_added_to_an_older_item_open_windows() {
+        // The item began before this connection (with a manual event from then); a manual
+        // event made afterwards joins the same item and must still open a window.
+        let mut f = EventFilter::new(&cfg(""));
+        let (old, new1, new2) = (eid(&f, -20.0, "aaaaaa"), eid(&f, 2.0, "bbbbbb"), eid(&f, 20.0, "cccccc"));
+        let r = item(&f, "r1", "alert", &["person"], &[&old], -15.0);
+        assert_eq!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Activity("brama".into()));
+        let r = item(&f, "r1", "alert", &["person"], &[&old, &new1], -15.0);
+        assert!(matches!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Show(_)));
+        assert_eq!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Activity("brama".into()));
+        // Another press of the doorbell in the same item opens (or refreshes) the window again.
+        let r = item(&f, "r1", "alert", &["person"], &[&old, &new1, &new2], -15.0);
+        assert!(matches!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Show(_)));
+    }
+
+    #[test]
+    fn manual_event_added_to_a_tracked_objects_item() {
+        let mut f = EventFilter::new(&cfg(""));
+        let person = eid(&f, 1.0, "pppppp");
+        let a = obj(&person, "brama", "person", false, &[]);
+        assert!(matches!(f.on_message("events", &event("new", &a, &a)), Verdict::Show(_)));
+        let r = item(&f, "r1", "alert", &["person"], &[&person], 1.0);
+        assert_eq!(f.on_message("reviews", &event("new", &r, &r)), Verdict::Ignore);
+        assert_eq!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Ignore);
+        // The doorbell rings while the person is there: a manual event joins the item.
+        let bell = eid(&f, 3.0, "dddddd");
+        let r = item(&f, "r1", "alert", &["person", "doorbell"], &[&person, &bell], 1.0);
+        assert!(matches!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Show(_)));
     }
 
     #[test]
