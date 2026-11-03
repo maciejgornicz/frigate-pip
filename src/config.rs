@@ -1,7 +1,7 @@
 //! Settings in an INI file (comments are preserved when saving from the menu).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------- INI document
 
@@ -191,6 +191,9 @@ pub struct CamOverride {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     pub url: String,
+    /// Frigate login (port 8971 or a reverse proxy); empty for port 5000.
+    pub user: String,
+    pub password: String,
     pub source: Source,
     pub rtsp: String,
     pub mqtt_host: String,
@@ -265,6 +268,8 @@ impl Config {
         }
         Config {
             url: g("frigate", "url").unwrap_or_default().trim_end_matches('/').to_string(),
+            user: g("frigate", "user").unwrap_or_default(),
+            password: g("frigate", "password").unwrap_or_default(),
             source: match g("frigate", "source").as_deref() {
                 Some("mqtt") => Source::Mqtt,
                 _ => Source::WebSocket,
@@ -390,8 +395,10 @@ pub fn ini_value(v: &str) -> String {
 /// Writes all settings to the INI document (existing lines and comments are kept).
 pub fn write_all(c: &Config, d: &mut IniDoc) {
     let quoted = ini_value;
-    let pairs: [(&str, &str, String); 34] = [
+    let pairs: [(&str, &str, String); 36] = [
         ("frigate", "url", c.url.clone()),
+        ("frigate", "user", quoted(&c.user)),
+        ("frigate", "password", quoted(&c.password)),
         ("frigate", "source", c.source.key().into()),
         ("frigate", "rtsp", c.rtsp.clone()),
         ("mqtt", "host", c.mqtt_host.clone()),
@@ -443,6 +450,7 @@ pub fn load(path: &PathBuf) -> std::io::Result<(Config, IniDoc)> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let _ = std::fs::create_dir_all(path.parent().unwrap_or(path));
             let _ = std::fs::write(path, DEFAULT_INI.replace('\n', crate::util::NEWLINE));
+            private(path);
             DEFAULT_INI.to_string()
         }
         Err(e) => return Err(e),
@@ -455,6 +463,19 @@ pub fn save(path: &PathBuf, doc: &IniDoc) {
     if let Err(e) = std::fs::write(path, doc.to_text()) {
         crate::log!("Cannot save settings: {e}");
     }
+    private(path);
+}
+
+/// The file holds passwords: on Linux only its owner may read it (on Windows the
+/// per-user application data folder already is private).
+fn private(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 pub const DEFAULT_INI: &str = "\
@@ -470,8 +491,12 @@ language = auto
 check_updates = true
 
 [frigate]
-; Address of the Frigate server. Port 5000 does not require logging in.
+; Address of the Frigate server: http://<host>:5000 needs no login;
+; https://<host>:8971 (or a reverse proxy) needs a Frigate user below
 url = http://frigate.local:5000
+; Frigate user for port 8971 (the viewer role is enough); empty for port 5000
+user =
+password =
 ; Event source: websocket (recommended, nothing else needed) or mqtt
 source = websocket
 ; RTSP address of go2rtc. {host} = host from url, {stream} = go2rtc stream name

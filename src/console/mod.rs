@@ -651,7 +651,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     crate::log!("{camera}: viewer {sw}x{sh} (aspect {aspect:.2})");
     let params = video::Params {
         camera: camera.to_string(),
-        frigate_url: cfg.url.clone(),
+        frigate: crate::client::Frigate::new(cfg),
         rtsp_url: stream.map(|s| cfg.rtsp_url(&s)),
         hub: None,
         main: args.iter().any(|a| a == "--view-main"),
@@ -1138,7 +1138,7 @@ impl App {
         let w = &mut self.wins[i];
         let params = video::Params {
             camera: w.camera.clone(),
-            frigate_url: self.cfg.url.clone(),
+            frigate: crate::client::Frigate::new(&self.cfg),
             rtsp_url: w.stream.as_ref().map(|s| self.cfg.rtsp_url(s)),
             hub,
             main,
@@ -1233,7 +1233,7 @@ impl App {
             None => {
                 let params = video::Params {
                     camera: d.camera.clone(),
-                    frigate_url: self.cfg.url.clone(),
+                    frigate: crate::client::Frigate::new(&self.cfg),
                     rtsp_url: stream.as_ref().map(|s| self.cfg.rtsp_url(s)),
                     hub: self.hubs.get(&d.camera).cloned(),
                     main,

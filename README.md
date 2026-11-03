@@ -37,11 +37,11 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 1. Download **`FrigatePiP-<version>-installer.exe`** from [Releases](https://github.com/maciejgornicz/frigate-pip/releases/latest).
 2. Run it (no administrator rights needed). If Windows SmartScreen says *“Windows protected your PC”*, click **More info → Run anyway** — the program is not code-signed.
 3. Keep **Start FrigatePiP with Windows** checked if you want it to start automatically, and finish with **Launch FrigatePiP**.
-4. The settings window opens. Enter your **Frigate address** (for example `http://192.168.1.10:5000`), click **Test connection**, then **OK**.
+4. The settings window opens. Enter your **Frigate address** (for example `http://192.168.1.10:5000`, or `https://192.168.1.10:8971` together with a Frigate user and password), click **Test connection**, then **OK**.
 
 Prefer no installer? Download `FrigatePiP-<version>-portable.exe` from the same release and run it from any folder.
 
-**Requirements:** Windows 10 (1809+) or 11, 64-bit; Frigate reachable over plain `http://` on its API port **5000** (the unauthenticated port; 8971 and HTTPS are not supported — in the Home Assistant add-on, enable port 5000 in the add-on's network settings) and, for live video, go2rtc's RTSP port **8554**. On Windows N editions without the Media Feature Pack, live video falls back to MJPEG. Details, updating and uninstalling: [user guide → Installation](docs/en/user-guide.md#2-installation).
+**Requirements:** Windows 10 (1809+) or 11, 64-bit; Frigate reachable on its API port **5000** (`http://`, no login — in the Home Assistant add-on, enable it in the add-on's network settings) or **8971** (`https://`, with a Frigate user; the viewer role is enough), also through a reverse proxy, and, for live video, go2rtc's RTSP port **8554**. On Windows N editions without the Media Feature Pack, live video falls back to MJPEG. Details, updating and uninstalling: [user guide → Installation](docs/en/user-guide.md#2-installation).
 
 ### Usage in short
 

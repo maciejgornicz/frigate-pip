@@ -1,6 +1,7 @@
 //! PiP window thread: an instant snapshot, then live video.
 
 use crate::audio::{AudioMsg, AudioTrack, Sound};
+use crate::client::Frigate;
 use crate::config::LiveMode;
 use crate::decoder::{Decoder, Frame};
 use crate::hub::{Feed, Hub, Sink};
@@ -96,7 +97,7 @@ impl Shared {
 pub struct Params {
     pub hwnd: isize,
     pub camera: String,
-    pub frigate_url: String,
+    pub frigate: crate::client::Frigate,
     pub rtsp_url: Option<String>,
     pub hub: Option<Arc<Hub>>,
     pub live: LiveMode,
@@ -114,9 +115,9 @@ struct QuickPaint {
     t0: Instant,
 }
 
-fn spawn_snapshot(url: String, tx: Sender<Input>, cancel: Cancel, quick: Option<QuickPaint>) {
+fn spawn_snapshot(api: Frigate, path: String, tx: Sender<Input>, cancel: Cancel, quick: Option<QuickPaint>) {
     let _ = std::thread::Builder::new().name("snapshot".into()).spawn(move || {
-        match crate::net::get_bytes(&url, Duration::from_secs(3), Some(&cancel), 16 << 20) {
+        match api.get_bytes(&path, Duration::from_secs(3), Some(&cancel), 16 << 20) {
             Ok(b) => {
                 if let Some(q) = quick.filter(|q| !q.renderer_ready.load(Ordering::Acquire)) {
                     unsafe {
@@ -130,7 +131,7 @@ fn spawn_snapshot(url: String, tx: Sender<Input>, cancel: Cancel, quick: Option<
             }
             Err(e) => {
                 if !cancel.is_set() {
-                    crate::log!("Snapshot {url}: {e}");
+                    crate::log!("Snapshot {}: {e}", api.url(&path));
                 }
                 let _ = tx.send(Input::JpegFailed);
             }
@@ -176,10 +177,10 @@ fn prebuf_sink(tx: Sender<Input>) -> Sink {
 }
 
 /// Finds consecutive JPEG images (SOI…EOI) in an MJPEG stream.
-fn spawn_mjpeg(url: String, tx: Sender<Input>, cancel: Cancel) {
+fn spawn_mjpeg(api: Frigate, path: String, tx: Sender<Input>, cancel: Cancel) {
     let _ = std::thread::Builder::new().name("mjpeg".into()).spawn(move || {
         while !cancel.is_set() {
-            match crate::net::get(&url, Duration::from_secs(5), Some(&cancel)) {
+            match api.get(&path, Duration::from_secs(5), Some(&cancel)) {
                 Ok(mut resp) if resp.status == 200 => {
                     let mut buf: Vec<u8> = Vec::with_capacity(512 * 1024);
                     let mut chunk = vec![0u8; 64 * 1024];
@@ -218,10 +219,10 @@ fn spawn_mjpeg(url: String, tx: Sender<Input>, cancel: Cancel) {
                         }
                     }
                 }
-                Ok(resp) => crate::log!("MJPEG {url}: HTTP {}", resp.status),
+                Ok(resp) => crate::log!("MJPEG {}: HTTP {}", api.url(&path), resp.status),
                 Err(e) => {
                     if !cancel.is_set() {
-                        crate::log!("MJPEG {url}: {e}");
+                        crate::log!("MJPEG {}: {e}", api.url(&path));
                     }
                 }
             }
@@ -263,12 +264,13 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let cancel = shared.cancel.clone();
     let cam = &p.camera;
     let (tx, rx) = mpsc::channel::<Input>();
-    let snapshot_url = format!("{}/api/{}/latest.jpg", p.frigate_url, cam);
-    let mjpeg_url = format!("{}/api/{}?fps=5&h=720", p.frigate_url, cam);
+    let api = &p.frigate;
+    let snapshot_path = format!("/api/{cam}/latest.jpg");
+    let mjpeg_path = format!("/api/{cam}?fps=5&h=720");
 
     let renderer_ready = Arc::new(AtomicBool::new(false));
     let quick = QuickPaint { hwnd: p.hwnd, renderer_ready: renderer_ready.clone(), camera: cam.clone(), t0: p.t0 };
-    spawn_snapshot(snapshot_url.clone(), tx.clone(), cancel.clone(), Some(quick));
+    spawn_snapshot(api.clone(), snapshot_path.clone(), tx.clone(), cancel.clone(), Some(quick));
     // Audio lives on its own thread; here we only hand it frames without waiting.
     let audio_tx = p.audio.then(|| crate::audio::spawn(cam.clone(), cancel.clone(), shared.sound.clone()));
 
@@ -278,7 +280,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         // Without Media Foundation (Windows N) RTSP video cannot be decoded.
         LiveMode::Rtsp if !crate::decoder::mf_startup() => {
             crate::log!("{cam}: MJPEG from Frigate instead of RTSP");
-            spawn_mjpeg(mjpeg_url.clone(), tx.clone(), cancel.clone());
+            spawn_mjpeg(api.clone(), mjpeg_path.clone(), tx.clone(), cancel.clone());
             mjpeg_active = true;
         }
         LiveMode::Rtsp => {
@@ -293,12 +295,12 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 }
             }
             if !src[SRC_PREBUF].active && !src[SRC_DIRECT].active {
-                spawn_mjpeg(mjpeg_url.clone(), tx.clone(), cancel.clone());
+                spawn_mjpeg(api.clone(), mjpeg_path.clone(), tx.clone(), cancel.clone());
                 mjpeg_active = true;
             }
         }
         LiveMode::Mjpeg => {
-            spawn_mjpeg(mjpeg_url.clone(), tx.clone(), cancel.clone());
+            spawn_mjpeg(api.clone(), mjpeg_path.clone(), tx.clone(), cancel.clone());
             mjpeg_active = true;
         }
         LiveMode::Snapshot => {}
@@ -420,7 +422,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         let alive = src.iter().any(|s| s.active && !s.failed);
         if shown.is_none() && !alive && !mjpeg_active && p.live != LiveMode::Snapshot {
             crate::log!("{cam}: no RTSP video - MJPEG from Frigate instead");
-            spawn_mjpeg(mjpeg_url.clone(), tx.clone(), cancel.clone());
+            spawn_mjpeg(api.clone(), mjpeg_path.clone(), tx.clone(), cancel.clone());
             mjpeg_active = true;
         }
 
@@ -476,7 +478,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         if shown.is_none() && !mjpeg_active && !snapshot_inflight && last_snapshot.elapsed() > Duration::from_millis(400) {
             snapshot_inflight = true;
             last_snapshot = Instant::now();
-            spawn_snapshot(snapshot_url.clone(), tx.clone(), cancel.clone(), None);
+            spawn_snapshot(api.clone(), snapshot_path.clone(), tx.clone(), cancel.clone(), None);
         }
     }
     // Decoders are created before the renderer (they share the D3D11 device).

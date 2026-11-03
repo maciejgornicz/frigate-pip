@@ -15,8 +15,8 @@ The log contains your Frigate address and camera names — remove anything you d
 ## Development setup
 
 - [Rust](https://rustup.rs) stable, 1.87 or later.
-- **Windows application:** Windows 10 or 11, 64-bit, with either the MSVC (`x86_64-pc-windows-msvc`, default) or the GNU (`x86_64-pc-windows-gnu`) toolchain. Its only dependency is the [`windows`](https://crates.io/crates/windows) crate. Optional: [Inno Setup 6](https://jrsoftware.org/isinfo.php) to build the installer.
-- **Linux version:** Linux (or WSL on Windows) with `ffmpeg`; its dependencies are the `libc` and `fontdue` crates. Optional: `musl-tools` for a static binary and [cargo-deb](https://crates.io/crates/cargo-deb) for the Debian package — see [Testing the Linux version](#testing-the-linux-version).
+- **Windows application:** Windows 10 or 11, 64-bit, with either the MSVC (`x86_64-pc-windows-msvc`, default) or the GNU (`x86_64-pc-windows-gnu`) toolchain. Its dependencies are the [`windows`](https://crates.io/crates/windows) crate and [`schannel`](https://crates.io/crates/schannel) for HTTPS (the system's TLS); no C compiler is needed. Both stay on versions that link through import libraries, so the GNU toolchain needs no `dlltool`. Optional: [Inno Setup 6](https://jrsoftware.org/isinfo.php) to build the installer.
+- **Linux version:** Linux (or WSL on Windows) with `ffmpeg`; its dependencies are the `libc` and `fontdue` crates and, for HTTPS, `rustls` with `ring` and `webpki-roots`; `ring` needs a C compiler (`gcc`, e.g. from `build-essential`). Optional: `musl-tools` for a static binary and [cargo-deb](https://crates.io/crates/cargo-deb) for the Debian package — see [Testing the Linux version](#testing-the-linux-version).
 - Optional: a Frigate server with go2rtc to try things for real.
 
 The Windows application:
@@ -41,6 +41,8 @@ cargo test --release -- --ignored --nocapture
 ```
 
 `FRIGATE_STREAMS` is a comma-separated list of go2rtc stream names. Without these variables the live tests print a hint and pass. Never commit real addresses, camera names, credentials or footage.
+
+`live_connection` runs the whole **Test connection** against a Frigate server — set `FRIGATE_URL` (e.g. `https://192.168.1.10:8971`) and, for port 8971, `FRIGATE_USER` and `FRIGATE_PASSWORD` (a user with the viewer role is enough); `FRIGATE_RTSP_TEMPLATE` replaces `rtsp://{host}:8554/{stream}`. A self-signed certificate is remembered in `certificates.txt` in the settings folder, so set `APPDATA` (Windows) or `XDG_CONFIG_HOME` (Linux) to a scratch folder to keep your own settings folder untouched.
 
 ### Testing Windows-only behaviour
 

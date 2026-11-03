@@ -978,7 +978,7 @@ impl App {
         let params = player::Params {
             hwnd: hwnd.0 as isize,
             camera: camera.clone(),
-            frigate_url: self.cfg.url.clone(),
+            frigate: crate::client::Frigate::new(&self.cfg),
             rtsp_url,
             hub,
             live: v.live,

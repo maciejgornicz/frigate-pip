@@ -259,9 +259,35 @@ pub fn peek_topic(msg: &str) -> Option<&str> {
     msg.get(start..end)
 }
 
+/// A JSON string literal (with quotes) for `s`.
+pub fn quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quotes_strings() {
+        let s = "a\"b\\c\nd\u{1}ż";
+        assert_eq!(quote(s), "\"a\\\"b\\\\c\\nd\\u0001ż\"");
+        assert_eq!(Json::parse(&quote(s)).and_then(|j| j.str().map(str::to_string)).as_deref(), Some(s));
+    }
 
     #[test]
     fn parses_scalars_and_nesting() {

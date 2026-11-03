@@ -1,9 +1,8 @@
-//! Minimal WebSocket client (RFC 6455) for `ws://`.
+//! Minimal WebSocket client (RFC 6455) for `ws://` and `wss://`.
 
-use crate::net::{self, Url};
+use crate::net::{self, Conn, Url};
 use crate::util::{base64_encode, random_u64, Cancel};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
 use std::time::Duration;
 
 pub enum Msg {
@@ -15,9 +14,9 @@ pub enum Msg {
     Idle,
 }
 
+/// Reads go through the buffer, writes straight to the connection under it.
 pub struct WebSocket {
-    r: BufReader<TcpStream>,
-    w: TcpStream,
+    r: BufReader<Conn>,
 }
 
 const MAX_MESSAGE: usize = 16 << 20;
@@ -42,32 +41,41 @@ pub fn encode_frame(opcode: u8, payload: &[u8], mask: [u8; 4]) -> Vec<u8> {
 }
 
 impl WebSocket {
-    pub fn connect(url: &str, timeout: Duration, read_timeout: Duration, cancel: &Cancel) -> io::Result<WebSocket> {
+    /// Opens the connection with extra request `headers` (e.g. `Authorization`).
+    pub fn connect(url: &str, headers: &[(&str, String)], timeout: Duration, read_timeout: Duration, cancel: &Cancel) -> io::Result<WebSocket> {
         let u = Url::parse(url).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("invalid address {url}")))?;
-        if u.scheme != "ws" {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, "only ws:// is supported"));
+        if u.scheme != "ws" && u.scheme != "wss" {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "only ws:// and wss:// are supported"));
         }
-        let mut s = net::connect(&u.host, u.port, timeout, Some(cancel))?;
-        s.set_read_timeout(Some(timeout))?;
+        let mut s = net::open(&u, timeout, Some(cancel))?;
         let key = base64_encode(&random_u64().to_le_bytes().iter().chain(random_u64().to_le_bytes().iter()).copied().collect::<Vec<u8>>());
-        let req = format!(
-            "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: FrigatePiP\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        let mut req = format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: FrigatePiP\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n",
             u.path,
             u.host_header()
         );
-        s.write_all(req.as_bytes())?;
-        let mut r = BufReader::with_capacity(64 * 1024, s.try_clone()?);
-        let (status, _) = net::read_head(&mut r)?;
-        if net::status_code(&status) != 101 {
-            return Err(io::Error::new(io::ErrorKind::ConnectionRefused, format!("WebSocket rejected: {status}")));
+        for (k, v) in headers {
+            req.push_str(&format!("{k}: {v}\r\n"));
         }
-        s.set_read_timeout(Some(read_timeout))?;
-        Ok(WebSocket { r, w: s })
+        req.push_str("\r\n");
+        s.write_all(req.as_bytes())?;
+        s.flush()?;
+        let mut r = BufReader::with_capacity(64 * 1024, s);
+        let (status, _) = net::read_head(&mut r)?;
+        let code = net::status_code(&status);
+        if code != 101 {
+            let kind = if code == 401 { io::ErrorKind::PermissionDenied } else { io::ErrorKind::ConnectionRefused };
+            return Err(io::Error::new(kind, format!("WebSocket rejected: {status}")));
+        }
+        r.get_ref().set_read_timeout(Some(read_timeout))?;
+        Ok(WebSocket { r })
     }
 
     fn send(&mut self, opcode: u8, payload: &[u8]) -> io::Result<()> {
         let mask = (random_u64() as u32).to_le_bytes();
-        self.w.write_all(&encode_frame(opcode, payload, mask))
+        let w = self.r.get_mut();
+        w.write_all(&encode_frame(opcode, payload, mask))?;
+        w.flush()
     }
 
     pub fn send_ping(&mut self) -> io::Result<()> {

@@ -35,7 +35,7 @@ pub struct Shared {
 
 pub struct Params {
     pub camera: String,
-    pub frigate_url: String,
+    pub frigate: crate::client::Frigate,
     pub rtsp_url: Option<String>,
     /// The camera's prebuffer (`prebuffer`), if it runs.
     pub hub: Option<Arc<Hub>>,
@@ -87,10 +87,39 @@ fn store(shared: &Shared, img: Image, zoom: Zoom, live: bool, wake: &Wake) {
     wake();
 }
 
+/// ffmpeg decoding Frigate's picture or MJPEG stream at `path`. ffmpeg reads a plain
+/// `http://` address itself; with HTTPS or a login FrigatePiP fetches it and pipes the bytes.
+fn frigate_input(p: &Params, ff: &Ffmpeg, shared: &Shared, path: &str, format: &str, one_frame: bool) -> Option<Proc> {
+    let api = &p.frigate;
+    if !api.needs_client() {
+        let f = (format != "jpeg_pipe").then_some(format);
+        return ff.url(&api.url(path), f, p.size, one_frame, p.zoom).ok();
+    }
+    let mut body = match api.get(path, Duration::from_secs(5), Some(&shared.cancel)) {
+        Ok(r) if r.status == 200 => r.body,
+        Ok(r) => {
+            crate::log!("{}: HTTP {} for {}", p.camera, r.status, api.url(path));
+            return None;
+        }
+        Err(e) => {
+            if !shared.cancel.is_set() {
+                crate::log!("{}: {}: {e}", p.camera, api.url(path));
+            }
+            return None;
+        }
+    };
+    let mut proc = ff.video_pipe(format, p.size, false, p.zoom).ok()?;
+    let mut stdin = proc.0.stdin.take()?;
+    let _ = std::thread::Builder::new().name(format!("http-{}", p.camera)).spawn(move || {
+        let _ = std::io::copy(&mut body, &mut stdin);
+    });
+    Some(proc)
+}
+
 /// Frigate's latest picture of the camera (shown until live video starts).
 fn snapshot(p: &Params, ff: &Ffmpeg, shared: &Shared, wake: &Wake) {
-    let url = format!("{}/api/{}/latest.jpg?h={}", p.frigate_url, p.camera, source_height(p));
-    let Ok(mut proc) = ff.url(&url, None, p.size, true, p.zoom) else { return };
+    let path = format!("/api/{}/latest.jpg?h={}", p.camera, source_height(p));
+    let Some(mut proc) = frigate_input(p, ff, shared, &path, "jpeg_pipe", true) else { return };
     let Some(out) = proc.0.stdout.take() else { return };
     read_frames(out, p.size, |img| {
         if !shared.cancel.is_set() && !shared.live.load(Ordering::Relaxed) {
@@ -101,8 +130,8 @@ fn snapshot(p: &Params, ff: &Ffmpeg, shared: &Shared, wake: &Wake) {
 }
 
 fn mjpeg(p: &Params, ff: &Ffmpeg, shared: &Shared, wake: &Wake) {
-    let url = format!("{}/api/{}?fps=5&h={}", p.frigate_url, p.camera, source_height(p));
-    let Ok(mut proc) = ff.url(&url, Some("mpjpeg"), p.size, false, p.zoom) else { return };
+    let path = format!("/api/{}?fps=5&h={}", p.camera, source_height(p));
+    let Some(mut proc) = frigate_input(p, ff, shared, &path, "mpjpeg", false) else { return };
     let Some(out) = proc.0.stdout.take() else { return };
     let proc = Arc::new(Mutex::new(Some(proc)));
     kill_on_cancel(shared, proc.clone());
