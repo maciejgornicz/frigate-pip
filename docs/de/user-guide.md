@@ -170,6 +170,8 @@ Die meisten Änderungen wirken sich **sofort** auf geöffnete Vorschaufenster au
 
 Fehlalarme (False Positives) von Frigate werden immer ignoriert. Jedes Objekt öffnet nur einmal ein Fenster; bewegt es sich erneut, verlängert es nur das geöffnete Fenster.
 
+Auch **manuelle Ereignisse** öffnen ein Fenster: über Frigates API erstellte Ereignisse (`POST /api/events/<kamera>/<label>/create`, z. B. von einer Home-Assistant-Automatisierung, wenn es klingelt) und Einträge einer eigenen LPR-Kamera. Die Beschriftung zeigt das Label des Ereignisses. Das funktioniert mit **Jedes erkannte Objekt (am schnellsten)** und **Review-Alarme und -Erkennungen**, mit **Nur Review-Alarme** dann, wenn Frigate das Ereignis zum Alarm macht (sein Label gehört zu den Alarm-Labels von Review, standardmäßig `person` und `car`). Zum Testen: `curl -X POST -H "Content-Type: application/json" -d '{"duration": 10}' http://<frigate>:5000/api/events/<camera>/doorbell/create`. Frigate legt den Review-Eintrag, auf den FrigatePiP reagiert, nur an, wenn die Kamera aufzeichnet (`record` aktiviert).
+
 ### 6.3 Vorschaufenster
 
 | Option | Beschreibung |

@@ -201,7 +201,11 @@ impl<F: Fn(Notice)> Dispatch<'_, F> {
     fn handle(&mut self, topic: &str, payload: &Json, t0: Instant) {
         match self.filter.on_message(topic, payload) {
             Verdict::Show(d) => {
-                crate::log!("Detected: {} on {} ({:.0}%)", d.label, d.camera, d.score * 100.0);
+                if d.score > 0.0 {
+                    crate::log!("Detected: {} on {} ({:.0}%)", d.label, d.camera, d.score * 100.0);
+                } else {
+                    crate::log!("Detected: {} on {} (review item)", d.label, d.camera);
+                }
                 self.last_activity.insert(d.camera.clone(), t0);
                 (self.sink)(Notice::Show(d, t0));
             }

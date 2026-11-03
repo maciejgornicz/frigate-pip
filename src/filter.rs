@@ -31,6 +31,29 @@ pub struct EventFilter {
     ignore_stationary: bool,
     min_score: f32,
     shown: VecDeque<String>,
+    /// Ids met on the `events` topic and review items already seen. A review item that is
+    /// neither — Frigate starts it with an "update" — is a manual event (Frigate's API, e.g.
+    /// from a Home Assistant automation, or a dedicated LPR camera), with no `events` message.
+    seen: VecDeque<String>,
+    /// Unix time this connection began: older review items do not open windows.
+    since: f64,
+}
+
+/// Review items may start a little before `since` by the server's clock.
+const CLOCK_SLACK: f64 = 5.0;
+
+fn remember(list: &mut VecDeque<String>, id: &str) {
+    if id.is_empty() || list.iter().any(|s| s == id) {
+        return;
+    }
+    if list.len() >= 512 {
+        list.pop_front();
+    }
+    list.push_back(id.to_string());
+}
+
+fn unix_now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
 fn any_in(items: impl Iterator<Item = impl AsRef<str>>, set: &[String]) -> bool {
@@ -52,12 +75,15 @@ impl EventFilter {
             ignore_stationary: cfg.ignore_stationary,
             min_score: cfg.min_score,
             shown: VecDeque::new(),
+            seen: VecDeque::new(),
+            since: unix_now(),
         }
     }
 
+    /// `events` mode also reads review items, for manual events.
     pub fn wants(&self, topic: &str) -> bool {
         match self.mode {
-            TriggerMode::Events => topic == "events",
+            TriggerMode::Events => topic == "events" || topic == "reviews",
             TriggerMode::Alerts | TriggerMode::Reviews => topic == "reviews",
         }
     }
@@ -66,8 +92,9 @@ impl EventFilter {
         if !self.wants(topic) {
             return Verdict::Ignore;
         }
-        match self.mode {
-            TriggerMode::Events => self.on_event(payload),
+        match (self.mode, topic) {
+            (TriggerMode::Events, "events") => self.on_event(payload),
+            (TriggerMode::Events, _) => self.on_manual_review(payload),
             _ => self.on_review(payload),
         }
     }
@@ -82,6 +109,15 @@ impl EventFilter {
         }
         self.shown.push_back(id.to_string());
         true
+    }
+
+    fn known(&self, id: &str) -> bool {
+        self.shown.iter().chain(self.seen.iter()).any(|s| s == id)
+    }
+
+    /// The review item began during this connection.
+    fn recent(&self, item: &Json) -> bool {
+        item.get("start_time").f64().is_some_and(|t| t >= self.since - CLOCK_SLACK)
     }
 
     fn camera_ok(&self, cam: &str) -> bool {
@@ -115,6 +151,7 @@ impl EventFilter {
     fn on_event(&mut self, p: &Json) -> Verdict {
         let typ = p.get("type").str().unwrap_or("");
         let after = p.get("after");
+        remember(&mut self.seen, after.get("id").str().unwrap_or(""));
         if typ == "end" || !self.object_matches(after) {
             return Verdict::Ignore;
         }
@@ -160,27 +197,61 @@ impl EventFilter {
         }
         let id = after.get("id").str().unwrap_or("");
         let camera = after.get("camera").str().unwrap_or("").to_string();
-        let newly = typ == "new" || (typ == "update" && !self.review_matches(p.get("before")));
+        // Manual events, audio and LPR cameras start their item with an "update".
+        let first = !self.known(id);
+        remember(&mut self.seen, id);
+        let newly = typ == "new" || (typ == "update" && (!self.review_matches(p.get("before")) || (first && self.recent(after))));
         if newly && self.mark_shown(id) {
-            let data = after.get("data");
-            let objects: Vec<&str> = data.get("objects").strs().map(base_label).collect();
-            let label = objects
-                .iter()
-                .find(|o| self.labels.is_empty() || any_in(std::iter::once(**o), &self.labels))
-                .or(objects.first())
-                .or(data.get("audio").strs().next().as_ref())
-                .copied()
-                .unwrap_or("")
-                .to_string();
-            return Verdict::Show(Detection {
-                camera,
-                label,
-                sub_label: data.get("sub_labels").strs().next().map(str::to_string),
-                score: 0.0,
-                id: id.to_string(),
-            });
+            return Verdict::Show(self.review_detection(camera, after));
         }
         Verdict::Activity(camera)
+    }
+
+    /// `events` mode: a manual event has no `events` message, only a review item that
+    /// starts with an "update" (the items of tracked objects start with "new", and their
+    /// objects come through `events`). Such an item opens a window like a new object.
+    fn on_manual_review(&mut self, p: &Json) -> Verdict {
+        let typ = p.get("type").str().unwrap_or("");
+        let after = p.get("after");
+        let id = after.get("id").str().unwrap_or("");
+        let camera = after.get("camera").str().unwrap_or("").to_string();
+        if typ == "new" {
+            remember(&mut self.seen, id);
+            return Verdict::Ignore;
+        }
+        if self.shown.iter().any(|s| s == id) {
+            return if typ == "end" { Verdict::Ignore } else { Verdict::Activity(camera) };
+        }
+        let first = !self.known(id);
+        remember(&mut self.seen, id);
+        let data = after.get("data");
+        let tracked = data.get("detections").strs().any(|d| self.seen.iter().any(|s| s == d));
+        let objects = data.get("objects").strs().next().is_some();
+        if typ != "update" || !first || tracked || !objects || !self.recent(after) || !self.review_matches(after) {
+            return Verdict::Ignore;
+        }
+        self.mark_shown(id);
+        Verdict::Show(self.review_detection(camera, after))
+    }
+
+    fn review_detection(&self, camera: String, item: &Json) -> Detection {
+        let data = item.get("data");
+        let objects: Vec<&str> = data.get("objects").strs().map(base_label).collect();
+        let label = objects
+            .iter()
+            .find(|o| self.labels.is_empty() || any_in(std::iter::once(**o), &self.labels))
+            .or(objects.first())
+            .or(data.get("audio").strs().next().as_ref())
+            .copied()
+            .unwrap_or("")
+            .to_string();
+        Detection {
+            camera,
+            label,
+            sub_label: data.get("sub_labels").strs().next().map(str::to_string),
+            score: 0.0,
+            id: item.get("id").str().unwrap_or("").to_string(),
+        }
     }
 }
 
@@ -307,6 +378,75 @@ mod tests {
         assert!(matches!(f.on_message("reviews", &event("new", &det, &det)), Verdict::Show(_)));
         let cat = review("r3", "detection", &["cat"]);
         assert_eq!(f.on_message("reviews", &event("new", &cat, &cat)), Verdict::Ignore);
+    }
+
+    /// A review item as Frigate sends it for a manual event: `detections` holds the ids of
+    /// the events, `start_time` is seconds after the filter was made (negative = before).
+    fn item(f: &EventFilter, id: &str, severity: &str, objects: &[&str], detections: &[&str], start: f64) -> String {
+        let q = |v: &[&str]| v.iter().map(|x| format!("\"{x}\"")).collect::<Vec<_>>().join(",");
+        format!(
+            r#"{{"id": "{id}", "camera": "brama", "severity": "{severity}", "start_time": {}, "end_time": null, "data": {{"detections": [{}], "objects": [{}], "sub_labels": [], "zones": [], "audio": []}}}}"#,
+            f.since + start,
+            q(detections),
+            q(objects)
+        )
+    }
+
+    #[test]
+    fn manual_event_opens_a_window_in_events_mode() {
+        let mut f = EventFilter::new(&cfg(""));
+        let m = item(&f, "r1", "alert", &["doorbell"], &["e9"], 1.0);
+        // Frigate sends no `events` message and starts the item with an "update".
+        let v = f.on_message("reviews", &event("update", &m, &m));
+        let Verdict::Show(d) = v else { panic!("{v:?}") };
+        assert_eq!((d.camera.as_str(), d.label.as_str(), d.score), ("brama", "doorbell", 0.0));
+        assert_eq!(f.on_message("reviews", &event("update", &m, &m)), Verdict::Activity("brama".into()));
+        assert_eq!(f.on_message("reviews", &event("end", &m, &m)), Verdict::Ignore);
+    }
+
+    #[test]
+    fn tracked_objects_items_do_not_open_a_second_window() {
+        let mut f = EventFilter::new(&cfg(""));
+        let a = obj("e1", "brama", "person", false, &[]);
+        assert!(matches!(f.on_message("events", &event("new", &a, &a)), Verdict::Show(_)));
+        // Its review item: through "new", or an "update" that holds the known object.
+        let r = item(&f, "r1", "alert", &["person"], &["e1"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &r, &r)), Verdict::Ignore);
+        let r2 = item(&f, "r2", "alert", &["person"], &["e2"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("new", &r2, &r2)), Verdict::Ignore);
+        assert_eq!(f.on_message("reviews", &event("update", &r2, &r2)), Verdict::Ignore);
+        // A car filtered out on `events` is known too, so its item is no manual event.
+        let mut f = EventFilter::new(&cfg("labels = person"));
+        let car = obj("e3", "brama", "car", false, &[]);
+        assert_eq!(f.on_message("events", &event("new", &car, &car)), Verdict::Ignore);
+        let r3 = item(&f, "r3", "detection", &["car"], &["e3"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &r3, &r3)), Verdict::Ignore);
+    }
+
+    #[test]
+    fn manual_events_follow_filters_and_age() {
+        let mut f = EventFilter::new(&cfg("cameras = ogrod"));
+        let m = item(&f, "r1", "alert", &["person"], &["e1"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &m, &m)), Verdict::Ignore);
+        // An item that began before FrigatePiP connected only goes on.
+        let mut f = EventFilter::new(&cfg(""));
+        let old = item(&f, "r2", "alert", &["person"], &["e2"], -60.0);
+        assert_eq!(f.on_message("reviews", &event("update", &old, &old)), Verdict::Ignore);
+        // Sound only (no objects): not a manual event.
+        let sound = item(&f, "r3", "detection", &[], &[], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &sound, &sound)), Verdict::Ignore);
+    }
+
+    #[test]
+    fn manual_event_in_alerts_mode() {
+        let mut f = EventFilter::new(&cfg("mode = alerts"));
+        let m = item(&f, "r1", "alert", &["person"], &["e1"], 1.0);
+        let v = f.on_message("reviews", &event("update", &m, &m));
+        assert!(matches!(v, Verdict::Show(ref d) if d.label == "person"), "{v:?}");
+        assert_eq!(f.on_message("reviews", &event("update", &m, &m)), Verdict::Activity("brama".into()));
+        // An alert that began before the connection does not pop up.
+        let old = item(&f, "r2", "alert", &["person"], &["e2"], -60.0);
+        assert_eq!(f.on_message("reviews", &event("update", &old, &old)), Verdict::Activity("brama".into()));
     }
 
     #[test]
