@@ -223,14 +223,27 @@ impl<F: Fn(Notice)> Dispatch<'_, F> {
 
 fn session(cfg: &Config, cancel: &Cancel, sink: &impl Fn(Notice)) -> String {
     let api = Frigate::new(cfg);
-    match api.get_bytes("/api/config", Duration::from_secs(5), Some(cancel), 16 << 20) {
+    // Frigate's clock from the answer's `Date`: review items carry times by that clock.
+    let (body, server_time) = match api.get("/api/config", Duration::from_secs(5), Some(cancel)) {
+        Ok(r) if r.status == 200 => {
+            let date = crate::net::header(&r.headers, "Date").and_then(crate::net::http_date);
+            (r.read_all(16 << 20), date)
+        }
+        Ok(r) => (Err(std::io::Error::other(format!("HTTP {} for {}", r.status, api.url("/api/config")))), None),
+        Err(e) => (Err(e), None),
+    };
+    match body {
         Ok(b) => match Json::parse(&String::from_utf8_lossy(&b)) {
             Some(j) => sink(Notice::Cameras(camera_infos(&j, cfg))),
             None => crate::log!("Cannot parse /api/config"),
         },
         Err(e) => return format!("Frigate unreachable ({}): {e}", cfg.url),
     }
-    let mut d = Dispatch { filter: EventFilter::new(cfg), sink, last_activity: HashMap::new() };
+    let mut filter = EventFilter::new(cfg);
+    if let Some(t) = server_time {
+        filter.set_since(t);
+    }
+    let mut d = Dispatch { filter, sink, last_activity: HashMap::new() };
     match cfg.source {
         Source::WebSocket => ws_session(&api, cfg, cancel, &mut d),
         Source::Mqtt => mqtt_session(cfg, cancel, &mut d),

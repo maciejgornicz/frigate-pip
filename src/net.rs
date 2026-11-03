@@ -221,6 +221,24 @@ pub fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str
     headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
 }
 
+/// Unix time from an HTTP `Date` header, e.g. `Tue, 03 Nov 2026 17:28:56 GMT`.
+pub fn http_date(v: &str) -> Option<f64> {
+    let p: Vec<&str> = v.split_whitespace().collect();
+    let [_, day, month, year, time, ..] = p.as_slice() else { return None };
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let month = MONTHS.iter().position(|m| m.eq_ignore_ascii_case(month))? as i64 + 1;
+    let (day, year): (i64, i64) = (day.parse().ok()?, year.parse().ok()?);
+    let hms: Vec<i64> = time.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
+    let [h, m, s] = hms.as_slice() else { return None };
+    // Days since 1970-01-01 of a civil date (H. Hinnant's algorithm, years start in March).
+    let (y, mp) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + (153 * mp + 2) / 5 + day - 1;
+    let days = era * 146_097 + doe - 719_468;
+    Some((days * 86_400 + h * 3600 + m * 60 + s) as f64)
+}
+
 pub fn status_code(status_line: &str) -> u16 {
     status_line.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0)
 }
@@ -400,6 +418,14 @@ mod tests {
         let mut out = Vec::new();
         body.read_to_end(&mut out).unwrap();
         assert_eq!(out, b"abc");
+    }
+
+    #[test]
+    fn parses_http_dates() {
+        assert_eq!(http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0.0));
+        assert_eq!(http_date("Tue, 03 Nov 2026 17:28:56 GMT"), Some(1_793_726_936.0));
+        assert_eq!(http_date("Sun, 29 Feb 2032 23:59:59 GMT"), Some(1_961_711_999.0));
+        assert_eq!(http_date("yesterday"), None);
     }
 
     #[test]

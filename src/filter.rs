@@ -2,7 +2,7 @@
 
 use crate::config::{Config, TriggerMode};
 use crate::json::Json;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Detection {
@@ -34,22 +34,41 @@ pub struct EventFilter {
     /// Ids met on the `events` topic and review items already seen. A review item that is
     /// neither — Frigate starts it with an "update" — is a manual event (Frigate's API, e.g.
     /// from a Home Assistant automation, or a dedicated LPR camera), with no `events` message.
-    seen: VecDeque<String>,
-    /// Unix time this connection began: older review items do not open windows.
+    seen: Recent,
+    /// Unix time this connection began (by Frigate's clock when known, see `set_since`):
+    /// older review items do not open windows.
     since: f64,
 }
 
-/// Review items may start a little before `since` by the server's clock.
+/// Review items may start a little before `since` (the `Date` header has 1 s resolution).
 const CLOCK_SLACK: f64 = 5.0;
 
-fn remember(list: &mut VecDeque<String>, id: &str) {
-    if id.is_empty() || list.iter().any(|s| s == id) {
-        return;
+/// Ids met lately; one met again counts as new, so the ids of objects that are still active
+/// are never forgotten.
+#[derive(Default)]
+struct Recent {
+    at: HashMap<String, u64>,
+    clock: u64,
+}
+
+impl Recent {
+    const KEEP: u64 = 512;
+
+    fn note(&mut self, id: &str) {
+        if id.is_empty() {
+            return;
+        }
+        self.clock += 1;
+        let now = self.clock;
+        *self.at.entry(id.to_string()).or_default() = now;
+        if self.at.len() as u64 > 2 * Self::KEEP {
+            self.at.retain(|_, t| *t + Self::KEEP > now);
+        }
     }
-    if list.len() >= 512 {
-        list.pop_front();
+
+    fn has(&self, id: &str) -> bool {
+        self.at.contains_key(id)
     }
-    list.push_back(id.to_string());
 }
 
 fn unix_now() -> f64 {
@@ -75,9 +94,15 @@ impl EventFilter {
             ignore_stationary: cfg.ignore_stationary,
             min_score: cfg.min_score,
             shown: VecDeque::new(),
-            seen: VecDeque::new(),
+            seen: Recent::default(),
             since: unix_now(),
         }
+    }
+
+    /// The connection's start by Frigate's clock (its HTTP `Date`), so that review items are
+    /// dated against the same clock as their `start_time`.
+    pub fn set_since(&mut self, t: f64) {
+        self.since = t;
     }
 
     /// `events` mode also reads review items, for manual events.
@@ -112,7 +137,7 @@ impl EventFilter {
     }
 
     fn known(&self, id: &str) -> bool {
-        self.shown.iter().chain(self.seen.iter()).any(|s| s == id)
+        self.seen.has(id) || self.shown.iter().any(|s| s == id)
     }
 
     /// The review item began during this connection.
@@ -151,7 +176,7 @@ impl EventFilter {
     fn on_event(&mut self, p: &Json) -> Verdict {
         let typ = p.get("type").str().unwrap_or("");
         let after = p.get("after");
-        remember(&mut self.seen, after.get("id").str().unwrap_or(""));
+        self.seen.note(after.get("id").str().unwrap_or(""));
         if typ == "end" || !self.object_matches(after) {
             return Verdict::Ignore;
         }
@@ -197,10 +222,12 @@ impl EventFilter {
         }
         let id = after.get("id").str().unwrap_or("");
         let camera = after.get("camera").str().unwrap_or("").to_string();
-        // Manual events, audio and LPR cameras start their item with an "update".
+        // Manual events and LPR cameras start their item with an "update" (so does sound,
+        // which stays without a window, as before: no objects).
         let first = !self.known(id);
-        remember(&mut self.seen, id);
-        let newly = typ == "new" || (typ == "update" && (!self.review_matches(p.get("before")) || (first && self.recent(after))));
+        self.seen.note(id);
+        let objects = after.get("data").get("objects").strs().next().is_some();
+        let newly = typ == "new" || (typ == "update" && (!self.review_matches(p.get("before")) || (first && objects && self.recent(after))));
         if newly && self.mark_shown(id) {
             return Verdict::Show(self.review_detection(camera, after));
         }
@@ -215,17 +242,13 @@ impl EventFilter {
         let after = p.get("after");
         let id = after.get("id").str().unwrap_or("");
         let camera = after.get("camera").str().unwrap_or("").to_string();
-        if typ == "new" {
-            remember(&mut self.seen, id);
-            return Verdict::Ignore;
-        }
         if self.shown.iter().any(|s| s == id) {
-            return if typ == "end" { Verdict::Ignore } else { Verdict::Activity(camera) };
+            return if typ == "update" { Verdict::Activity(camera) } else { Verdict::Ignore };
         }
-        let first = !self.known(id);
-        remember(&mut self.seen, id);
+        let first = !self.seen.has(id);
+        self.seen.note(id);
         let data = after.get("data");
-        let tracked = data.get("detections").strs().any(|d| self.seen.iter().any(|s| s == d));
+        let tracked = data.get("detections").strs().any(|d| self.seen.has(d));
         let objects = data.get("objects").strs().next().is_some();
         if typ != "update" || !first || tracked || !objects || !self.recent(after) || !self.review_matches(after) {
             return Verdict::Ignore;
@@ -435,6 +458,50 @@ mod tests {
         // Sound only (no objects): not a manual event.
         let sound = item(&f, "r3", "detection", &[], &[], 1.0);
         assert_eq!(f.on_message("reviews", &event("update", &sound, &sound)), Verdict::Ignore);
+    }
+
+    #[test]
+    fn manual_event_in_reviews_mode_but_not_sound() {
+        let mut f = EventFilter::new(&cfg("mode = reviews"));
+        let m = item(&f, "r1", "detection", &["doorbell"], &["e1"], 1.0);
+        assert!(matches!(f.on_message("reviews", &event("update", &m, &m)), Verdict::Show(_)));
+        // Sound starts its item with an "update" too, but opens no window (as in 1.6.0).
+        let sound = item(&f, "r2", "detection", &[], &[], 1.0).replace("\"audio\": []", "\"audio\": [\"speech\"]");
+        assert_eq!(f.on_message("reviews", &event("update", &sound, &sound)), Verdict::Activity("brama".into()));
+    }
+
+    #[test]
+    fn object_filter_applies_to_manual_events() {
+        let mut f = EventFilter::new(&cfg("labels = person, car"));
+        let bell = item(&f, "r1", "detection", &["doorbell"], &["e1"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &bell, &bell)), Verdict::Ignore);
+        let person = item(&f, "r2", "alert", &["person"], &["e2"], 1.0);
+        assert!(matches!(f.on_message("reviews", &event("update", &person, &person)), Verdict::Show(_)));
+    }
+
+    #[test]
+    fn since_follows_the_server_clock() {
+        let mut f = EventFilter::new(&cfg(""));
+        // Frigate's clock is two minutes behind the PC: its items are dated by that clock.
+        f.set_since(f.since - 120.0);
+        let m = item(&f, "r1", "alert", &["person"], &["e1"], 1.0);
+        assert!(matches!(f.on_message("reviews", &event("update", &m, &m)), Verdict::Show(_)));
+    }
+
+    #[test]
+    fn active_ids_are_not_forgotten() {
+        let mut r = Recent::default();
+        r.note("old");
+        r.note("keep");
+        for i in 0..1100 {
+            r.note(&format!("id{i}"));
+            if i % 100 == 0 {
+                r.note("keep");
+            }
+        }
+        assert!(r.has("keep"));
+        assert!(!r.has("old"));
+        assert!(r.at.len() as u64 <= 2 * Recent::KEEP);
     }
 
     #[test]
