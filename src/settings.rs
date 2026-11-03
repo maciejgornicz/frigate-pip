@@ -34,6 +34,8 @@ pub const ID_LANGUAGE: i32 = 111;
 pub const ID_CHECK_UPDATES: i32 = 112;
 pub const ID_UPDATE: i32 = 113;
 pub const ID_UPDATE_STATUS: i32 = 114;
+pub const ID_USER: i32 = 115;
+pub const ID_PASS: i32 = 116;
 pub const ID_MODE: i32 = 200;
 pub const ID_CAMS: i32 = 201;
 pub const ID_LABELS: i32 = 202;
@@ -73,7 +75,7 @@ const SS_ENDELLIPSIS: u32 = 0x4000;
 const MAX_POPUPS: usize = 8;
 /// Client area at 96 DPI.
 const WIDTH: i32 = 680;
-const HEIGHT: i32 = 548;
+const HEIGHT: i32 = 580;
 /// Right edge of the contents of a tab page.
 const RIGHT: i32 = WIDTH - 28;
 /// `GWLP_USERDATA` mark of controls drawn on a tab page.
@@ -490,7 +492,7 @@ impl Settings {
     fn build(&mut self, c: &Config, autostart: bool, monitors: &[String], cameras: &[(String, String)]) {
         let t = i18n::t();
         unsafe {
-            self.tab = self.add(None, WC_TABCONTROLW, "", WS_VISIBLE.0 | WS_CLIPSIBLINGS.0 | WS_TABSTOP.0, 0, ID_TAB, 12, 12, WIDTH - 24, 484);
+            self.tab = self.add(None, WC_TABCONTROLW, "", WS_VISIBLE.0 | WS_CLIPSIBLINGS.0 | WS_TABSTOP.0, 0, ID_TAB, 12, 12, WIDTH - 24, 516);
             for (i, name) in [t.tab_connection, t.tab_detection, t.tab_window, t.tab_video].iter().enumerate() {
                 // "&" would underline the next letter.
                 let mut buf: Vec<u16> = name.replace('&', "&&").encode_utf16().chain(std::iter::once(0)).collect();
@@ -501,6 +503,7 @@ impl Settings {
         // The caption column is as wide as its longest text in this language.
         let captions = [
             t.frigate_url,
+            t.frigate_login,
             t.source,
             t.mqtt_server,
             t.mqtt_login,
@@ -531,53 +534,57 @@ impl Settings {
         let l = self.label(p, t.frigate_url, lx, 52, lw);
         let e = self.edit(p, ID_URL, &c.url, cx, 52, cw, 0);
         self.tip(&[l, e], t.tip_url);
-        let l = self.label(p, t.source, lx, 84, lw);
+        let half = (cw - 10) / 2;
+        let l = self.label(p, t.frigate_login, lx, 84, lw);
+        let user = self.edit(p, ID_USER, &c.user, cx, 84, half, 0);
+        let pass = self.edit(p, ID_PASS, &c.password, cx + half + 10, 84, cw - half - 10, ES_PASSWORD as u32);
+        self.tip(&[l, user, pass], t.tip_frigate_login);
+        let l = self.label(p, t.source, lx, 116, lw);
         let sources = [t.source_websocket.to_string(), t.source_mqtt.to_string()];
-        let e = self.combo(Some(p), ID_SOURCE, &sources, (c.source == Source::Mqtt) as usize, cx, 84, cw);
+        let e = self.combo(Some(p), ID_SOURCE, &sources, (c.source == Source::Mqtt) as usize, cx, 116, cw);
         self.tip(&[l, e], t.tip_source);
         let port_w = 64;
         let port_lw = self.text_w(t.port) + 4;
         let port_lx = RIGHT - port_w - 6 - port_lw;
-        let l = self.label(p, t.mqtt_server, lx, 116, lw);
-        let e = self.edit(p, ID_MQTT_HOST, &c.mqtt_host, cx, 116, port_lx - 10 - cx, 0);
+        let l = self.label(p, t.mqtt_server, lx, 148, lw);
+        let e = self.edit(p, ID_MQTT_HOST, &c.mqtt_host, cx, 148, port_lx - 10 - cx, 0);
         self.tip(&[l, e], t.tip_mqtt_server);
-        let l = self.label(p, t.port, port_lx, 116, port_lw);
-        let e = self.edit(p, ID_MQTT_PORT, &c.mqtt_port.to_string(), RIGHT - port_w, 116, port_w, ES_NUMBER as u32);
+        let l = self.label(p, t.port, port_lx, 148, port_lw);
+        let e = self.edit(p, ID_MQTT_PORT, &c.mqtt_port.to_string(), RIGHT - port_w, 148, port_w, ES_NUMBER as u32);
         self.tip(&[l, e], t.tip_mqtt_port);
-        let half = (cw - 10) / 2;
-        let l = self.label(p, t.mqtt_login, lx, 148, lw);
-        let user = self.edit(p, ID_MQTT_USER, &c.mqtt_user, cx, 148, half, 0);
-        let pass = self.edit(p, ID_MQTT_PASS, &c.mqtt_password, cx + half + 10, 148, cw - half - 10, ES_PASSWORD as u32);
+        let l = self.label(p, t.mqtt_login, lx, 180, lw);
+        let user = self.edit(p, ID_MQTT_USER, &c.mqtt_user, cx, 180, half, 0);
+        let pass = self.edit(p, ID_MQTT_PASS, &c.mqtt_password, cx + half + 10, 180, cw - half - 10, ES_PASSWORD as u32);
         self.tip(&[l, user, pass], t.tip_mqtt_login);
-        let l = self.label(p, t.mqtt_prefix, lx, 180, lw);
-        let e = self.edit(p, ID_MQTT_PREFIX, &c.mqtt_prefix, cx, 180, half, 0);
+        let l = self.label(p, t.mqtt_prefix, lx, 212, lw);
+        let e = self.edit(p, ID_MQTT_PREFIX, &c.mqtt_prefix, cx, 212, half, 0);
         self.tip(&[l, e], t.tip_mqtt_prefix);
-        let l = self.label(p, t.rtsp, lx, 212, lw);
-        let e = self.edit(p, ID_RTSP, &c.rtsp, cx, 212, cw, 0);
+        let l = self.label(p, t.rtsp, lx, 244, lw);
+        let e = self.edit(p, ID_RTSP, &c.rtsp, cx, 244, cw, 0);
         self.tip(&[l, e], t.tip_rtsp);
-        self.note(p, t.rtsp_hint, cx, 238, cw, 30);
+        self.note(p, t.rtsp_hint, cx, 270, cw, 30);
         let bw = self.text_w(t.test_button).max(120) + 32;
-        let b = self.add(Some(p), WC_BUTTONW, t.test_button, WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_TEST, cx, 270, bw, 28);
+        let b = self.add(Some(p), WC_BUTTONW, t.test_button, WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_TEST, cx, 302, bw, 28);
         self.tip(&[b], t.tip_test);
         let out_style = (ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL) as u32 | WS_VSCROLL.0;
-        self.add(Some(p), WC_EDITW, t.test_placeholder, out_style, WS_EX_CLIENTEDGE.0, ID_TEST_OUT, lx, 306, full, 96);
-        let l = self.label(p, t.language, lx, 412, lw);
+        self.add(Some(p), WC_EDITW, t.test_placeholder, out_style, WS_EX_CLIENTEDGE.0, ID_TEST_OUT, lx, 338, full, 96);
+        let l = self.label(p, t.language, lx, 444, lw);
         let mut langs = vec![t.language_auto.to_string()];
         langs.extend(Lang::ALL.iter().map(|l| l.native_name().to_string()));
         let lang = Lang::from_code(&c.language).and_then(|l| Lang::ALL.iter().position(|x| *x == l)).map_or(0, |i| i + 1);
-        let e = self.combo(Some(p), ID_LANGUAGE, &langs, lang, cx, 412, cw.min(240));
+        let e = self.combo(Some(p), ID_LANGUAGE, &langs, lang, cx, 444, cw.min(240));
         self.tip(&[l, e], t.tip_language);
-        let e = self.check(Some(p), ID_AUTOSTART, t.autostart, autostart, lx, 442, full);
+        let e = self.check(Some(p), ID_AUTOSTART, t.autostart, autostart, lx, 474, full);
         self.tip(&[e], t.tip_autostart);
         // Updates: check box, status text and a button ("Check now" / "Update to x").
         let check_w = self.text_w(t.check_updates) + 26;
-        let e = self.check(Some(p), ID_CHECK_UPDATES, t.check_updates, c.check_updates, lx, 470, check_w);
+        let e = self.check(Some(p), ID_CHECK_UPDATES, t.check_updates, c.check_updates, lx, 502, check_w);
         self.tip(&[e], t.tip_check_updates);
         let bw = self.text_w(t.update_check_now).max(self.text_w(&i18n::fmt(t.update_install, &[&"10.10.10"]))) + 28;
-        let b = self.add(Some(p), WC_BUTTONW, t.update_check_now, WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_UPDATE, RIGHT - bw, 468, bw, 26);
+        let b = self.add(Some(p), WC_BUTTONW, t.update_check_now, WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_UPDATE, RIGHT - bw, 500, bw, 26);
         self.tip(&[b], t.tip_update);
         let x = lx + check_w + 8;
-        self.label(p, "", x, 470, RIGHT - bw - 8 - x);
+        self.label(p, "", x, 502, RIGHT - bw - 8 - x);
         self.set_id_of_last(ID_UPDATE_STATUS);
 
         // ---- Detection
@@ -684,20 +691,20 @@ impl Settings {
         let widths: Vec<i32> = buttons.iter().map(|(_, text, _)| (self.text_w(text) + 24).max(72)).collect();
         let first = WIDTH - 12 - widths.iter().sum::<i32>() - 6 * (buttons.len() as i32 - 1);
         let pw = self.text_w(t.preview) + 4;
-        self.add(None, WC_STATICW, t.preview, WS_VISIBLE.0, 0, -1, 12, 512, pw, 20);
+        self.add(None, WC_STATICW, t.preview, WS_VISIBLE.0, 0, -1, 12, 544, pw, 20);
         let live_w = self.text_w(t.preview_live) + 26;
         let combo_x = 12 + pw + 4;
         let combo_w = (first - 12 - live_w - 8 - combo_x).clamp(90, 180);
         let cam_names: Vec<String> =
             if cameras.is_empty() { vec![t.menu_no_cameras.into()] } else { cameras.iter().map(|(_, t)| t.clone()).collect() };
-        let e = self.combo(None, ID_PREV_CAM, &cam_names, 0, combo_x, 508, combo_w);
+        let e = self.combo(None, ID_PREV_CAM, &cam_names, 0, combo_x, 540, combo_w);
         self.tip(&[e], t.tip_preview_camera);
-        let e = self.check(None, ID_PREVIEW, t.preview_live, false, combo_x + combo_w + 8, 509, live_w);
+        let e = self.check(None, ID_PREVIEW, t.preview_live, false, combo_x + combo_w + 8, 541, live_w);
         self.tip(&[e], t.tip_preview_live);
         let mut x = first;
         for ((id, text, default), w) in buttons.into_iter().zip(widths) {
             let style = WS_VISIBLE.0 | WS_TABSTOP.0 | if default { BS_DEFPUSHBUTTON } else { BS_PUSHBUTTON } as u32;
-            let b = self.add(None, WC_BUTTONW, text, style, 0, id, x, 506, w, 28);
+            let b = self.add(None, WC_BUTTONW, text, style, 0, id, x, 538, w, 28);
             if id == ID_HELP {
                 self.tip(&[b], t.tip_help);
             }
@@ -806,7 +813,9 @@ impl Settings {
     pub fn read(&self, base: &Config) -> (Config, bool) {
         let mut c = base.clone();
         let num = |id: i32, def: i64| self.text(id).parse::<i64>().unwrap_or(def);
-        c.url = self.text(ID_URL).trim_end_matches('/').to_string();
+        c.url = self.text(ID_URL).trim().trim_end_matches('/').to_string();
+        c.user = self.text(ID_USER).trim().to_string();
+        c.password = self.text(ID_PASS);
         c.source = if self.sel(ID_SOURCE) == 1 { Source::Mqtt } else { Source::WebSocket };
         c.mqtt_host = self.text(ID_MQTT_HOST);
         c.mqtt_port = num(ID_MQTT_PORT, 1883).clamp(1, 65535) as u16;

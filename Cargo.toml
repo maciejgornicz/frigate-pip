@@ -8,6 +8,12 @@ license = "GPL-3.0-only"
 repository = "https://github.com/maciejgornicz/frigate-pip"
 readme = "README.md"
 
+# HTTPS and WSS to Frigate's port 8971 or a reverse proxy (src/tls.rs): the system's
+# SChannel on Windows (no C compiler needed), rustls on Linux.
+[target.'cfg(windows)'.dependencies.schannel]
+# 0.1.27 still links like windows 0.58 (import libraries): newer ones need dlltool on GNU.
+version = "=0.1.27"
+
 [target.'cfg(windows)'.dependencies.windows]
 version = "=0.58.0"
 features = [
@@ -48,6 +54,9 @@ features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 fontdue = "0.9"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+ring = "0.17"
 
 # Debian package of the Linux version (cargo deb --target <musl target> --no-build).
 [package.metadata.deb]

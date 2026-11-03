@@ -168,6 +168,7 @@ pub struct Strings {
     pub tab_window: &'static str,
     pub tab_video: &'static str,
     pub frigate_url: &'static str,
+    pub frigate_login: &'static str,
     pub source: &'static str,
     pub source_websocket: &'static str,
     pub source_mqtt: &'static str,
@@ -239,6 +240,7 @@ pub struct Strings {
 
     // ---- tooltips (one per option)
     pub tip_url: &'static str,
+    pub tip_frigate_login: &'static str,
     pub tip_source: &'static str,
     pub tip_mqtt_server: &'static str,
     pub tip_mqtt_port: &'static str,
@@ -282,6 +284,15 @@ pub struct Strings {
     /// {0} = address, {1} = error
     pub test_frigate_fail: &'static str,
     pub test_frigate_hint: &'static str,
+    /// {0} = user name
+    pub test_login_ok: &'static str,
+    pub test_login_hint: &'static str,
+    pub test_cert_hint: &'static str,
+    pub test_tls_public: &'static str,
+    /// {0} = SHA-256 fingerprint
+    pub test_tls_first_use: &'static str,
+    /// {0} = SHA-256 fingerprint
+    pub test_tls_remembered: &'static str,
     /// {0} = error
     pub test_config_fail: &'static str,
     /// {0} = count, {1} = names, {2} = ms

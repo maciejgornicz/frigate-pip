@@ -1,4 +1,4 @@
-//! URLs, cancellable TCP connections and a minimal HTTP/1.1 client.
+//! URLs, cancellable TCP (and TLS) connections and a minimal HTTP/1.1 client.
 
 use crate::util::Cancel;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -111,6 +111,61 @@ pub fn connect(host: &str, port: u16, timeout: Duration, cancel: Option<&Cancel>
         }
     }
     Err(last)
+}
+
+/// A connection for `http`/`ws` (plain) or `https`/`wss` (TLS).
+pub enum Conn {
+    Plain(TcpStream),
+    Tls(Box<crate::tls::TlsStream>),
+}
+
+impl Conn {
+    fn socket(&self) -> &TcpStream {
+        match self {
+            Conn::Plain(s) => s,
+            Conn::Tls(t) => crate::tls::socket(t),
+        }
+    }
+
+    pub fn set_read_timeout(&self, d: Option<Duration>) -> io::Result<()> {
+        self.socket().set_read_timeout(d)
+    }
+}
+
+impl Read for Conn {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Conn::Plain(s) => s.read(buf),
+            Conn::Tls(t) => t.read(buf),
+        }
+    }
+}
+
+impl Write for Conn {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Conn::Plain(s) => s.write(buf),
+            Conn::Tls(t) => t.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Conn::Plain(s) => s.flush(),
+            Conn::Tls(t) => t.flush(),
+        }
+    }
+}
+
+/// Connects to the URL's host; TLS for `https` and `wss`. `timeout` also applies to reads.
+pub fn open(u: &Url, timeout: Duration, cancel: Option<&Cancel>) -> io::Result<Conn> {
+    let s = connect(&u.host, u.port, timeout, cancel)?;
+    s.set_read_timeout(Some(timeout))?;
+    match u.scheme.as_str() {
+        "http" | "ws" => Ok(Conn::Plain(s)),
+        "https" | "wss" => Ok(Conn::Tls(Box::new(crate::tls::connect(s, &u.host, u.port)?))),
+        other => Err(io::Error::new(io::ErrorKind::Unsupported, format!("unsupported address type {other}://"))),
+    }
 }
 
 /// Reads an LF-terminated line (without CR/LF), with a length limit.
@@ -250,7 +305,8 @@ impl<R: BufRead> Read for Body<R> {
 
 pub struct Response {
     pub status: u16,
-    pub body: Body<BufReader<TcpStream>>,
+    pub headers: Vec<(String, String)>,
+    pub body: Body<BufReader<Conn>>,
 }
 
 impl Response {
@@ -270,33 +326,39 @@ impl Response {
     }
 }
 
-/// GET request. `timeout` applies to the connection and to each read.
-pub fn get(url: &str, timeout: Duration, cancel: Option<&Cancel>) -> io::Result<Response> {
+/// HTTP request with extra `headers` and a `body` (empty for GET). Credentials in the URL
+/// are sent as Basic authentication. `timeout` applies to the connection and to each read.
+pub fn request(method: &str, url: &str, headers: &[(&str, String)], body: &[u8], timeout: Duration, cancel: Option<&Cancel>) -> io::Result<Response> {
     let u = Url::parse(url).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("invalid address {url}")))?;
-    if u.scheme != "http" {
-        return Err(io::Error::new(io::ErrorKind::Unsupported, "only http:// is supported"));
+    if u.scheme != "http" && u.scheme != "https" {
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "only http:// and https:// are supported"));
     }
-    let mut s = connect(&u.host, u.port, timeout, cancel)?;
-    s.set_read_timeout(Some(timeout))?;
-    let mut req = format!("GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: FrigatePiP\r\nAccept: */*\r\nConnection: close\r\n", u.path, u.host_header());
+    let mut s = open(&u, timeout, cancel)?;
+    let mut req =
+        format!("{method} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: FrigatePiP\r\nAccept: */*\r\nConnection: close\r\n", u.path, u.host_header());
     if let (Some(user), Some(pass)) = (&u.user, &u.pass) {
         req.push_str(&format!("Authorization: Basic {}\r\n", crate::util::base64_encode(format!("{user}:{pass}").as_bytes())));
     }
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    if !body.is_empty() || method == "POST" {
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
     req.push_str("\r\n");
-    s.write_all(req.as_bytes())?;
+    let mut msg = req.into_bytes();
+    msg.extend_from_slice(body);
+    s.write_all(&msg)?;
+    s.flush()?;
     let mut r = BufReader::with_capacity(64 * 1024, s);
     let (status, headers) = read_head(&mut r)?;
     let body = Body::new(r, &headers);
-    Ok(Response { status: status_code(&status), body })
+    Ok(Response { status: status_code(&status), headers, body })
 }
 
-/// GET of the whole body; error if the status ≠ 200.
-pub fn get_bytes(url: &str, timeout: Duration, cancel: Option<&Cancel>, limit: usize) -> io::Result<Vec<u8>> {
-    let resp = get(url, timeout, cancel)?;
-    if resp.status != 200 {
-        return Err(io::Error::other(format!("HTTP {} for {url}", resp.status)));
-    }
-    resp.read_all(limit)
+/// GET request. `timeout` applies to the connection and to each read.
+pub fn get(url: &str, timeout: Duration, cancel: Option<&Cancel>) -> io::Result<Response> {
+    request("GET", url, &[], &[], timeout, cancel)
 }
 
 #[cfg(test)]

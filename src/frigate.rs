@@ -1,11 +1,13 @@
 //! Listens for Frigate events (WebSocket or MQTT) and reads the camera list from `/api/config`.
 
+use crate::client::Frigate;
 use crate::config::{Config, Source};
 use crate::filter::{Detection, EventFilter, Verdict};
 use crate::json::{self, Json};
 use crate::mqtt::{Mqtt, Packet};
+use crate::tls::Trust;
 use crate::util::{random_u64, Cancel};
-use crate::ws::{Msg, WebSocket};
+use crate::ws::Msg;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -83,7 +85,7 @@ pub fn camera_infos(j: &Json, cfg: &Config) -> Vec<CameraInfo> {
 
 /// The cameras from `/api/config` (the error is the reason, or "JSON" for an unreadable answer).
 pub fn cameras(cfg: &Config, cancel: &Cancel) -> Result<Vec<CameraInfo>, String> {
-    let b = crate::net::get_bytes(&format!("{}/api/config", cfg.url), Duration::from_secs(4), Some(cancel), 16 << 20).map_err(|e| e.to_string())?;
+    let b = Frigate::new(cfg).get_bytes("/api/config", Duration::from_secs(4), Some(cancel), 16 << 20).map_err(|e| e.to_string())?;
     let j = Json::parse(&String::from_utf8_lossy(&b)).ok_or("JSON")?;
     Ok(camera_infos(&j, cfg))
 }
@@ -94,14 +96,32 @@ pub fn connection_test(cfg: &Config, cancel: &Cancel, report: &mut dyn FnMut(Str
     let s = tr();
     let ms = |t: Instant| t.elapsed().as_millis();
     let timeout = Duration::from_secs(4);
+    let api = Frigate::new(cfg);
     let t = Instant::now();
-    match crate::net::get_bytes(&format!("{}/api/version", cfg.url), timeout, Some(cancel), 4096) {
+    match api.get_bytes("/api/version", timeout, Some(cancel), 4096) {
         Ok(v) => report(fmt(s.test_frigate_ok, &[&String::from_utf8_lossy(&v).trim(), &ms(t)])),
         Err(e) => {
             report(fmt(s.test_frigate_fail, &[&cfg.url, &e]));
-            report(s.test_frigate_hint.into());
+            let hint = match e.kind() {
+                std::io::ErrorKind::PermissionDenied => s.test_login_hint,
+                _ if e.to_string().contains("HTTP 401") => s.test_login_hint,
+                std::io::ErrorKind::InvalidData if e.to_string().contains("certificate") => s.test_cert_hint,
+                _ => s.test_frigate_hint,
+            };
+            report(hint.into());
             return;
         }
+    }
+    if let Some(u) = crate::net::Url::parse(&cfg.url).filter(|u| u.scheme == "https") {
+        match crate::tls::trust(&u.host, u.port) {
+            Some(Trust::Public) => report(s.test_tls_public.into()),
+            Some(Trust::FirstUse(fp)) => report(fmt(s.test_tls_first_use, &[&fp])),
+            Some(Trust::Remembered(fp)) => report(fmt(s.test_tls_remembered, &[&fp])),
+            None => {}
+        }
+    }
+    if let Some(user) = api.user() {
+        report(fmt(s.test_login_ok, &[&user]));
     }
     let t = Instant::now();
     let cams = cameras(cfg, cancel).unwrap_or_else(|e| {
@@ -114,13 +134,10 @@ pub fn connection_test(cfg: &Config, cancel: &Cancel, report: &mut dyn FnMut(Str
     }
     let t = Instant::now();
     match cfg.source {
-        Source::WebSocket => {
-            let url = format!("{}/ws", cfg.url.replacen("http://", "ws://", 1));
-            match WebSocket::connect(&url, timeout, timeout, cancel) {
-                Ok(_) => report(fmt(s.test_websocket_ok, &[&ms(t)])),
-                Err(e) => report(fmt(s.test_websocket_fail, &[&url, &e])),
-            }
-        }
+        Source::WebSocket => match api.websocket(timeout, timeout, cancel) {
+            Ok(_) => report(fmt(s.test_websocket_ok, &[&ms(t)])),
+            Err(e) => report(fmt(s.test_websocket_fail, &[&api.ws_url(), &e])),
+        },
         Source::Mqtt => {
             let id = format!("frigate-pip-test-{:08x}", random_u64() as u32);
             let host = format!("{}:{}", cfg.mqtt_host, cfg.mqtt_port);
@@ -201,8 +218,8 @@ impl<F: Fn(Notice)> Dispatch<'_, F> {
 }
 
 fn session(cfg: &Config, cancel: &Cancel, sink: &impl Fn(Notice)) -> String {
-    let api = format!("{}/api/config", cfg.url);
-    match crate::net::get_bytes(&api, Duration::from_secs(5), Some(cancel), 16 << 20) {
+    let api = Frigate::new(cfg);
+    match api.get_bytes("/api/config", Duration::from_secs(5), Some(cancel), 16 << 20) {
         Ok(b) => match Json::parse(&String::from_utf8_lossy(&b)) {
             Some(j) => sink(Notice::Cameras(camera_infos(&j, cfg))),
             None => crate::log!("Cannot parse /api/config"),
@@ -211,14 +228,14 @@ fn session(cfg: &Config, cancel: &Cancel, sink: &impl Fn(Notice)) -> String {
     }
     let mut d = Dispatch { filter: EventFilter::new(cfg), sink, last_activity: HashMap::new() };
     match cfg.source {
-        Source::WebSocket => ws_session(cfg, cancel, &mut d),
+        Source::WebSocket => ws_session(&api, cfg, cancel, &mut d),
         Source::Mqtt => mqtt_session(cfg, cancel, &mut d),
     }
 }
 
-fn ws_session<F: Fn(Notice)>(cfg: &Config, cancel: &Cancel, d: &mut Dispatch<F>) -> String {
-    let url = format!("{}/ws", cfg.url.replacen("http://", "ws://", 1));
-    let mut ws = match WebSocket::connect(&url, Duration::from_secs(5), Duration::from_secs(30), cancel) {
+fn ws_session<F: Fn(Notice)>(api: &Frigate, cfg: &Config, cancel: &Cancel, d: &mut Dispatch<F>) -> String {
+    let url = api.ws_url();
+    let mut ws = match api.websocket(Duration::from_secs(5), Duration::from_secs(30), cancel) {
         Ok(ws) => ws,
         Err(e) => return format!("WebSocket {url}: {e}"),
     };
@@ -439,5 +456,27 @@ mod tests {
         assert_eq!(cams[2].title, "Ogród");
         assert_eq!(cams[2].main.as_deref(), Some("c_hd"));
         assert_eq!(cams[2].sub.as_deref(), Some("c_sub"));
+    }
+
+    /// The whole connection test against a real Frigate, e.g. port 8971 with a login:
+    /// `FRIGATE_URL=https://192.168.1.10:8971 FRIGATE_USER=viewer FRIGATE_PASSWORD=… cargo test --release live_connection -- --ignored --nocapture`
+    /// (`FRIGATE_RTSP_TEMPLATE` overrides `rtsp://{host}:8554/{stream}`).
+    #[test]
+    #[ignore = "requires Frigate on the network"]
+    fn live_connection() {
+        let Ok(url) = std::env::var("FRIGATE_URL") else { return println!("skipped: set FRIGATE_URL (and FRIGATE_USER, FRIGATE_PASSWORD)") };
+        let mut cfg = Config::from_ini(&IniDoc::parse(""));
+        cfg.url = url;
+        cfg.user = std::env::var("FRIGATE_USER").unwrap_or_default();
+        cfg.password = std::env::var("FRIGATE_PASSWORD").unwrap_or_default();
+        if let Ok(t) = std::env::var("FRIGATE_RTSP_TEMPLATE") {
+            cfg.rtsp = t;
+        }
+        let mut lines = Vec::new();
+        connection_test(&cfg, &Cancel::new(), &mut |l| {
+            println!("{l}");
+            lines.push(l);
+        });
+        assert!(!lines.iter().any(|l| l.starts_with('✖')), "{lines:#?}");
     }
 }

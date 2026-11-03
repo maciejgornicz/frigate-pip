@@ -194,8 +194,10 @@ fn parse_form(s: &str) -> Vec<(String, String)> {
 }
 
 /// Settings fields of the page: `section.key` as in config.ini.
-const FIELDS: [&str; 26] = [
+const FIELDS: [&str; 28] = [
     "frigate.url",
+    "frigate.user",
+    "frigate.password",
     "frigate.source",
     "frigate.rtsp",
     "mqtt.host",
@@ -229,10 +231,13 @@ const FIELDS: [&str; 26] = [
 fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> Option<bool> {
     // Credentials exactly as typed (spaces included); the rest without outer spaces.
     let last = |name: &str| {
-        form.iter()
-            .rev()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| if matches!(name, "mqtt.user" | "mqtt.password") { v.clone() } else { v.trim().to_string() })
+        form.iter().rev().find(|(k, _)| k == name).map(|(_, v)| {
+            if matches!(name, "mqtt.user" | "mqtt.password" | "frigate.password") {
+                v.clone()
+            } else {
+                v.trim().to_string()
+            }
+        })
     };
     for f in FIELDS.iter().chain(["video.prebuffer", "video.camera_audio"].iter()) {
         if let (Some(v), Some((section, key))) = (last(f), f.split_once('.')) {
@@ -395,6 +400,12 @@ fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
     let mut connection = String::new();
     connection += &row("frigate.url", s.frigate_url, text("frigate.url", &c.url, "url"), s.tip_url);
     connection += &row(
+        "frigate.user",
+        s.frigate_login,
+        format!("{} {}", text("frigate.user", &c.user, "text"), text("frigate.password", &c.password, "password")),
+        s.tip_frigate_login,
+    );
+    connection += &row(
         "frigate.source",
         s.source,
         select("frigate.source", &opts(&[("websocket", s.source_websocket), ("mqtt", s.source_mqtt)]), source),
@@ -516,7 +527,7 @@ section {{ background: var(--card); border: 1px solid var(--line); border-radius
 input[type=text], input[type=url], input[type=password], select {{ width: 100%; max-width: 420px; }}
 input, select, button {{ font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }}
 input.num {{ width: 96px; }}
-#mqtt-host {{ max-width: 240px; }} #mqtt-user, #mqtt-password {{ max-width: 200px; }}
+#mqtt-host {{ max-width: 240px; }} #mqtt-user, #mqtt-password, #frigate-user, #frigate-password {{ max-width: 200px; }}
 label.check {{ display: inline-flex; align-items: center; gap: 6px; margin: 2px 16px 2px 0; font-weight: normal; }}
 .checks {{ display: flex; flex-wrap: wrap; }}
 button {{ cursor: pointer; }}

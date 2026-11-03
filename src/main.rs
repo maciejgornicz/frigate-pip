@@ -6,6 +6,7 @@
 #[macro_use]
 mod util;
 mod audio;
+mod client;
 mod config;
 mod filter;
 mod frigate;
@@ -16,6 +17,7 @@ mod mqtt;
 mod net;
 mod rtp;
 mod rtsp;
+mod tls;
 mod view;
 mod ws;
 

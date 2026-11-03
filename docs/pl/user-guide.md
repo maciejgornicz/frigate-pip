@@ -27,8 +27,8 @@ Rozdziały 1–11 opisują aplikację dla Windows. FrigatePiP działa też w Lin
 
 - **Windows 10 (wersja 1809 lub nowsza) lub Windows 11**, wersja 64-bitowa.
 - **Frigate** dostępny z Twojego komputera przez sieć. Zalecany jest Frigate 0.14 lub nowszy; tryby *Review* wymagają wersji 0.14 lub nowszej.
-- **Port API 5000** Frigate musi być dostępny z komputera. FrigatePiP się nie loguje, więc nie można użyć portu 8971 wymagającego uwierzytelnienia. W Dockerze opublikuj port, np. `- "5000:5000"`.
-- **Dodatek Frigate do Home Assistant:** port 5000 jest domyślnie wyłączony — włącz go w ustawieniach *Sieć* dodatku. Adresy HTTPS nie są obsługiwane: użyj zwykłego adresu `http://` w sieci lokalnej.
+- **API** Frigate musi być dostępne z komputera: **port 5000** bez uwierzytelniania (`http://`, bez logowania) albo **port 8971** z logowaniem (`https://`, z użytkownikiem Frigate — wystarczy rola *viewer*; założysz go w *Ustawienia → Użytkownicy* we Frigate). W Dockerze opublikuj port, np. `- "5000:5000"` lub `- "8971:8971"`. Działa też reverse proxy przed Frigate.
+- **Dodatek Frigate do Home Assistant:** port 5000 jest domyślnie wyłączony — włącz go w ustawieniach *Sieć* dodatku. Możesz też użyć portu 8971 z użytkownikiem Frigate.
 - Do płynnego wideo na żywo: wbudowany we Frigate **serwer RTSP go2rtc, port 8554** (`- "8554:8554"`). Bez niego nadal możesz korzystać z MJPEG lub klatek (zob. [Obraz na żywo](#obraz-na-żywo)).
 - Opcjonalnie: **broker MQTT** używany przez Frigate, jeśli wolisz MQTT od WebSocketu Frigate.
 - W przypadku kamer H.265 (HEVC) system Windows potrzebuje dekodera HEVC. Większość komputerów z aktualnym sterownikiem karty graficznej go ma; w przeciwnym razie zainstaluj *Rozszerzenia wideo HEVC* (*HEVC Video Extensions*) ze sklepu Microsoft Store albo użyj sub-strumienia H.264. Jeśli dekodera brak, FrigatePiP automatycznie pokazuje zamiast tego MJPEG z Frigate.
@@ -144,7 +144,8 @@ Większość zmian działa **od razu** na otwarte okna podglądu, więc widzisz 
 
 | Opcja | Opis |
 |---|---|
-| **Adres Frigate** | Adres serwera Frigate z portem, np. `http://192.168.1.10:5000` lub `http://frigate.local:5000`. Port 5000 nie wymaga logowania. |
+| **Adres Frigate** | Adres serwera Frigate z portem: `http://192.168.1.10:5000` (port 5000, bez logowania) albo `https://192.168.1.10:8971` (port 8971, z użytkownikiem Frigate poniżej). Może to być też adres reverse proxy. |
+| **Użytkownik / hasło Frigate** | Tylko dla portu 8971 albo reverse proxy, które wymaga logowania do Frigate: użytkownik Frigate (*Ustawienia → Użytkownicy* we Frigate); wystarczy rola *viewer*. Dla portu 5000 zostaw puste. FrigatePiP loguje się, trzyma token od Frigate i loguje się ponownie, gdy token wygaśnie. Hasło jest zapisane w `config.ini`, tak jak hasło MQTT. |
 | **Źródło zdarzeń** | **WebSocket Frigate (zalecane)** — FrigatePiP łączy się bezpośrednio z Frigate; nic więcej nie jest potrzebne. **MQTT** — wykrycia są odczytywane z Twojego brokera MQTT (tego skonfigurowanego we Frigate). Oba sposoby dają ten sam wynik; WebSocket jest zwykle nieco szybszy. |
 | **Serwer MQTT**, **port** | Nazwa hosta lub adres IP oraz port (zwykle 1883) brokera MQTT. Używane tylko przy źródle MQTT. |
 | **Użytkownik / hasło** | Dane logowania MQTT. Zostaw puste, jeśli broker pozwala na dostęp anonimowy. |
@@ -193,7 +194,7 @@ Fałszywe wykrycia oznaczone przez Frigate (false positives) są zawsze pomijane
 | Wybór | Opis |
 |---|---|
 | **RTSP z go2rtc** (domyślnie) | Płynne wideo z liczbą klatek na sekundę kamery i dekodowaniem sprzętowym (H.264 i H.265), małe opóźnienie. Wymaga portu 8554. |
-| **MJPEG z Frigate** | Około 5 klatek na sekundę w rozdzielczości detekcji, przez port 5000. Używaj, gdy RTSP nie jest dostępny. |
+| **MJPEG z Frigate** | Około 5 klatek na sekundę w rozdzielczości detekcji, przez API Frigate. Używaj, gdy RTSP nie jest dostępny. |
 | **Tylko odświeżane klatki** | Tylko klatki z Frigate, regularnie odświeżane. Najlżejsza opcja. |
 
 #### Strumień
@@ -236,6 +237,7 @@ Wszystkie ustawienia są przechowywane w `%APPDATA%\FrigatePiP\config.ini` (zwyk
 | `[app]` | `language` | `auto` | `auto` (język Windows) lub `en`, `pl`, `de`, `es`, `pt`, `fr`. |
 | | `check_updates` | `true` | Raz dziennie szukaj nowej wersji. |
 | `[frigate]` | `url` | `http://frigate.local:5000` | Adres Frigate. |
+| | `user`, `password` | *(puste)* | Logowanie do Frigate dla portu 8971 (puste dla portu 5000). |
 | | `source` | `websocket` | `websocket` lub `mqtt`. |
 | | `rtsp` | `rtsp://{host}:8554/{stream}` | Szablon adresu RTSP. |
 | `[mqtt]` | `host` | *(puste)* | Broker MQTT (tylko przy `source = mqtt`). |
@@ -313,10 +315,10 @@ FrigatePiP jest dostępny w językach: angielskim, polskim, niemieckim, hiszpań
 Zacznij od **Testuj połączenie** w ustawieniach i od **Pokaż log** w menu w zasobniku.
 
 **Ikona pozostaje szara (brak połączenia)**
-- Sprawdź adres Frigate i port (5000) w przeglądarce na tym samym komputerze: `http://<frigate>:5000/api/version` powinien pokazać wersję.
-- W Dockerze port 5000 musi być opublikowany. Port 8971 (z logowaniem) nie jest obsługiwany.
-- Dodatek do Home Assistant: włącz port 5000 w ustawieniach *Sieć* dodatku.
-- Adres musi zaczynać się od `http://`. HTTPS (np. przez reverse proxy) nie jest obsługiwany.
+- Sprawdź adres Frigate i port w przeglądarce na tym samym komputerze: `http://<frigate>:5000/api/version` (albo `https://<frigate>:8971/api/version` po zalogowaniu) powinien pokazać wersję.
+- W Dockerze port (5000 albo 8971) musi być opublikowany.
+- Dodatek do Home Assistant: włącz port 5000 w ustawieniach *Sieć* dodatku albo użyj portu 8971 z użytkownikiem Frigate.
+- Port 8971 albo reverse proxy: wpisz użytkownika i hasło Frigate; **Testuj połączenie** pokaże, czy logowanie działa. Certyfikat samopodpisany (własny certyfikat Frigate na porcie 8971) jest zaufany przy pierwszym połączeniu i zapamiętany w `certificates.txt` (obok `config.ini`); jeśli serwer pokaże później inny, FrigatePiP odmówi połączenia — gdy certyfikat wymieniono celowo, usuń jego linię w tym pliku.
 - Przy MQTT: sprawdź adres brokera, dane logowania i prefiks tematów.
 
 **Nie pojawiają się żadne okna**
@@ -371,7 +373,7 @@ Wideo dekoduje program **ffmpeg**; dane dostarcza mu własny klient RTSP Frigate
 - **ffmpeg**: instaluje się razem z paczką `.deb`; w innym wypadku `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) lub pakiet z Twojej dystrybucji.
 - Do napisów na framebufferze: czcionka DejaVu (`fonts-dejavu-core`, zwykle instalowana razem z ffmpeg).
 - Do framebuffera: członkostwo w grupie `video` (`sudo usermod -aG video $USER`, a potem ponowne zalogowanie).
-- Frigate dostępny z tego komputera przez zwykłe `http://` na porcie API 5000, a dla wideo na żywo — port RTSP 8554 serwera go2rtc (szczegóły: [Wymagania](#1-wymagania)).
+- Frigate dostępny z tego komputera na porcie API 5000 (`http://`) albo 8971 (`https://`, z użytkownikiem Frigate), a dla wideo na żywo — port RTSP 8554 serwera go2rtc (szczegóły: [Wymagania](#1-wymagania)).
 
 ### Instalacja
 
