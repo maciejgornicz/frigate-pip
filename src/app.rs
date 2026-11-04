@@ -87,6 +87,14 @@ enum Pause {
     Forever,
 }
 
+/// What the left button holds in a window that has the mouse to itself.
+#[derive(Clone, Copy)]
+enum Drag {
+    /// Ctrl + drag on a zoomed picture: the last mouse position (screen pixels).
+    Picture(POINT),
+    Volume,
+}
+
 struct Popup {
     hwnd: HWND,
     camera: String,
@@ -94,8 +102,7 @@ struct Popup {
     deadline: Instant,
     hard_deadline: Instant,
     hovered: bool,
-    /// Ctrl + drag on a zoomed picture: the last mouse position (screen pixels).
-    panning: Option<POINT>,
+    drag: Option<Drag>,
     pinned: bool,
     closing: bool,
     user_moved: bool,
@@ -520,22 +527,30 @@ fn cursor_pos() -> POINT {
 /// Hit-test code of the sound button: one without default behaviour (HTHELP, for example,
 /// would start the "?" context help mode and swallow the next click).
 const HT_SOUND: u32 = HTOBJECT;
+/// Hit-test code of the volume slider, likewise.
+const HT_VOLUME: u32 = HTBORDER;
 
 unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_NCHITTEST => {
-            // The close button in the top-right corner, the sound button left of it (only with
-            // camera audio); the rest of the window drags it.
+            // The close button in the top-right corner, the sound button left of it and the
+            // volume slider under that (only with camera audio); the rest of the window drags it.
             let mut pt = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
             let _ = ScreenToClient(hwnd, &mut pt);
             let mut rc = RECT::default();
             let _ = GetClientRect(hwnd, &mut rc);
             let dpi = GetDpiForWindow(hwnd);
             let inside = |(l, t, r, b): (i32, i32, i32, i32)| pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
+            let button = inside(crate::render::sound_button_rect(rc.right, dpi));
+            let slider = crate::render::volume_slider_rect(rc.right, rc.bottom, dpi).is_some_and(inside);
             let hit = if inside(crate::render::close_button_rect(rc.right, dpi)) {
                 HTCLOSE
-            } else if inside(crate::render::sound_button_rect(rc.right, dpi)) && with_app(|a| a.has_sound(hwnd)) == Some(true) {
-                HT_SOUND
+            } else if (button || slider) && with_app(|a| a.has_sound(hwnd)) == Some(true) {
+                if button {
+                    HT_SOUND
+                } else {
+                    HT_VOLUME
+                }
             } else {
                 HTCAPTION
             };
@@ -561,8 +576,13 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             SetCapture(hwnd);
             LRESULT(0)
         }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HT_VOLUME => {
+            with_app(|a| a.start_volume(hwnd));
+            SetCapture(hwnd);
+            LRESULT(0)
+        }
         WM_MOUSEMOVE => {
-            with_app(|a| a.pan(hwnd));
+            with_app(|a| a.dragged(hwnd));
             LRESULT(0)
         }
         WM_LBUTTONUP => {
@@ -570,7 +590,7 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             LRESULT(0)
         }
         WM_CAPTURECHANGED => {
-            with_app(|a| a.end_pan(hwnd));
+            with_app(|a| a.end_drag(hwnd));
             LRESULT(0)
         }
         WM_NCLBUTTONDOWN => {
@@ -964,7 +984,7 @@ impl App {
             let pref = DWMWCP_ROUND;
             let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const _ as *const _, 4);
         }
-        let shared = Shared::new(text.clone(), v.overlay);
+        let shared = Shared::new(text.clone(), v.overlay, v.camera_volume);
         let now = Instant::now();
         let dur = Duration::from_secs(v.duration as u64);
         let max = Duration::from_secs(v.max_duration.max(v.duration) as u64);
@@ -975,7 +995,7 @@ impl App {
             deadline: now + dur,
             hard_deadline: now + max,
             hovered: false,
-            panning: None,
+            drag: None,
             pinned: false,
             closing: false,
             user_moved: place.as_ref().is_some_and(|p| p.moved_to.is_some()),
@@ -1317,7 +1337,7 @@ impl App {
                     return;
                 };
                 let p = &self.popups[i];
-                if p.hovered || p.panning.is_some() || p.pinned || p.preview {
+                if p.hovered || p.drag.is_some() || p.pinned || p.preview {
                     unsafe {
                         SetTimer(hwnd, TIMER_DEADLINE, 1000, None);
                     }
@@ -1334,6 +1354,10 @@ impl App {
     /// Mouse over the window (`on`); `hit` = the part under it (`HTCLOSE`, `HT_SOUND`).
     fn hover(&mut self, hwnd: HWND, on: bool, hit: u32) {
         let Some(p) = self.find(hwnd) else { return };
+        // During a drag the window has the mouse to itself, wherever it goes.
+        if !on && p.drag.is_some() {
+            return;
+        }
         p.shared.set_close_button(match (on, hit) {
             (false, _) => 0,
             (true, HTCLOSE) => 2,
@@ -1423,30 +1447,55 @@ impl App {
     /// Ctrl + press: the drag moves a zoomed picture (`false` = no zoom, it moves the window).
     fn start_pan(&mut self, hwnd: HWND) -> bool {
         let Some(p) = self.find(hwnd).filter(|p| !p.shared.zoom().is_full()) else { return false };
-        p.panning = Some(cursor_pos());
+        p.drag = Some(Drag::Picture(cursor_pos()));
         true
     }
 
-    /// The mouse moved during Ctrl + drag: the picture follows it.
-    fn pan(&mut self, hwnd: HWND) {
+    /// A press on the volume slider: the level jumps there and follows the mouse.
+    fn start_volume(&mut self, hwnd: HWND) {
         let Some(p) = self.find(hwnd) else { return };
-        let Some(last) = p.panning else { return };
-        let at = cursor_pos();
+        p.drag = Some(Drag::Volume);
+        self.dragged(hwnd);
+    }
+
+    /// The mouse moved with the left button held: the picture or the volume follows it.
+    fn dragged(&mut self, hwnd: HWND) {
+        let Some(p) = self.find(hwnd) else { return };
+        let mut at = cursor_pos();
         let mut rc = RECT::default();
         unsafe {
             let _ = GetClientRect(hwnd, &mut rc);
         }
-        p.panning = Some(at);
-        let (l, t, r, b) = Self::picture_rect(p, rc);
-        let zoom = p.shared.zoom().panned((at.x - last.x) as f32 / (r - l).max(1.0), (at.y - last.y) as f32 / (b - t).max(1.0));
-        p.shared.set_zoom(zoom);
+        match p.drag {
+            Some(Drag::Picture(last)) => {
+                p.drag = Some(Drag::Picture(at));
+                let (l, t, r, b) = Self::picture_rect(p, rc);
+                let zoom = p.shared.zoom().panned((at.x - last.x) as f32 / (r - l).max(1.0), (at.y - last.y) as f32 / (b - t).max(1.0));
+                p.shared.set_zoom(zoom);
+            }
+            Some(Drag::Volume) => {
+                let dpi = unsafe {
+                    let _ = ScreenToClient(hwnd, &mut at);
+                    GetDpiForWindow(hwnd)
+                };
+                let Some(slider) = crate::render::volume_slider_rect(rc.right, rc.bottom, dpi) else { return };
+                let volume = crate::view::volume_at(slider, at.y);
+                p.shared.sound.volume.store(volume, Ordering::Relaxed);
+                if volume > 0 {
+                    p.shared.sound.muted.store(false, Ordering::Relaxed);
+                }
+                p.shared.request_redraw();
+            }
+            None => {}
+        }
     }
 
-    /// Ctrl + drag ended. The window had the mouse all to itself, so hovering starts over.
-    fn end_pan(&mut self, hwnd: HWND) {
+    /// The left button is up. The window had the mouse all to itself, so hovering starts over.
+    fn end_drag(&mut self, hwnd: HWND) {
         let Some(p) = self.find(hwnd) else { return };
-        if p.panning.take().is_none() {
-            return;
+        let Some(drag) = p.drag.take() else { return };
+        if matches!(drag, Drag::Volume) {
+            crate::log!("{}: volume {} %", p.camera, p.shared.sound.volume.load(Ordering::Relaxed));
         }
         p.hovered = false;
         let inside = unsafe { PtInRect(&window_rect(hwnd), cursor_pos()).as_bool() };

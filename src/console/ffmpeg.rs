@@ -167,12 +167,16 @@ impl Ffmpeg {
         }
     }
 
-    /// Audio player fed through stdin; `input` = input format options.
-    pub fn audio_pipe(&self, input: &[String]) -> std::io::Result<Proc> {
+    /// Audio player fed through stdin; `input` = input format options, `volume` in percent.
+    pub fn audio_pipe(&self, input: &[String], volume: u8) -> std::io::Result<Proc> {
         let mut c = self.command();
         c.args(["-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0"]);
         c.args(input);
-        c.args(["-i", "pipe:0", "-vn", "-f", self.audio_out.0, self.audio_out.1]);
+        c.args(["-i", "pipe:0", "-vn"]);
+        if volume < 100 {
+            c.args(["-af", &format!("volume={:.4}", crate::view::gain(volume))]);
+        }
+        c.args(["-f", self.audio_out.0, self.audio_out.1]);
         c.stdin(Stdio::piped()).stdout(Stdio::null());
         c.spawn().map(Proc)
     }

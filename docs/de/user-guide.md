@@ -121,6 +121,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 | **Strg + Ziehen** | Bei gezoomtem Bild: verschiebt das Bild, um einen anderen Ausschnitt zu sehen. Ohne Zoom wird wie gewohnt das Fenster verschoben. |
 | **×** (oben rechts) | Schließt das Fenster sofort. Die Schaltfläche erscheint, wenn Sie mit der Maus auf das Fenster zeigen. |
 | **Lautsprecher** (links neben ×) | Schaltet den Ton des Fensters aus; ein weiterer Klick schaltet ihn wieder ein. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Kameraton zeigen; solange der Ton aus ist, bleibt der durchgestrichene Lautsprecher sichtbar. |
+| **Lautstärkeregler** (unter dem Lautsprecher) | Stellt die Lautstärke dieses Fensters ein: ziehen oder anklicken. Er erscheint zusammen mit dem Lautsprecher; Lauterstellen schaltet auch stummgeschalteten Ton wieder ein. Unter Linux ist die neue Lautstärke kurz nach dem Loslassen zu hören. |
 | **Rechtsklick** | Schließt das Fenster. |
 | **Doppelklick** | Öffnet diese Kamera in der Frigate-Weboberfläche. |
 | **Darauf zeigen** | Solange sich der Mauszeiger über dem Fenster befindet, schließt es sich nicht. Nachdem Sie die Maus wegbewegt haben, bleibt es noch mindestens 3 Sekunden geöffnet. |
@@ -212,7 +213,7 @@ FrigatePiP ermittelt die go2rtc-Streams jeder Kamera aus der Frigate-Konfigurati
 
 #### Kameraton
 
-**Kameraton** gibt den Ton der Kamera (AAC oder G.711 aus dem RTSP-Stream) in jedem geöffneten Fenster wieder. Er läuft separat und verzögert daher nie das Fenster oder das Video. Die Lautstärke lässt sich im Lautstärkemixer von Windows einstellen (*FrigatePiP*). Erfordert **RTSP von go2rtc**. Um ein einzelnes Fenster stummzuschalten, klicken Sie auf die Lautsprecher-Schaltfläche oben rechts im Fenster (siehe [Mausaktionen](#mausaktionen)).
+**Kameraton** gibt den Ton der Kamera (AAC oder G.711 aus dem RTSP-Stream) in jedem geöffneten Fenster wieder. Er läuft separat und verzögert daher nie das Fenster oder das Video. Die Lautstärke lässt sich im Lautstärkemixer von Windows einstellen (*FrigatePiP*). Erfordert **RTSP von go2rtc**. Um ein einzelnes Fenster stummzuschalten, klicken Sie auf die Lautsprecher-Schaltfläche oben rechts im Fenster (siehe [Mausaktionen](#mausaktionen)). **Lautstärke** legt fest, wie laut ein neues Fenster startet (0–100 %, `camera_volume`), zum Beispiel gegen Windgeräusche; jedes Fenster hat außerdem einen eigenen Regler.
 
 #### Vorpuffer
 
@@ -271,6 +272,7 @@ Alle Einstellungen werden in `%APPDATA%\FrigatePiP\config.ini` gespeichert (eine
 | | `prebuffer` | `false` | Vorpuffer. |
 | | `gpu_warm` | `false` | GPU bereithalten. |
 | | `camera_audio` | `false` | Kameraton. |
+| | `camera_volume` | `100` | Lautstärke eines neuen Fensters, 0–100 %. |
 
 ### Einstellungen pro Kamera
 
@@ -420,7 +422,7 @@ Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rah
 - **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie. Ein zweiter Start (oder `frigate-pip --settings`) öffnet die Einstellungen der laufenden Kopie.
 - **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
 - **Symbol im Infobereich:** mit demselben Menü wie unter Windows (siehe [Das Tray-Symbol](#4-das-tray-symbol)); seine Farbe zeigt den Zustand: blau — verbunden, grau — nicht verbunden, orange — pausiert. Es erscheint unter KDE Plasma, Xfce, Cinnamon, MATE und Budgie sowie unter GNOME mit der Erweiterung AppIndicator (in Ubuntu enthalten).
-- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
+- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
 - **Fensteroptionen:** `topmost` (bei `false` sind die Fenster gewöhnliche Fenster, die andere verdecken können), `sound` (der Benachrichtigungston des Desktops) und `skip_fullscreen` (nichts, solange das aktive Fenster im Vollbild ist) wirken wie unter Windows.
 - **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben).
 

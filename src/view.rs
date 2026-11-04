@@ -96,6 +96,39 @@ pub fn state_caption(caption: &str, pinned: bool, zoom: Zoom) -> String {
     text
 }
 
+/// The amplitude for a camera audio volume in percent. Hearing is not linear: on this
+/// curve the middle of the slider sounds about half as loud.
+pub fn gain(volume: u8) -> f32 {
+    let v = volume.min(100) as f32 / 100.0;
+    v * v
+}
+
+/// Volume slider of a window `height` pixels high: a bar under the sound button `button`
+/// (left, top, right, bottom), `None` when the window is too low for it.
+pub fn volume_slider((l, _, r, b): (i32, i32, i32, i32), height: i32, scale: f32) -> Option<(i32, i32, i32, i32)> {
+    let gap = (6.0 * scale).round() as i32;
+    let (top, bottom) = (b + gap, (b + gap + (90.0 * scale).round() as i32).min(height - gap));
+    (bottom - top >= (r - l) * 3 / 2).then_some((l, top, r, bottom))
+}
+
+/// The part of the slider the knob moves along: (top, bottom).
+pub fn volume_track((l, t, r, b): (i32, i32, i32, i32)) -> (i32, i32) {
+    let end = (r - l) / 2;
+    (t + end, b - end)
+}
+
+/// Where the knob of `slider` is at `volume` percent.
+pub fn volume_y(slider: (i32, i32, i32, i32), volume: u8) -> f32 {
+    let (top, bottom) = volume_track(slider);
+    bottom as f32 - (bottom - top) as f32 * volume.min(100) as f32 / 100.0
+}
+
+/// The volume in percent for a mouse at height `y`.
+pub fn volume_at(slider: (i32, i32, i32, i32), y: i32) -> u8 {
+    let (top, bottom) = volume_track(slider);
+    ((bottom - y) as f32 / (bottom - top).max(1) as f32 * 100.0).round().clamp(0.0, 100.0) as u8
+}
+
 /// Zoom of a preview window (Ctrl + mouse wheel): the part of the picture that is shown —
 /// its left and top edge and its size, as fractions of the whole picture. The part keeps
 /// the picture's aspect ratio.
@@ -168,6 +201,22 @@ mod tests {
         assert_eq!((z.label().as_deref(), Zoom::FULL.label()), (Some("1.6×"), None));
         assert_eq!(state_caption("Gate", false, Zoom { x: 0.0, y: 0.0, size: 0.5 }), "Gate · 2.0×");
         assert_eq!(state_caption("Gate", false, Zoom::FULL), "Gate");
+    }
+
+    #[test]
+    fn volume_curve_and_slider() {
+        assert_eq!((gain(0), gain(50), gain(100), gain(200)), (0.0, 0.25, 1.0, 1.0));
+        // Under a 24 px button: 6 px apart, 90 px long, the knob stays 12 px from the ends.
+        let button = (418, 8, 442, 32);
+        let slider = volume_slider(button, 270, 1.0).unwrap();
+        assert_eq!(slider, (418, 38, 442, 128));
+        assert_eq!(volume_track(slider), (50, 116));
+        assert_eq!((volume_at(slider, 116), volume_at(slider, 83), volume_at(slider, 50)), (0, 50, 100));
+        assert_eq!((volume_at(slider, 500), volume_at(slider, -5)), (0, 100));
+        assert_eq!((volume_y(slider, 0), volume_y(slider, 50), volume_y(slider, 100)), (116.0, 83.0, 50.0));
+        // The smallest window (160 x 90) still has a shorter one, a very wide one none.
+        assert_eq!(volume_slider(button, 90, 1.0), Some((418, 38, 442, 84)));
+        assert_eq!(volume_slider(button, 70, 1.0), None);
     }
 
     #[test]

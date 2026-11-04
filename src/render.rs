@@ -27,6 +27,8 @@ pub struct Overlay {
     pub close: u8,
     /// Sound button: 0 = no camera audio (no button), 1 = sound on, 2 = muted.
     pub sound: u8,
+    /// Volume in percent (volume slider).
+    pub volume: u8,
     /// The part of the picture that is shown (Ctrl + mouse wheel).
     pub zoom: Zoom,
 }
@@ -45,6 +47,11 @@ pub fn sound_button_rect(client_width: i32, dpi: u32) -> (i32, i32, i32, i32) {
     let (l, t, r, b) = close_button_rect(client_width, dpi);
     let gap = (6.0 * dpi.max(96) as f32 / 96.0).round() as i32;
     (l - gap - (r - l), t, l - gap, b)
+}
+
+/// Volume slider under the sound button, if the window is high enough for it.
+pub fn volume_slider_rect(client_width: i32, client_height: i32, dpi: u32) -> Option<(i32, i32, i32, i32)> {
+    crate::view::volume_slider(sound_button_rect(client_width, dpi), client_height, dpi.max(96) as f32 / 96.0)
 }
 
 enum Last {
@@ -430,6 +437,27 @@ impl Renderer {
         if let Some(rect) = sound {
             let _ = self.draw_sound_button(rect, ov.sound == 2, ov.close == 3);
         }
+        if ov.sound > 0 && ov.close > 0 {
+            if let Some(slider) = volume_slider_rect(self.size.0 as i32, self.size.1 as i32, dpi) {
+                self.draw_volume(slider, ov.volume);
+            }
+        }
+    }
+
+    /// A dark bar with the track and the knob at `volume` percent.
+    unsafe fn draw_volume(&self, slider: (i32, i32, i32, i32), volume: u8) {
+        let (l, t, r, b) = slider;
+        let rad = (r - l) as f32 / 2.0;
+        let bar = D2D_RECT_F { left: l as f32, top: t as f32, right: r as f32, bottom: b as f32 };
+        self.d2d.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: bar, radiusX: rad, radiusY: rad }, &self.shade);
+        let (top, bottom) = crate::view::volume_track(slider);
+        let (x, level) = (l as f32 + rad, crate::view::volume_y(slider, volume));
+        let width = (rad / 7.0).max(1.5);
+        let p = |y: f32| D2D_POINT_2F { x, y };
+        self.d2d.DrawLine(p(top as f32), p(bottom as f32), &self.grey, width, None);
+        self.d2d.DrawLine(p(level), p(bottom as f32), &self.white, width, None);
+        let knob = D2D1_ELLIPSE { point: p(level), radiusX: rad * 0.45, radiusY: rad * 0.45 };
+        self.d2d.FillEllipse(&knob, &self.white);
     }
 
     /// A speaker in a circle: with sound waves, or crossed out when muted.

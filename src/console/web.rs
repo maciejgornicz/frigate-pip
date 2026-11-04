@@ -194,7 +194,7 @@ fn parse_form(s: &str) -> Vec<(String, String)> {
 }
 
 /// Settings fields of the page: `section.key` as in config.ini.
-const FIELDS: [&str; 28] = [
+const FIELDS: [&str; 29] = [
     "frigate.url",
     "frigate.user",
     "frigate.password",
@@ -223,6 +223,7 @@ const FIELDS: [&str; 28] = [
     "video.live",
     "video.stream",
     "video.auto_main_width",
+    "video.camera_volume",
 ];
 
 /// Puts the form values into the settings file; returns the autostart choice when the
@@ -494,6 +495,7 @@ fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
     );
     video += &row("video.prebuffer", "", checkbox("video.prebuffer", c.prebuffer, s.prebuffer), s.tip_prebuffer);
     video += &row("video.camera_audio", "", checkbox("video.camera_audio", c.camera_audio, s.camera_audio), s.tip_camera_audio);
+    video += &row("video.camera_volume", s.camera_volume, number("video.camera_volume", c.camera_volume, 0, 100, "%"), s.tip_camera_volume);
 
     let saved = match saved {
         Some(Ok(())) => format!("<p class=\"saved\">{}</p>", esc(s.linux_settings_saved)),

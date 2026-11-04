@@ -230,7 +230,7 @@ mod playback {
     use super::*;
     use crate::util::Cancel;
     use std::mem::ManuallyDrop;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::sync::mpsc::{self, RecvTimeoutError, Sender};
     use std::sync::Arc;
     use std::time::Duration;
@@ -494,6 +494,16 @@ mod playback {
         pub muted: AtomicBool,
         /// Sound is playing (the mute button is shown only then).
         pub playing: AtomicBool,
+        /// Volume in percent (volume slider).
+        pub volume: AtomicU8,
+    }
+
+    /// Turns the samples down to `volume` percent.
+    pub fn turn_down(pcm: &mut [i16], volume: u8) {
+        if volume < 100 {
+            let gain = crate::view::gain(volume);
+            pcm.iter_mut().for_each(|s| *s = (*s as f32 * gain) as i16);
+        }
     }
 
     fn open_out(camera: &str, d: &AudioDecoder) -> Option<AudioOut> {
@@ -564,6 +574,7 @@ mod playback {
                             if sound.muted.load(Ordering::Relaxed) {
                                 pcm.fill(0);
                             }
+                            turn_down(&mut pcm, sound.volume.load(Ordering::Relaxed));
                             match decoded.and_then(|_| o.write(&pcm)) {
                                 Ok(()) if first => {
                                     first = false;
@@ -672,6 +683,18 @@ mod tests {
         let mut out = Vec::new();
         d.push(&[0x00, 0x10, 0x00, 0x18, 0x01, 0x20, 0x35], &mut out);
         assert_eq!(out, vec![vec![0x01, 0x20, 0x35]]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn volume_turns_the_samples_down() {
+        let mut pcm = [1000, -1000, 32767];
+        turn_down(&mut pcm, 100);
+        assert_eq!(pcm, [1000, -1000, 32767]);
+        turn_down(&mut pcm, 50);
+        assert_eq!(pcm, [250, -250, 8191]);
+        turn_down(&mut pcm, 0);
+        assert_eq!(pcm, [0, 0, 0]);
     }
 
     #[test]

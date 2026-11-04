@@ -121,6 +121,7 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 | **Ctrl + glisser** | Sur une image zoomée : déplace l’image pour en voir une autre partie. Sans zoom, c’est la fenêtre qui se déplace, comme d’habitude. |
 | **×** (coin supérieur droit) | Ferme immédiatement la fenêtre. Le bouton apparaît lorsque vous pointez la souris sur la fenêtre. |
 | **Haut-parleur** (à gauche de ×) | Coupe le son de la fenêtre ; un nouveau clic le rétablit. Le bouton apparaît lorsque vous pointez une fenêtre qui diffuse le son de la caméra ; tant que le son est coupé, le haut-parleur barré reste visible. |
+| **Curseur de volume** (sous le haut-parleur) | Règle le volume de cette fenêtre : faites-le glisser ou cliquez dessus. Il apparaît avec le haut-parleur ; monter le volume réactive aussi le son coupé. Sous Linux, le nouveau volume s’entend juste après avoir relâché. |
 | **Clic droit** | Ferme la fenêtre. |
 | **Double-clic** | Ouvre cette caméra dans l’interface web de Frigate. |
 | **Survol** | Tant que le pointeur de la souris se trouve sur la fenêtre, celle-ci ne se ferme pas. Une fois le pointeur éloigné, elle reste encore au moins 3 secondes. |
@@ -212,7 +213,7 @@ FrigatePiP trouve les flux go2rtc de chaque caméra dans la configuration de Fri
 
 #### Son de la caméra
 
-L’option **Son de la caméra** joue le son de la caméra (AAC ou G.711 issu du flux RTSP) dans chaque fenêtre ouverte. Il est traité séparément et ne retarde donc jamais la fenêtre ni la vidéo. Le volume se règle dans le Mélangeur de volume de Windows (*FrigatePiP*). Cette option nécessite **RTSP depuis go2rtc**. Pour couper le son d’une seule fenêtre, cliquez sur le bouton haut-parleur dans son coin supérieur droit (voir [Actions de la souris](#actions-de-la-souris)).
+L’option **Son de la caméra** joue le son de la caméra (AAC ou G.711 issu du flux RTSP) dans chaque fenêtre ouverte. Il est traité séparément et ne retarde donc jamais la fenêtre ni la vidéo. Le volume se règle dans le Mélangeur de volume de Windows (*FrigatePiP*). Cette option nécessite **RTSP depuis go2rtc**. Pour couper le son d’une seule fenêtre, cliquez sur le bouton haut-parleur dans son coin supérieur droit (voir [Actions de la souris](#actions-de-la-souris)). **Volume** définit le niveau de départ d’une nouvelle fenêtre (0–100 %, `camera_volume`), par exemple pour atténuer le bruit du vent ; chaque fenêtre a aussi son propre curseur.
 
 #### Préchargement
 
@@ -271,6 +272,7 @@ Tous les paramètres sont stockés dans `%APPDATA%\FrigatePiP\config.ini` (un fi
 | | `prebuffer` | `false` | Préchargement. |
 | | `gpu_warm` | `false` | GPU prêt. |
 | | `camera_audio` | `false` | Son de la caméra. |
+| | `camera_volume` | `100` | Volume d’une nouvelle fenêtre, 0–100 %. |
 
 ### Paramètres par caméra
 
@@ -420,7 +422,7 @@ Sur un bureau Linux, les fenêtres d’aperçu fonctionnent comme sous Windows 
 - **Lancement :** menu des applications → **FrigatePiP** (installé avec apt), ou `frigate-pip` dans un terminal du bureau. Il s’exécute en arrière-plan sans terminal ; une seule copie s’exécute par utilisateur. Un second lancement (ou `frigate-pip --settings`) ouvre les paramètres de la copie en cours d’exécution.
 - **Avec la session du bureau :** `frigate-pip --autostart on` (pour désactiver : `frigate-pip --autostart off`). Pour l’arrêter : `frigate-pip --quit`.
 - **Icône dans la zone de notification :** avec le même menu que sous Windows (voir [Icône de la zone de notification](#4-icône-de-la-zone-de-notification)) ; sa couleur indique l’état : bleu — connecté, gris — non connecté, orange — en pause. Elle apparaît sous KDE Plasma, Xfce, Cinnamon, MATE et Budgie, ainsi que sous GNOME avec l’extension AppIndicator (incluse dans Ubuntu).
-- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, et une fenêtre sous la souris ne se ferme pas.
+- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, le curseur en dessous règle le volume, un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, et une fenêtre sous la souris ne se ferme pas.
 - **Options des fenêtres :** `topmost` (avec `false`, les fenêtres sont des fenêtres ordinaires que d’autres peuvent recouvrir), `sound` (le son de notification du bureau) et `skip_fullscreen` (rien tant que la fenêtre active est en plein écran) fonctionnent comme sous Windows.
 - **Paramètres :** un clic sur l’icône (ou **Paramètres…** dans son menu) les ouvre dans le navigateur, avec les mêmes options, descriptions et le même test de connexion que sous Windows ; la page ne s’ouvre que sur cet ordinateur. Au premier lancement, elle s’ouvre d’elle-même. Ils sont enregistrés dans `~/.config/frigate-pip/config.ini` (décrit plus bas).
 

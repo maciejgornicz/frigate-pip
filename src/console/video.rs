@@ -12,7 +12,7 @@ use crate::util::Cancel;
 use crate::view::Zoom;
 use std::cell::RefCell;
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -30,6 +30,8 @@ pub struct Shared {
     pub muted: AtomicBool,
     /// The camera audio is being played.
     pub audio: AtomicBool,
+    /// Volume of the camera audio in percent.
+    pub volume: AtomicU8,
     pub cancel: Cancel,
 }
 
@@ -47,13 +49,15 @@ pub struct Params {
     /// The part of the camera picture to show (Ctrl + mouse wheel).
     pub zoom: Zoom,
     pub audio: bool,
+    /// Volume of the camera audio in percent.
+    pub volume: u8,
     pub t0: Instant,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
 
 pub fn start(p: Params, ff: Arc<Ffmpeg>, wake: Wake) -> Arc<Shared> {
-    let shared = Arc::new(Shared::default());
+    let shared = Arc::new(Shared { volume: p.volume.into(), ..Default::default() });
     let p = Arc::new(p);
     // The snapshot runs on its own thread so it never delays the live video.
     {
@@ -196,6 +200,9 @@ struct Feeder<'a> {
     via: &'static str,
     video: Option<(Arc<Mutex<Option<Proc>>>, std::process::ChildStdin)>,
     audio: Option<(Proc, std::process::ChildStdin)>,
+    /// Input format options of the audio player and the volume it plays at.
+    audio_input: Vec<String>,
+    played_volume: u8,
     /// AAC: AudioSpecificConfig for the ADTS headers.
     asc: Option<Vec<u8>>,
     aud: &'static [u8],
@@ -204,7 +211,22 @@ struct Feeder<'a> {
 
 impl<'a> Feeder<'a> {
     fn new(p: &'a Params, ff: &'a Ffmpeg, shared: &'a Arc<Shared>, wake: &'a Wake, role: Role, handover: Arc<AtomicBool>, via: &'static str) -> Self {
-        Feeder { p, ff, shared, wake, role, handover, via, video: None, audio: None, asc: None, aud: &[], started: false }
+        Feeder {
+            p,
+            ff,
+            shared,
+            wake,
+            role,
+            handover,
+            via,
+            video: None,
+            audio: None,
+            audio_input: Vec::new(),
+            played_volume: 100,
+            asc: None,
+            aud: &[],
+            started: false,
+        }
     }
 
     /// Still wanted: the window is open and (for the bridge) the other stream has no picture yet.
@@ -252,7 +274,7 @@ impl<'a> Feeder<'a> {
             Err(e) => crate::log!("{}: cannot start ffmpeg: {e}", p.camera),
         }
         if let Some(a) = audio.filter(|_| self.role != Role::Bridge) {
-            let input: Vec<String> = match &a.codec {
+            self.audio_input = match &a.codec {
                 AudioCodec::Aac { config, .. } => {
                     self.asc = Some(config.clone());
                     vec!["-f".into(), "aac".into()]
@@ -260,16 +282,25 @@ impl<'a> Feeder<'a> {
                 AudioCodec::Pcmu => vec!["-f".into(), "mulaw".into(), "-ar".into(), a.rate.to_string(), "-ac".into(), a.channels.to_string()],
                 AudioCodec::Pcma => vec!["-f".into(), "alaw".into(), "-ar".into(), a.rate.to_string(), "-ac".into(), a.channels.to_string()],
             };
-            match self.ff.audio_pipe(&input) {
-                Ok(mut proc) => {
-                    if let Some(stdin) = proc.0.stdin.take() {
-                        crate::log!("{}: audio {} Hz", p.camera, a.rate);
-                        self.audio = Some((proc, stdin));
-                        self.shared.audio.store(true, Ordering::Relaxed);
-                    }
-                }
-                Err(e) => crate::log!("{}: no audio: {e}", p.camera),
+            self.start_audio();
+            if self.audio.is_some() {
+                crate::log!("{}: audio {} Hz", p.camera, a.rate);
+                self.shared.audio.store(true, Ordering::Relaxed);
             }
+        }
+    }
+
+    /// The audio player, at the window's volume (the old one ends first: both would play).
+    fn start_audio(&mut self) {
+        self.audio = None;
+        self.played_volume = self.shared.volume.load(Ordering::Relaxed);
+        match self.ff.audio_pipe(&self.audio_input, self.played_volume) {
+            Ok(mut proc) => {
+                if let Some(stdin) = proc.0.stdin.take() {
+                    self.audio = Some((proc, stdin));
+                }
+            }
+            Err(e) => crate::log!("{}: no audio: {e}", self.p.camera),
         }
     }
 
@@ -292,6 +323,10 @@ impl<'a> Feeder<'a> {
     fn audio(&mut self, frame: &[u8]) -> bool {
         if self.shared.muted.load(Ordering::Relaxed) {
             return self.alive();
+        }
+        // ffmpeg cannot change the volume while it plays.
+        if self.audio.is_some() && self.shared.volume.load(Ordering::Relaxed) != self.played_volume {
+            self.start_audio();
         }
         let header = self.asc.as_deref().map(|asc| adts_header(asc, frame.len()));
         if let Some((_, stdin)) = self.audio.as_mut() {

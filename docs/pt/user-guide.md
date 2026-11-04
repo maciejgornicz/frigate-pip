@@ -121,6 +121,7 @@ As janelas de pré-visualização nunca recebem o foco do teclado, por isso não
 | **Ctrl + arrastar** | Com a imagem aproximada: move a imagem para ver outra parte dela. Sem zoom move-se a janela, como habitualmente. |
 | **×** (canto superior direito) | Fecha a janela de imediato. O botão aparece quando aponta o rato para a janela. |
 | **Altifalante** (à esquerda do ×) | Desliga o som da janela; outro clique volta a ligá-lo. O botão aparece quando aponta para uma janela que reproduz o áudio da câmara; enquanto o som estiver desligado, o altifalante riscado continua visível. |
+| **Controlo de volume** (por baixo do altifalante) | Define o volume desta janela: arraste-o ou clique nele. Aparece com o altifalante; subir o volume também volta a ligar o som desligado. No Linux, o novo volume ouve-se logo depois de largar. |
 | **Clique direito** | Fecha a janela. |
 | **Duplo clique** | Abre esta câmara na interface web do Frigate. |
 | **Passar o rato por cima** | Enquanto o ponteiro do rato estiver sobre a janela, esta não se fecha. Depois de afastar o rato, fica aberta pelo menos mais 3 segundos. |
@@ -212,7 +213,7 @@ O FrigatePiP encontra os streams go2rtc de cada câmara na configuração do Fri
 
 #### Áudio da câmara
 
-**Áudio da câmara** reproduz o som da câmara (AAC ou G.711 do stream RTSP) em cada janela aberta. Funciona em separado, por isso nunca atrasa a janela nem o vídeo. O volume pode ser ajustado no Misturador de volume do Windows (*FrigatePiP*). Requer **RTSP do go2rtc**. Para silenciar uma única janela, clique no botão do altifalante no canto superior direito (ver [Ações do rato](#ações-do-rato)).
+**Áudio da câmara** reproduz o som da câmara (AAC ou G.711 do stream RTSP) em cada janela aberta. Funciona em separado, por isso nunca atrasa a janela nem o vídeo. O volume pode ser ajustado no Misturador de volume do Windows (*FrigatePiP*). Requer **RTSP do go2rtc**. Para silenciar uma única janela, clique no botão do altifalante no canto superior direito (ver [Ações do rato](#ações-do-rato)). **Volume** define o volume com que uma janela nova começa (0–100 %, `camera_volume`), por exemplo para baixar o ruído do vento; cada janela tem também o seu próprio controlo.
 
 #### Pré-buffer
 
@@ -271,6 +272,7 @@ Todas as configurações são guardadas em `%APPDATA%\FrigatePiP\config.ini` (um
 | | `prebuffer` | `false` | Pré-buffer. |
 | | `gpu_warm` | `false` | GPU pronta. |
 | | `camera_audio` | `false` | Áudio da câmara. |
+| | `camera_volume` | `100` | Volume de uma janela nova, 0–100 %. |
 
 ### Configurações por câmara
 
@@ -420,7 +422,7 @@ Num ambiente de trabalho Linux, as janelas de pré-visualização funcionam como
 - **Iniciar:** menu de aplicações → **FrigatePiP** (instalado com o apt) ou `frigate-pip` num terminal do ambiente de trabalho. Funciona em segundo plano, sem terminal; funciona uma cópia por utilizador. Um segundo arranque (ou `frigate-pip --settings`) abre as configurações da cópia em execução.
 - **Com a sessão do ambiente de trabalho:** `frigate-pip --autostart on` (para desligar: `frigate-pip --autostart off`). Para parar: `frigate-pip --quit`.
 - **Ícone na área de notificação:** com o mesmo menu que no Windows (ver [O ícone na área de notificação](#4-o-ícone-na-área-de-notificação)); a cor mostra o estado: azul — ligado, cinzento — sem ligação, âmbar — em pausa. Aparece no KDE Plasma, Xfce, Cinnamon, MATE e Budgie, e no GNOME com a extensão AppIndicator (incluída no Ubuntu).
-- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, arrastar move a janela, a roda redimensiona-a, Ctrl + roda aproxima a imagem em torno do ponteiro, Ctrl + arrastar move a imagem aproximada, um clique fixa-a, um duplo clique abre a câmara no Frigate e uma janela sob o ponteiro não se fecha.
+- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, o controlo por baixo ajusta o volume, arrastar move a janela, a roda redimensiona-a, Ctrl + roda aproxima a imagem em torno do ponteiro, Ctrl + arrastar move a imagem aproximada, um clique fixa-a, um duplo clique abre a câmara no Frigate e uma janela sob o ponteiro não se fecha.
 - **Opções das janelas:** `topmost` (com `false`, as janelas são janelas normais que outras podem tapar), `sound` (o som de notificação do ambiente de trabalho) e `skip_fullscreen` (nada enquanto a janela ativa estiver em ecrã inteiro) funcionam como no Windows.
 - **Configurações:** um clique no ícone (ou **Configurações…** no seu menu) abre-as no navegador, com as mesmas opções, descrições e teste de ligação que no Windows; a página só se abre neste computador. No primeiro arranque abre-se sozinha. São guardadas em `~/.config/frigate-pip/config.ini` (descrito abaixo).
 

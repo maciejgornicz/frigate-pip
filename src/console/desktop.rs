@@ -1,8 +1,8 @@
 //! Desktop output: each preview window is a borderless always-on-top X11 window (an X11
 //! desktop, or Wayland through XWayland) in the chosen corner of the chosen monitor.
-//! The mouse works like on Windows: × closes, the speaker mutes, dragging moves (with Ctrl
-//! a zoomed picture, otherwise the window), a click pins, a double click opens the camera
-//! in Frigate, the right button closes.
+//! The mouse works like on Windows: × closes, the speaker mutes, the slider under it sets
+//! the volume, dragging moves (with Ctrl a zoomed picture, otherwise the window), a click
+//! pins, a double click opens the camera in Frigate, the right button closes.
 
 use super::canvas::{Font, Image};
 use super::x11::{Event, Monitor, BUTTON1_MASK, CONTROL_MASK, X11};
@@ -16,6 +16,7 @@ enum Hot {
     None,
     Close,
     Sound,
+    Volume,
 }
 
 /// Left button held on a window.
@@ -24,6 +25,8 @@ enum Press {
     Window { root: (i32, i32), start: (i32, i32), moved: bool },
     /// Ctrl + drag on a zoomed picture: the last mouse position on the screen.
     Picture { last: (i32, i32) },
+    /// On the volume slider, at this volume (percent).
+    Volume(u8),
 }
 
 /// What a mouse move with the button held does.
@@ -50,6 +53,7 @@ impl Press {
                 *moved |= dx * dx + dy * dy > 16;
                 moved.then_some(Drag::Window(start.0 + dx, start.1 + dy))
             }
+            Press::Volume(_) => None,
         }
     }
 
@@ -60,6 +64,8 @@ impl Press {
             Press::Window { moved: true, .. } => Some(Action::Moved(at.0, at.1)),
             Press::Window { .. } => Some(Action::Pin),
             Press::Picture { .. } => None,
+            // ffmpeg needs a moment for a new volume, so it gets the final one.
+            Press::Volume(volume) => Some(Action::Volume(*volume)),
         }
     }
 }
@@ -74,6 +80,8 @@ struct Win {
     hot: Hot,
     /// 0 = no camera audio, 1 = sound on, 2 = muted.
     sound: u8,
+    /// Volume in percent.
+    volume: u8,
     /// The picture is zoomed in.
     zoomed: bool,
     press: Option<Press>,
@@ -204,6 +212,9 @@ impl Desktop {
         if show_sound {
             pic.sound_button(sound, w.sound == 2, w.hot == Hot::Sound);
         }
+        if let Some(slider) = crate::view::volume_slider(sound, pic.h as i32, self.scale).filter(|_| w.hover && w.sound > 0) {
+            pic.volume_slider(slider, w.volume);
+        }
         let xid = w.xid;
         self.x.put_image(xid, &pic);
     }
@@ -236,6 +247,7 @@ impl Output for Desktop {
             hover: false,
             hot: Hot::None,
             sound: 0,
+            volume: 100,
             zoomed: false,
             press: None,
             last_click: None,
@@ -296,6 +308,12 @@ impl Output for Desktop {
         }
     }
 
+    fn set_volume(&mut self, id: u64, volume: u8) {
+        if let Some(w) = self.wins.get_mut(&id).filter(|w| !matches!(w.press, Some(Press::Volume(_)))) {
+            w.volume = volume;
+        }
+    }
+
     fn set_zoomed(&mut self, id: u64, zoomed: bool) {
         if let Some(w) = self.wins.get_mut(&id) {
             w.zoomed = zoomed;
@@ -334,10 +352,12 @@ impl Output for Desktop {
         let (scale, area) = (self.scale, self.area);
         let Some(w) = self.wins.get_mut(&id) else { return Vec::new() };
         let (close, sound) = button_rects(w.rect.w, scale);
+        let slider = crate::view::volume_slider(sound, w.rect.h as i32, scale);
         let hot_at = |w: &Win, x: i32, y: i32| match () {
             _ if !w.hover => Hot::None,
             _ if inside(close, x, y) => Hot::Close,
             _ if w.sound > 0 && inside(sound, x, y) => Hot::Sound,
+            _ if w.sound > 0 && slider.is_some_and(|s| inside(s, x, y)) => Hot::Volume,
             _ => Hot::None,
         };
         let mut actions = Vec::new();
@@ -356,7 +376,15 @@ impl Output for Desktop {
             }
             Event::Expose { .. } => repaint = true,
             Event::Motion { x, y, root_x, root_y, buttons, .. } => {
-                if let (Some(p), true) = (w.press.as_mut(), buttons & BUTTON1_MASK != 0) {
+                if let (Some(Press::Volume(volume)), Some(slider), true) = (w.press.as_mut(), slider, buttons & BUTTON1_MASK != 0) {
+                    // A repaint only for a new level: the mouse reports far more often.
+                    let level = crate::view::volume_at(slider, y);
+                    if *volume != level {
+                        *volume = level;
+                        w.volume = level;
+                        repaint = true;
+                    }
+                } else if let (Some(p), true) = (w.press.as_mut(), buttons & BUTTON1_MASK != 0) {
                     match p.drag((root_x, root_y), (w.rect.w, w.rect.h)) {
                         Some(Drag::Window(nx, ny)) => {
                             w.rect.x = nx;
@@ -377,6 +405,13 @@ impl Output for Desktop {
             Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y) {
                 Hot::Close => actions.push(Action::Close),
                 Hot::Sound => actions.push(Action::Sound),
+                Hot::Volume => {
+                    if let Some(slider) = slider {
+                        w.volume = crate::view::volume_at(slider, y);
+                        w.press = Some(Press::Volume(w.volume));
+                        repaint = true;
+                    }
+                }
                 // With Ctrl a zoomed picture moves instead of the window; that is no click,
                 // however quickly the drags follow each other.
                 Hot::None if w.zoomed && state & CONTROL_MASK != 0 => {
@@ -449,6 +484,13 @@ mod tests {
         // From the last place on.
         assert_eq!(press.drag((148, 77), (480, 270)), Some(Drag::Picture(0.0, 0.0)));
         assert_eq!(press.released((0, 0)), None);
+    }
+
+    #[test]
+    fn the_volume_slider_reports_when_let_go() {
+        let mut press = Press::Volume(30);
+        assert_eq!(press.drag((148, 77), (480, 270)), None);
+        assert_eq!(press.released((0, 0)), Some(Action::Volume(30)));
     }
 
     #[test]

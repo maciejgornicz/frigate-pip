@@ -121,6 +121,7 @@ Las ventanas de vista previa nunca toman el foco del teclado, por lo que no inte
 | **Ctrl + arrastrar** | Con la imagen acercada: mueve la imagen para ver otra parte de ella. Sin zoom se mueve la ventana, como siempre. |
 | **×** (esquina superior derecha) | Cierra la ventana al instante. El botón aparece al señalar la ventana con el mouse. |
 | **Altavoz** (a la izquierda de ×) | Silencia la ventana; otro clic vuelve a activar el sonido. El botón aparece al señalar una ventana que reproduce el audio de la cámara; mientras el sonido está desactivado, el altavoz tachado permanece visible. |
+| **Control de volumen** (bajo el altavoz) | Ajusta el volumen de esta ventana: arrástrelo o haga clic en él. Aparece junto con el altavoz; subir el volumen también reactiva el sonido silenciado. En Linux, el nuevo volumen se oye justo después de soltar. |
 | **Clic derecho** | Cierra la ventana. |
 | **Doble clic** | Abre esta cámara en la interfaz web de Frigate. |
 | **Pasar el puntero** | Mientras el puntero del mouse está sobre la ventana, esta no se cierra. Después de retirarlo, permanece abierta al menos 3 segundos más. |
@@ -212,7 +213,7 @@ FrigatePiP encuentra los flujos de go2rtc de cada cámara en la configuración d
 
 #### Audio de la cámara
 
-**Audio de la cámara** reproduce el sonido de la cámara (AAC o G.711 del flujo RTSP) en cada ventana abierta. Funciona por separado, por lo que nunca retrasa la ventana ni el video. El volumen se puede ajustar en el Mezclador de volumen de Windows (*FrigatePiP*). Requiere **RTSP de go2rtc**. Para silenciar una sola ventana, haga clic en el botón del altavoz de su esquina superior derecha (consulte [Acciones con el mouse](#acciones-con-el-mouse)).
+**Audio de la cámara** reproduce el sonido de la cámara (AAC o G.711 del flujo RTSP) en cada ventana abierta. Funciona por separado, por lo que nunca retrasa la ventana ni el video. El volumen se puede ajustar en el Mezclador de volumen de Windows (*FrigatePiP*). Requiere **RTSP de go2rtc**. Para silenciar una sola ventana, haga clic en el botón del altavoz de su esquina superior derecha (consulte [Acciones con el mouse](#acciones-con-el-mouse)). **Volumen** define con qué volumen empieza una ventana nueva (0–100 %, `camera_volume`), por ejemplo para atenuar el ruido del viento; cada ventana tiene además su propio control.
 
 #### Búfer previo
 
@@ -271,6 +272,7 @@ Toda la configuración se guarda en `%APPDATA%\FrigatePiP\config.ini` (un archiv
 | | `prebuffer` | `false` | Búfer previo. |
 | | `gpu_warm` | `false` | GPU preparada. |
 | | `camera_audio` | `false` | Audio de la cámara. |
+| | `camera_volume` | `100` | Volumen de una ventana nueva, 0–100 %. |
 
 ### Configuración por cámara
 
@@ -420,7 +422,7 @@ En un escritorio Linux, las ventanas de vista previa funcionan como en Windows: 
 - **Inicio:** menú de aplicaciones → **FrigatePiP** (instalado con apt) o `frigate-pip` en un terminal del escritorio. Se ejecuta en segundo plano sin terminal; se ejecuta una copia por usuario. Un segundo inicio (o `frigate-pip --settings`) abre la configuración de la copia en ejecución.
 - **Con la sesión del escritorio:** `frigate-pip --autostart on` (para desactivarlo: `frigate-pip --autostart off`). Para detenerlo: `frigate-pip --quit`.
 - **Icono en la bandeja:** con el mismo menú que en Windows (consulte [El icono de la bandeja](#4-el-icono-de-la-bandeja)); su color muestra el estado: azul — conectado, gris — sin conexión, ámbar — en pausa. Aparece en KDE Plasma, Xfce, Cinnamon, MATE y Budgie, y en GNOME con la extensión AppIndicator (incluida en Ubuntu).
-- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, arrastrar mueve la ventana, la rueda cambia su tamaño, Ctrl + rueda acerca la imagen alrededor del puntero, Ctrl + arrastrar mueve la imagen acercada, un clic la fija, un doble clic abre la cámara en Frigate y una ventana bajo el puntero no se cierra.
+- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, el control bajo él ajusta el volumen, arrastrar mueve la ventana, la rueda cambia su tamaño, Ctrl + rueda acerca la imagen alrededor del puntero, Ctrl + arrastrar mueve la imagen acercada, un clic la fija, un doble clic abre la cámara en Frigate y una ventana bajo el puntero no se cierra.
 - **Opciones de las ventanas:** `topmost` (con `false`, las ventanas son ventanas normales que otras pueden tapar), `sound` (el sonido de notificación del escritorio) y `skip_fullscreen` (nada mientras la ventana activa está a pantalla completa) funcionan como en Windows.
 - **Configuración:** un clic en el icono (o **Configuración…** en su menú) la abre en el navegador, con las mismas opciones, descripciones y prueba de conexión que en Windows; la página solo se abre en este equipo. En el primer inicio se abre sola. Se guarda en `~/.config/frigate-pip/config.ini` (descrito más abajo).
 

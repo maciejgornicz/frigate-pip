@@ -121,6 +121,7 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 | **Ctrl + drag** | On a zoomed picture: moves the picture, so that you can see another part of it. Without zoom the window moves, as usual. |
 | **×** (top-right corner) | Closes the window at once. The button appears when you point at the window. |
 | **Speaker** (left of ×) | Turns the window's sound off; click again to turn it back on. The button appears when you point at a window that plays camera audio; while the sound is off, the crossed-out speaker stays visible. |
+| **Volume slider** (under the speaker) | Sets the sound volume of this window: drag it or click on it. It appears together with the speaker; raising the volume also turns muted sound back on. On Linux you hear the new volume just after you let go. |
 | **Right click** | Closes the window. |
 | **Double click** | Opens this camera in the Frigate web interface. |
 | **Hover** | While the mouse pointer is over the window, it does not close. After you move away it stays at least 3 more seconds. |
@@ -212,7 +213,7 @@ FrigatePiP finds each camera's go2rtc streams in the Frigate configuration (`liv
 
 #### Camera audio
 
-**Camera audio** plays the sound of the camera (AAC or G.711 from the RTSP stream) in each open window. It runs separately, so it never delays the window or the video. The volume can be set in the Windows volume mixer (*FrigatePiP*). It requires **RTSP from go2rtc**. To mute a single window, click the speaker button in its top-right corner (see [Mouse actions](#mouse-actions)).
+**Camera audio** plays the sound of the camera (AAC or G.711 from the RTSP stream) in each open window. It runs separately, so it never delays the window or the video. The volume can be set in the Windows volume mixer (*FrigatePiP*). It requires **RTSP from go2rtc**. To mute a single window, click the speaker button in its top-right corner (see [Mouse actions](#mouse-actions)). **Volume** sets how loud a new window starts (0–100 %, `camera_volume`), for example to keep wind noise down; each window also has its own slider.
 
 #### Prebuffer
 
@@ -271,6 +272,7 @@ All settings are stored in `%APPDATA%\FrigatePiP\config.ini` (a plain text file)
 | | `prebuffer` | `false` | Prebuffer. |
 | | `gpu_warm` | `false` | Ready GPU. |
 | | `camera_audio` | `false` | Camera audio. |
+| | `camera_volume` | `100` | Volume of a new window, 0–100 %. |
 
 ### Per-camera settings
 
@@ -420,7 +422,7 @@ On a Linux desktop the preview windows work like on Windows: borderless windows 
 - **Start:** applications menu → **FrigatePiP** (installed with apt), or `frigate-pip` in a terminal on the desktop. It runs in the background without a terminal; one copy runs per user. A second start (or `frigate-pip --settings`) opens the settings of the running copy.
 - **With the desktop session:** `frigate-pip --autostart on` (off again: `frigate-pip --autostart off`). To stop it: `frigate-pip --quit`.
 - **Tray icon:** with the same menu as on Windows (see [The tray icon](#4-the-tray-icon)); its colour shows the state: blue — connected, grey — not connected, amber — paused. It appears on KDE Plasma, Xfce, Cinnamon, MATE and Budgie, and on GNOME with the AppIndicator extension (included in Ubuntu).
-- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, and a window under the mouse does not close.
+- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, the slider under it sets the volume, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, and a window under the mouse does not close.
 - **Window options:** `topmost` (with `false` the windows are ordinary windows that others can cover), `sound` (the desktop’s notification sound) and `skip_fullscreen` (nothing while the active window is full-screen) work like on Windows.
 - **Settings:** a click on the icon (or **Settings…** in its menu) opens them in the browser, with the same options, descriptions and connection test as on Windows; the page opens only on this computer. At the first start it opens by itself. They are saved in `~/.config/frigate-pip/config.ini` (described below).
 

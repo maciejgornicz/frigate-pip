@@ -204,6 +204,23 @@ impl Image {
         self.line((cx - arm, cy + arm), (cx + arm, cy - arm), width, (255, 255, 255));
     }
 
+    /// Volume slider: a dark bar with round ends, the track and the knob at `volume` percent.
+    pub fn volume_slider(&mut self, slider: (i32, i32, i32, i32), volume: u8) {
+        let (l, t, r, b) = slider;
+        let rad = (r - l) as f32 / 2.0;
+        for y in t..b {
+            let off = (rad - (y - t).min(b - 1 - y) as f32 - 0.5).max(0.0);
+            let inset = (rad - (rad * rad - off * off).sqrt()) as i32;
+            self.shade(l + inset, y, r - inset, y + 1, 0.45);
+        }
+        let (top, bottom) = crate::view::volume_track(slider);
+        let (x, level) = (l as f32 + rad, crate::view::volume_y(slider, volume));
+        let (width, white) = ((rad / 7.0).max(1.5), (255, 255, 255));
+        self.line((x, top as f32), (x, bottom as f32), width, (190, 190, 190));
+        self.line((x, level), (x, bottom as f32), width, white);
+        self.disc(x, level, rad * 0.45, white);
+    }
+
     /// Round sound button: a speaker with waves, or crossed out when muted.
     pub fn sound_button(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), muted: bool, hot: bool) {
         let (cx, cy, rad) = ((x0 + x1) as f32 / 2.0, y0 as f32 + (x1 - x0) as f32 / 2.0, (x1 - x0) as f32 / 2.0);
