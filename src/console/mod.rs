@@ -84,6 +84,12 @@ pub trait Output {
     }
     /// Camera audio of window `id`: 0 = none, 1 = on, 2 = muted (desktop windows show a button).
     fn set_sound(&mut self, _id: u64, _state: u8) {}
+    /// The picture of window `id` is zoomed in (desktop windows: Ctrl + drag then moves it).
+    fn set_zoomed(&mut self, _id: u64, _zoomed: bool) {}
+    /// The mouse is moving the picture of window `id` right now (Ctrl + drag).
+    fn panning(&self, _id: u64) -> bool {
+        false
+    }
     /// The windows have their own buttons (close, sound).
     fn buttons(&self) -> bool {
         false
@@ -119,6 +125,8 @@ pub enum Action {
     Wheel(i32),
     /// Ctrl + mouse wheel: zoom in (+1) or out (-1) around this point of the window (0–1).
     Zoom(i32, f32, f32),
+    /// Ctrl + drag on a zoomed picture: the mouse moved by this part of the window (0–1).
+    Pan(f32, f32),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -193,8 +201,9 @@ Where the windows appear (--output):
   window       On the desktop (X11, or Wayland with XWayland): borderless windows above
                the others in a corner of the screen; runs in the background. Mouse: x
                closes, the speaker mutes, drag moves, the wheel resizes, Ctrl + wheel
-               zooms the picture around the mouse, a click pins, a double click opens
-               the camera in Frigate, the right button closes.
+               zooms the picture around the mouse, Ctrl + drag moves the zoomed picture,
+               a click pins, a double click opens the camera in Frigate, the right
+               button closes.
                A tray icon has the menu known from Windows; the settings open in the
                browser.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
@@ -1107,6 +1116,11 @@ impl App {
                 // At once from the current pictures; sharp once the wheel stops.
                 w.resized = Some(Instant::now());
             }
+            Action::Pan(du, dv) => {
+                w.zoom = w.zoom.panned(du, dv);
+                // Like the wheel: sharp, with the new part live, once the drag ends.
+                w.resized = Some(Instant::now());
+            }
             Action::Wheel(step) => {
                 // Like on Windows: 12 % per notch, from 160 px to the width of the screen.
                 let scale = self.out.scale();
@@ -1375,6 +1389,8 @@ impl App {
                 String::new()
             };
             self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
+            // Each time: a window that did not fit for a while comes back as a new one.
+            self.out.set_zoomed(w.id, !w.zoom.is_full());
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).
@@ -1403,7 +1419,9 @@ impl App {
         let settled: Vec<usize> = (0..self.wins.len())
             .filter(|&i| {
                 let w = &self.wins[i];
-                w.resized.is_some_and(|t| t.elapsed() > Duration::from_millis(700)) && (w.dec_size != w.size || w.dec_zoom != w.zoom)
+                w.resized.is_some_and(|t| t.elapsed() > Duration::from_millis(700))
+                    && (w.dec_size != w.size || w.dec_zoom != w.zoom)
+                    && !self.out.panning(w.id)
             })
             .collect();
         for i in settled {

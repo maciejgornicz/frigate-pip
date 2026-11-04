@@ -131,6 +131,13 @@ impl Zoom {
         Zoom { x: (px - u * size).clamp(0.0, 1.0 - size), y: (py - v * size).clamp(0.0, 1.0 - size), size }
     }
 
+    /// Ctrl + drag by (`du`, `dv`), fractions of the shown part: the picture follows the
+    /// mouse, as far as its edges.
+    pub fn panned(self, du: f32, dv: f32) -> Zoom {
+        let moved = |at: f32, by: f32| (at - by * self.size).clamp(0.0, 1.0 - self.size);
+        Zoom { x: moved(self.x, du), y: moved(self.y, dv), size: self.size }
+    }
+
     /// For the caption: "2.4×" (nothing at 1×).
     pub fn label(self) -> Option<String> {
         (!self.is_full()).then(|| format!("{:.1}×", 1.0 / self.size))
@@ -161,6 +168,17 @@ mod tests {
         assert_eq!((z.label().as_deref(), Zoom::FULL.label()), (Some("1.6×"), None));
         assert_eq!(state_caption("Gate", false, Zoom { x: 0.0, y: 0.0, size: 0.5 }), "Gate · 2.0×");
         assert_eq!(state_caption("Gate", false, Zoom::FULL), "Gate");
+    }
+
+    #[test]
+    fn panning_follows_the_mouse_up_to_the_edges() {
+        let z = Zoom { x: 0.25, y: 0.25, size: 0.5 };
+        // Dragged a quarter of the window to the right: the part left of it comes into view.
+        assert_eq!(z.panned(0.25, 0.0), Zoom { x: 0.125, y: 0.25, size: 0.5 });
+        assert_eq!(z.panned(0.0, -0.5), Zoom { x: 0.25, y: 0.5, size: 0.5 });
+        // Never past the picture.
+        assert_eq!(z.panned(9.0, -9.0), Zoom { x: 0.0, y: 0.5, size: 0.5 });
+        assert_eq!(Zoom::FULL.panned(0.5, -0.5), Zoom::FULL);
     }
 
     #[test]

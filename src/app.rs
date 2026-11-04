@@ -94,6 +94,8 @@ struct Popup {
     deadline: Instant,
     hard_deadline: Instant,
     hovered: bool,
+    /// Ctrl + drag on a zoomed picture: the last mouse position (screen pixels).
+    panning: Option<POINT>,
     pinned: bool,
     closing: bool,
     user_moved: bool,
@@ -489,8 +491,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
 
 unsafe fn show_menu(hwnd: HWND) {
     let Some(menu) = with_app(|a| a.build_menu()) else { return };
-    let mut pt = POINT::default();
-    let _ = GetCursorPos(&mut pt);
+    let pt = cursor_pos();
     let _ = SetForegroundWindow(hwnd);
     let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, None);
     let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
@@ -506,6 +507,14 @@ fn window_rect(hwnd: HWND) -> RECT {
         let _ = GetWindowRect(hwnd, &mut r);
     }
     r
+}
+
+fn cursor_pos() -> POINT {
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    pt
 }
 
 /// Hit-test code of the sound button: one without default behaviour (HTHELP, for example,
@@ -544,6 +553,26 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
         // The release on a button is ours too (the default handling has nothing to do there).
         WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND) => LRESULT(0),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        // With Ctrl a zoomed picture moves instead of the window; that is no click, however
+        // quickly the drags follow each other.
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK
+            if wp.0 as u32 == HTCAPTION && GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 && with_app(|a| a.start_pan(hwnd)) == Some(true) =>
+        {
+            SetCapture(hwnd);
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            with_app(|a| a.pan(hwnd));
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            let _ = ReleaseCapture();
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            with_app(|a| a.end_pan(hwnd));
+            LRESULT(0)
+        }
         WM_NCLBUTTONDOWN => {
             // Dragging moves the window; a plain click pins / unpins it.
             let before = window_rect(hwnd);
@@ -558,8 +587,9 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             }
             LRESULT(0)
         }
-        WM_NCRBUTTONDOWN | WM_NCMBUTTONDOWN | WM_CONTEXTMENU => LRESULT(0),
-        WM_NCRBUTTONUP | WM_NCMBUTTONUP => {
+        // Without the NC during Ctrl + drag: the window has the mouse all to itself then.
+        WM_NCRBUTTONDOWN | WM_NCMBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_CONTEXTMENU => LRESULT(0),
+        WM_NCRBUTTONUP | WM_NCMBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP => {
             with_app(|a| a.close_hwnd(hwnd));
             LRESULT(0)
         }
@@ -945,6 +975,7 @@ impl App {
             deadline: now + dur,
             hard_deadline: now + max,
             hovered: false,
+            panning: None,
             pinned: false,
             closing: false,
             user_moved: place.as_ref().is_some_and(|p| p.moved_to.is_some()),
@@ -1286,7 +1317,7 @@ impl App {
                     return;
                 };
                 let p = &self.popups[i];
-                if p.hovered || p.pinned || p.preview {
+                if p.hovered || p.panning.is_some() || p.pinned || p.preview {
                     unsafe {
                         SetTimer(hwnd, TIMER_DEADLINE, 1000, None);
                     }
@@ -1377,12 +1408,49 @@ impl App {
             let _ = ScreenToClient(hwnd, &mut pt);
             let _ = GetClientRect(hwnd, &mut rc);
         }
-        // Where the picture is in the window (it may have bars when the aspect differs).
-        let (l, t, r, b) = crate::render::fit(((p.aspect * 1000.0).round() as u32, 1000), (rc.right.max(1) as u32, rc.bottom.max(1) as u32));
+        let (l, t, r, b) = Self::picture_rect(p, rc);
         let (u, v) = ((pt.x as f32 - l) / (r - l).max(1.0), (pt.y as f32 - t) / (b - t).max(1.0));
         let zoom = p.shared.zoom().at(delta as f32 / WHEEL_DELTA as f32, u, v);
         p.shared.set_zoom(zoom);
         p.shared.set_overlay(Self::popup_text(p));
+    }
+
+    /// Where the picture is in the window (it may have bars when the aspect differs).
+    fn picture_rect(p: &Popup, client: RECT) -> (f32, f32, f32, f32) {
+        crate::render::fit(((p.aspect * 1000.0).round() as u32, 1000), (client.right.max(1) as u32, client.bottom.max(1) as u32))
+    }
+
+    /// Ctrl + press: the drag moves a zoomed picture (`false` = no zoom, it moves the window).
+    fn start_pan(&mut self, hwnd: HWND) -> bool {
+        let Some(p) = self.find(hwnd).filter(|p| !p.shared.zoom().is_full()) else { return false };
+        p.panning = Some(cursor_pos());
+        true
+    }
+
+    /// The mouse moved during Ctrl + drag: the picture follows it.
+    fn pan(&mut self, hwnd: HWND) {
+        let Some(p) = self.find(hwnd) else { return };
+        let Some(last) = p.panning else { return };
+        let at = cursor_pos();
+        let mut rc = RECT::default();
+        unsafe {
+            let _ = GetClientRect(hwnd, &mut rc);
+        }
+        p.panning = Some(at);
+        let (l, t, r, b) = Self::picture_rect(p, rc);
+        let zoom = p.shared.zoom().panned((at.x - last.x) as f32 / (r - l).max(1.0), (at.y - last.y) as f32 / (b - t).max(1.0));
+        p.shared.set_zoom(zoom);
+    }
+
+    /// Ctrl + drag ended. The window had the mouse all to itself, so hovering starts over.
+    fn end_pan(&mut self, hwnd: HWND) {
+        let Some(p) = self.find(hwnd) else { return };
+        if p.panning.take().is_none() {
+            return;
+        }
+        p.hovered = false;
+        let inside = unsafe { PtInRect(&window_rect(hwnd), cursor_pos()).as_bool() };
+        self.hover(hwnd, inside, if inside { HTCAPTION } else { HTNOWHERE });
     }
 
     fn set_aspect(&mut self, hwnd: HWND, w: u32, h: u32) {

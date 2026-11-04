@@ -1,12 +1,14 @@
 //! Desktop output: each preview window is a borderless always-on-top X11 window (an X11
 //! desktop, or Wayland through XWayland) in the chosen corner of the chosen monitor.
-//! The mouse works like on Windows: × closes, the speaker mutes, dragging moves, a click
-//! pins, a double click opens the camera in Frigate, the right button closes.
+//! The mouse works like on Windows: × closes, the speaker mutes, dragging moves (with Ctrl
+//! a zoomed picture, otherwise the window), a click pins, a double click opens the camera
+//! in Frigate, the right button closes.
 
 use super::canvas::{Font, Image};
 use super::x11::{Event, Monitor, BUTTON1_MASK, CONTROL_MASK, X11};
 use super::{Action, Output, Rect};
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// The button under the mouse.
 #[derive(Clone, Copy, PartialEq)]
@@ -16,11 +18,50 @@ enum Hot {
     Sound,
 }
 
-/// Left button held on a window: where it started (screen, window) and whether it moved.
-struct Press {
-    root: (i32, i32),
-    start: (i32, i32),
-    moved: bool,
+/// Left button held on a window.
+enum Press {
+    /// It moves the window: where it started (screen, window) and whether it moved.
+    Window { root: (i32, i32), start: (i32, i32), moved: bool },
+    /// Ctrl + drag on a zoomed picture: the last mouse position on the screen.
+    Picture { last: (i32, i32) },
+}
+
+/// What a mouse move with the button held does.
+#[derive(Debug, PartialEq)]
+enum Drag {
+    /// The window goes to this place on the screen.
+    Window(i32, i32),
+    /// The picture follows the mouse, see `Action::Pan`.
+    Picture(f32, f32),
+}
+
+impl Press {
+    /// The mouse moved to `to` on the screen, over a window of `size`.
+    fn drag(&mut self, to: (i32, i32), size: (u32, u32)) -> Option<Drag> {
+        match self {
+            Press::Picture { last } => {
+                let (dx, dy) = (to.0 - last.0, to.1 - last.1);
+                *last = to;
+                Some(Drag::Picture(dx as f32 / size.0.max(1) as f32, dy as f32 / size.1.max(1) as f32))
+            }
+            // After a few pixels, so that a click stays a click.
+            Press::Window { root, start, moved } => {
+                let (dx, dy) = (to.0 - root.0, to.1 - root.1);
+                *moved |= dx * dx + dy * dy > 16;
+                moved.then_some(Drag::Window(start.0 + dx, start.1 + dy))
+            }
+        }
+    }
+
+    /// The button went up, with the window at `at` in the usable area: a click or the end of
+    /// a move. Moving the picture is neither a click nor a double click.
+    fn released(&self, at: (i32, i32)) -> Option<Action> {
+        match self {
+            Press::Window { moved: true, .. } => Some(Action::Moved(at.0, at.1)),
+            Press::Window { .. } => Some(Action::Pin),
+            Press::Picture { .. } => None,
+        }
+    }
 }
 
 struct Win {
@@ -33,6 +74,8 @@ struct Win {
     hot: Hot,
     /// 0 = no camera audio, 1 = sound on, 2 = muted.
     sound: u8,
+    /// The picture is zoomed in.
+    zoomed: bool,
     press: Option<Press>,
     /// Time and place of the last left click (double clicks).
     last_click: Option<(u32, i32, i32)>,
@@ -193,12 +236,13 @@ impl Output for Desktop {
             hover: false,
             hot: Hot::None,
             sound: 0,
+            zoomed: false,
             press: None,
             last_click: None,
             on_top: *topmost,
         });
         // Not while the user drags it.
-        if w.rect != r && w.press.as_ref().is_none_or(|p| !p.moved) {
+        if w.rect != r && !matches!(w.press, Some(Press::Window { moved: true, .. })) {
             x.configure(w.xid, r.x, r.y, r.w, r.h, w.on_top);
             w.rect = r;
         }
@@ -252,6 +296,21 @@ impl Output for Desktop {
         }
     }
 
+    fn set_zoomed(&mut self, id: u64, zoomed: bool) {
+        if let Some(w) = self.wins.get_mut(&id) {
+            w.zoomed = zoomed;
+        }
+    }
+
+    fn panning(&self, id: u64) -> bool {
+        self.wins.get(&id).is_some_and(|w| matches!(w.press, Some(Press::Picture { .. })))
+    }
+
+    /// The mouse reports far more often than pictures are needed (Ctrl + drag).
+    fn min_interval(&self) -> Duration {
+        Duration::from_millis(16)
+    }
+
     fn pointer(&mut self, e: &Event) -> Vec<(u64, Action)> {
         let window = match *e {
             Event::Press { window, .. } | Event::Release { window, .. } | Event::Motion { window, .. } => window,
@@ -298,14 +357,14 @@ impl Output for Desktop {
             Event::Expose { .. } => repaint = true,
             Event::Motion { x, y, root_x, root_y, buttons, .. } => {
                 if let (Some(p), true) = (w.press.as_mut(), buttons & BUTTON1_MASK != 0) {
-                    // Dragging (after a few pixels, so that a click stays a click).
-                    let (dx, dy) = (root_x - p.root.0, root_y - p.root.1);
-                    if p.moved || dx * dx + dy * dy > 16 {
-                        p.moved = true;
-                        let (nx, ny) = (p.start.0 + dx, p.start.1 + dy);
-                        w.rect.x = nx;
-                        w.rect.y = ny;
-                        self.x.move_to(w.xid, nx, ny);
+                    match p.drag((root_x, root_y), (w.rect.w, w.rect.h)) {
+                        Some(Drag::Window(nx, ny)) => {
+                            w.rect.x = nx;
+                            w.rect.y = ny;
+                            self.x.move_to(w.xid, nx, ny);
+                        }
+                        Some(Drag::Picture(du, dv)) => actions.push(Action::Pan(du, dv)),
+                        None => {}
                     }
                 } else {
                     let h = hot_at(w, x, y);
@@ -315,9 +374,14 @@ impl Output for Desktop {
                     }
                 }
             }
-            Event::Press { button: 1, x, y, root_x, root_y, time, .. } => match hot_at(w, x, y) {
+            Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y) {
                 Hot::Close => actions.push(Action::Close),
                 Hot::Sound => actions.push(Action::Sound),
+                // With Ctrl a zoomed picture moves instead of the window; that is no click,
+                // however quickly the drags follow each other.
+                Hot::None if w.zoomed && state & CONTROL_MASK != 0 => {
+                    w.press = Some(Press::Picture { last: (root_x, root_y) });
+                }
                 Hot::None => {
                     let double =
                         w.last_click.is_some_and(|(t, cx, cy)| time.wrapping_sub(t) < 400 && (root_x - cx).abs() < 6 && (root_y - cy).abs() < 6);
@@ -332,16 +396,12 @@ impl Output for Desktop {
                                 (w.rect.x, w.rect.y) = (px, py);
                             }
                         }
-                        w.press = Some(Press { root: (root_x, root_y), start: (w.rect.x, w.rect.y), moved: false });
+                        w.press = Some(Press::Window { root: (root_x, root_y), start: (w.rect.x, w.rect.y), moved: false });
                     }
                 }
             },
             Event::Release { button: 1, x, y, .. } => {
-                match w.press.take() {
-                    Some(p) if p.moved => actions.push(Action::Moved(w.rect.x - area.x, w.rect.y - area.y)),
-                    Some(_) => actions.push(Action::Pin),
-                    None => {}
-                }
+                actions.extend(w.press.take().and_then(|p| p.released((w.rect.x - area.x, w.rect.y - area.y))));
                 // Released outside the window: the leave event came during the press.
                 if !inside((0, 0, w.rect.w as i32, w.rect.h as i32), x, y) && w.hover {
                     w.hover = false;
@@ -380,6 +440,27 @@ impl Drop for Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moving_the_picture_is_no_click() {
+        let mut press = Press::Picture { last: (100, 50) };
+        // A tenth of the window at once: it needs no few pixels first.
+        assert_eq!(press.drag((148, 77), (480, 270)), Some(Drag::Picture(0.1, 0.1)));
+        // From the last place on.
+        assert_eq!(press.drag((148, 77), (480, 270)), Some(Drag::Picture(0.0, 0.0)));
+        assert_eq!(press.released((0, 0)), None);
+    }
+
+    #[test]
+    fn moving_the_window_starts_after_a_few_pixels() {
+        let mut press = Press::Window { root: (100, 100), start: (500, 300), moved: false };
+        assert_eq!(press.drag((102, 102), (480, 270)), None);
+        assert_eq!(press.released((0, 0)), Some(Action::Pin));
+        assert_eq!(press.drag((110, 100), (480, 270)), Some(Drag::Window(510, 300)));
+        // Back near the start it is still a move.
+        assert_eq!(press.drag((101, 100), (480, 270)), Some(Drag::Window(501, 300)));
+        assert_eq!(press.released((10, 20)), Some(Action::Moved(10, 20)));
+    }
 
     #[test]
     fn buttons_like_on_windows() {
