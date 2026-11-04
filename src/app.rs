@@ -491,8 +491,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
 
 unsafe fn show_menu(hwnd: HWND) {
     let Some(menu) = with_app(|a| a.build_menu()) else { return };
-    let mut pt = POINT::default();
-    let _ = GetCursorPos(&mut pt);
+    let pt = cursor_pos();
     let _ = SetForegroundWindow(hwnd);
     let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, None);
     let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
@@ -508,6 +507,14 @@ fn window_rect(hwnd: HWND) -> RECT {
         let _ = GetWindowRect(hwnd, &mut r);
     }
     r
+}
+
+fn cursor_pos() -> POINT {
+    let mut pt = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    pt
 }
 
 /// Hit-test code of the sound button: one without default behaviour (HTHELP, for example,
@@ -549,9 +556,8 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
         // With Ctrl a zoomed picture moves instead of the window; that is no click, however
         // quickly the drags follow each other.
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK
-            if wp.0 as u32 == HTCAPTION && GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 && with_app(|a| a.zoomed(hwnd)) == Some(true) =>
+            if wp.0 as u32 == HTCAPTION && GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 && with_app(|a| a.start_pan(hwnd)) == Some(true) =>
         {
-            with_app(|a| a.start_pan(hwnd));
             SetCapture(hwnd);
             LRESULT(0)
         }
@@ -581,8 +587,9 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             }
             LRESULT(0)
         }
-        WM_NCRBUTTONDOWN | WM_NCMBUTTONDOWN | WM_CONTEXTMENU => LRESULT(0),
-        WM_NCRBUTTONUP | WM_NCMBUTTONUP => {
+        // Without the NC during Ctrl + drag: the window has the mouse all to itself then.
+        WM_NCRBUTTONDOWN | WM_NCMBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_CONTEXTMENU => LRESULT(0),
+        WM_NCRBUTTONUP | WM_NCMBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP => {
             with_app(|a| a.close_hwnd(hwnd));
             LRESULT(0)
         }
@@ -1413,27 +1420,20 @@ impl App {
         crate::render::fit(((p.aspect * 1000.0).round() as u32, 1000), (client.right.max(1) as u32, client.bottom.max(1) as u32))
     }
 
-    fn zoomed(&mut self, hwnd: HWND) -> bool {
-        self.find(hwnd).is_some_and(|p| !p.shared.zoom().is_full())
-    }
-
-    fn start_pan(&mut self, hwnd: HWND) {
-        let Some(p) = self.find(hwnd) else { return };
-        let mut at = POINT::default();
-        unsafe {
-            let _ = GetCursorPos(&mut at);
-        }
-        p.panning = Some(at);
+    /// Ctrl + press: the drag moves a zoomed picture (`false` = no zoom, it moves the window).
+    fn start_pan(&mut self, hwnd: HWND) -> bool {
+        let Some(p) = self.find(hwnd).filter(|p| !p.shared.zoom().is_full()) else { return false };
+        p.panning = Some(cursor_pos());
+        true
     }
 
     /// The mouse moved during Ctrl + drag: the picture follows it.
     fn pan(&mut self, hwnd: HWND) {
         let Some(p) = self.find(hwnd) else { return };
         let Some(last) = p.panning else { return };
-        let mut at = POINT::default();
+        let at = cursor_pos();
         let mut rc = RECT::default();
         unsafe {
-            let _ = GetCursorPos(&mut at);
             let _ = GetClientRect(hwnd, &mut rc);
         }
         p.panning = Some(at);
@@ -1449,11 +1449,7 @@ impl App {
             return;
         }
         p.hovered = false;
-        let mut at = POINT::default();
-        let inside = unsafe {
-            let _ = GetCursorPos(&mut at);
-            PtInRect(&window_rect(hwnd), at).as_bool()
-        };
+        let inside = unsafe { PtInRect(&window_rect(hwnd), cursor_pos()).as_bool() };
         self.hover(hwnd, inside, if inside { HTCAPTION } else { HTNOWHERE });
     }
 

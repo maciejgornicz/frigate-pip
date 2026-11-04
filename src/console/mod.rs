@@ -86,6 +86,10 @@ pub trait Output {
     fn set_sound(&mut self, _id: u64, _state: u8) {}
     /// The picture of window `id` is zoomed in (desktop windows: Ctrl + drag then moves it).
     fn set_zoomed(&mut self, _id: u64, _zoomed: bool) {}
+    /// The mouse is moving the picture of window `id` right now (Ctrl + drag).
+    fn panning(&self, _id: u64) -> bool {
+        false
+    }
     /// The windows have their own buttons (close, sound).
     fn buttons(&self) -> bool {
         false
@@ -1111,11 +1115,10 @@ impl App {
                 w.zoom = w.zoom.at(notches as f32, u, v);
                 // At once from the current pictures; sharp once the wheel stops.
                 w.resized = Some(Instant::now());
-                self.out.set_zoomed(id, !w.zoom.is_full());
             }
             Action::Pan(du, dv) => {
                 w.zoom = w.zoom.panned(du, dv);
-                // Like the wheel: sharp, with the new part live, once the mouse stops.
+                // Like the wheel: sharp, with the new part live, once the drag ends.
                 w.resized = Some(Instant::now());
             }
             Action::Wheel(step) => {
@@ -1386,6 +1389,8 @@ impl App {
                 String::new()
             };
             self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
+            // Each time: a window that did not fit for a while comes back as a new one.
+            self.out.set_zoomed(w.id, !w.zoom.is_full());
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).
@@ -1414,7 +1419,9 @@ impl App {
         let settled: Vec<usize> = (0..self.wins.len())
             .filter(|&i| {
                 let w = &self.wins[i];
-                w.resized.is_some_and(|t| t.elapsed() > Duration::from_millis(700)) && (w.dec_size != w.size || w.dec_zoom != w.zoom)
+                w.resized.is_some_and(|t| t.elapsed() > Duration::from_millis(700))
+                    && (w.dec_size != w.size || w.dec_zoom != w.zoom)
+                    && !self.out.panning(w.id)
             })
             .collect();
         for i in settled {
