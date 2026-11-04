@@ -62,6 +62,8 @@ pub const ID_AUTOW: i32 = 402;
 pub const ID_AUDIO: i32 = 403;
 pub const ID_PREBUF: i32 = 404;
 pub const ID_GPU: i32 = 405;
+pub const ID_VOLUME: i32 = 406;
+pub const ID_VOLUME_LBL: i32 = 407;
 pub const ID_PREV_CAM: i32 = 500;
 pub const ID_PREVIEW: i32 = 501;
 pub const ID_APPLY: i32 = 502;
@@ -682,9 +684,15 @@ impl Settings {
             (ID_GPU, t.gpu_warm, c.gpu_warm, t.tip_gpu_warm),
         ];
         for (i, (id, text, on, tip)) in checks.into_iter().enumerate() {
-            let e = self.check(Some(p), id, text, on, lx, 154 + 26 * i as i32, full);
+            // The volume slider of the camera audio comes right under its check box.
+            let e = self.check(Some(p), id, text, on, lx, 154 + 26 * i as i32 + if i > 0 { 38 } else { 0 }, full);
             self.tip(&[e], tip);
         }
+        let l = self.label(p, t.camera_volume, lx, 184, lw);
+        let e = self.track(p, ID_VOLUME, 0, 100, c.camera_volume as i32, cx, 182, cw - 60);
+        self.label(p, "", RIGHT - 55, 184, 55);
+        self.set_id_of_last(ID_VOLUME_LBL);
+        self.tip(&[l, e], t.tip_camera_volume);
 
         // ---- bottom of the window: preview on the left, buttons on the right
         let buttons = [(IDOK.0, t.ok, true), (IDCANCEL.0, t.cancel, false), (ID_APPLY, t.apply, false), (ID_HELP, t.help, false)];
@@ -863,6 +871,7 @@ impl Settings {
         c.stream = StreamPref::ALL[self.sel(ID_STREAM).min(2)];
         c.auto_main_width = num(ID_AUTOW, 800).clamp(160, 7680) as i32;
         c.camera_audio = self.checked(ID_AUDIO);
+        c.camera_volume = self.pos(ID_VOLUME) as u8;
         c.prebuffer = self.checked(ID_PREBUF);
         c.gpu_warm = self.checked(ID_GPU);
         (c, self.checked(ID_AUTOSTART))
@@ -893,6 +902,7 @@ impl Settings {
         unsafe {
             let _ = SetWindowTextW(self.item(ID_WIDTH_LBL), &wide(&format!("{} px", self.pos(ID_WIDTH))));
             let _ = SetWindowTextW(self.item(ID_MINSCORE_LBL), &wide(&format!("{}%", self.pos(ID_MINSCORE))));
+            let _ = SetWindowTextW(self.item(ID_VOLUME_LBL), &wide(&format!("{}%", self.pos(ID_VOLUME))));
         }
     }
 

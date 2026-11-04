@@ -86,6 +86,8 @@ pub trait Output {
     fn set_sound(&mut self, _id: u64, _state: u8) {}
     /// The picture of window `id` is zoomed in (desktop windows: Ctrl + drag then moves it).
     fn set_zoomed(&mut self, _id: u64, _zoomed: bool) {}
+    /// Volume of window `id` in percent (desktop windows show a slider).
+    fn set_volume(&mut self, _id: u64, _volume: u8) {}
     /// The mouse is moving the picture of window `id` right now (Ctrl + drag).
     fn panning(&self, _id: u64) -> bool {
         false
@@ -127,6 +129,8 @@ pub enum Action {
     Zoom(i32, f32, f32),
     /// Ctrl + drag on a zoomed picture: the mouse moved by this part of the window (0–1).
     Pan(f32, f32),
+    /// The volume slider was let go at this volume (percent).
+    Volume(u8),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -200,8 +204,9 @@ Usage: frigate-pip [options]
 Where the windows appear (--output):
   window       On the desktop (X11, or Wayland with XWayland): borderless windows above
                the others in a corner of the screen; runs in the background. Mouse: x
-               closes, the speaker mutes, drag moves, the wheel resizes, Ctrl + wheel
-               zooms the picture around the mouse, Ctrl + drag moves the zoomed picture,
+               closes, the speaker mutes, the slider under it sets the volume, drag
+               moves, the wheel resizes, Ctrl + wheel zooms the picture around the
+               mouse, Ctrl + drag moves the zoomed picture,
                a click pins, a double click opens the camera in Frigate, the right
                button closes.
                A tray icon has the menu known from Windows; the settings open in the
@@ -668,6 +673,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         size,
         zoom: Zoom::FULL,
         audio: cfg.camera_audio,
+        volume: cfg.camera_volume,
         t0: Instant::now(),
     };
     let wake = tx.clone();
@@ -1121,6 +1127,13 @@ impl App {
                 // Like the wheel: sharp, with the new part live, once the drag ends.
                 w.resized = Some(Instant::now());
             }
+            Action::Volume(volume) => {
+                w.shared.volume.store(volume, Ordering::Relaxed);
+                if volume > 0 {
+                    w.shared.muted.store(false, Ordering::Relaxed);
+                }
+                crate::log!("{}: volume {volume} %", w.camera);
+            }
             Action::Wheel(step) => {
                 // Like on Windows: 12 % per notch, from 160 px to the width of the screen.
                 let scale = self.out.scale();
@@ -1160,6 +1173,7 @@ impl App {
             size: w.size,
             zoom: w.zoom,
             audio: self.cfg.camera_audio,
+            volume: w.shared.volume.load(Ordering::Relaxed),
             t0: Instant::now(),
         };
         let tx = self.tx.clone();
@@ -1255,6 +1269,7 @@ impl App {
                     size,
                     zoom: Zoom::FULL,
                     audio: self.cfg.camera_audio,
+                    volume: self.cfg.camera_volume,
                     t0,
                 };
                 let tx = self.tx.clone();
@@ -1355,6 +1370,7 @@ impl App {
             if ready {
                 if let Some((next, _)) = w.next.take() {
                     next.muted.store(w.shared.muted.load(Ordering::Relaxed), Ordering::Relaxed);
+                    next.volume.store(w.shared.volume.load(Ordering::Relaxed), Ordering::Relaxed);
                     next.dirty.store(true, Ordering::Relaxed);
                     std::mem::replace(&mut w.shared, next).cancel.cancel();
                 }
@@ -1391,6 +1407,8 @@ impl App {
             self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
             // Each time: a window that did not fit for a while comes back as a new one.
             self.out.set_zoomed(w.id, !w.zoom.is_full());
+            self.out.set_volume(w.id, w.shared.volume.load(Ordering::Relaxed));
+            self.out.set_sound(w.id, w.sound);
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).

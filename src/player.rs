@@ -49,14 +49,14 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(text: String, overlay_on: bool) -> Arc<Shared> {
+    pub fn new(text: String, overlay_on: bool, volume: u8) -> Arc<Shared> {
         Arc::new(Shared {
             cancel: Cancel::new(),
             overlay: Mutex::new(text),
             overlay_on: AtomicBool::new(overlay_on),
             close_button: AtomicU8::new(0),
             dirty: AtomicBool::new(false),
-            sound: Arc::default(),
+            sound: Arc::new(Sound { volume: volume.into(), ..Default::default() }),
             zoom: Mutex::new(Zoom::FULL),
         })
     }
@@ -324,6 +324,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             (true, false) => 1,
             (true, true) => 2,
         },
+        volume: shared.sound.volume.load(Ordering::Relaxed),
         zoom: shared.zoom(),
     };
     let _ = r.redraw(&overlay_text(false));

@@ -121,6 +121,7 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 | **Ctrl + przeciągnięcie** | Na przybliżonym obrazie: przesuwa obraz, żeby zobaczyć inny jego fragment. Bez zoomu przesuwa się okno, jak zwykle. |
 | **×** (prawy górny róg) | Od razu zamyka okno. Przycisk pojawia się po najechaniu myszą na okno. |
 | **Głośnik** (na lewo od ×) | Wyłącza dźwięk okna; ponowne kliknięcie włącza go z powrotem. Przycisk pojawia się po wskazaniu okna, które odtwarza dźwięk z kamery; dopóki dźwięk jest wyłączony, przekreślony głośnik pozostaje widoczny. |
+| **Suwak głośności** (pod głośnikiem) | Ustawia głośność dźwięku tego okna: przeciągnij go lub kliknij. Pojawia się razem z głośnikiem; podgłośnienie włącza też wyciszony dźwięk. W Linuksie nową głośność słychać chwilę po puszczeniu przycisku. |
 | **Kliknięcie prawym przyciskiem** | Zamyka okno. |
 | **Dwukrotne kliknięcie** | Otwiera tę kamerę w interfejsie webowym Frigate. |
 | **Najechanie kursorem** | Dopóki wskaźnik myszy jest nad oknem, okno się nie zamyka. Gdy odsuniesz kursor, okno pozostaje jeszcze co najmniej 3 sekundy. |
@@ -212,7 +213,7 @@ FrigatePiP znajduje strumienie go2rtc każdej kamery w konfiguracji Frigate (`li
 
 #### Dźwięk z kamery
 
-**Dźwięk z kamery** odtwarza dźwięk kamery (AAC lub G.711 ze strumienia RTSP) w każdym otwartym oknie. Działa osobno, więc nigdy nie opóźnia okna ani wideo. Głośność możesz ustawić w Mikserze głośności Windows (*FrigatePiP*). Wymaga opcji **RTSP z go2rtc**. Aby wyciszyć jedno okno, kliknij przycisk głośnika w jego prawym górnym rogu (zob. [Obsługa myszą](#obsługa-myszą)).
+**Dźwięk z kamery** odtwarza dźwięk kamery (AAC lub G.711 ze strumienia RTSP) w każdym otwartym oknie. Działa osobno, więc nigdy nie opóźnia okna ani wideo. Głośność możesz ustawić w Mikserze głośności Windows (*FrigatePiP*). Wymaga opcji **RTSP z go2rtc**. Aby wyciszyć jedno okno, kliknij przycisk głośnika w jego prawym górnym rogu (zob. [Obsługa myszą](#obsługa-myszą)). **Głośność** określa, jak głośno startuje nowe okno (0–100 %, `camera_volume`), np. żeby przyciszyć szum wiatru; każde okno ma też własny suwak.
 
 #### Prebufor
 
@@ -271,6 +272,7 @@ Wszystkie ustawienia są przechowywane w `%APPDATA%\FrigatePiP\config.ini` (zwyk
 | | `prebuffer` | `false` | Prebufor. |
 | | `gpu_warm` | `false` | Gotowe GPU. |
 | | `camera_audio` | `false` | Dźwięk z kamery. |
+| | `camera_volume` | `100` | Głośność nowego okna, 0–100 %. |
 
 ### Ustawienia poszczególnych kamer
 
@@ -420,7 +422,7 @@ Na pulpicie Linuksa okna podglądu działają jak w Windows: okna bez ramek nad 
 - **Uruchomienie:** menu aplikacji → **FrigatePiP** (po instalacji przez apt) albo `frigate-pip` w terminalu na pulpicie. Program działa w tle, bez terminala; na użytkownika działa jedna kopia. Ponowne uruchomienie (albo `frigate-pip --settings`) otwiera ustawienia działającej kopii.
 - **Razem z sesją pulpitu:** `frigate-pip --autostart on` (wyłączenie: `frigate-pip --autostart off`). Zatrzymanie: `frigate-pip --quit`.
 - **Ikona w zasobniku:** z tym samym menu co w Windows (zob. [Ikona w zasobniku](#4-ikona-w-zasobniku)); jej kolor pokazuje stan: niebieski — połączono, szary — brak połączenia, pomarańczowy — wstrzymano. Pojawia się w KDE Plasma, Xfce, Cinnamon, MATE i Budgie, a w GNOME z rozszerzeniem AppIndicator (jest w Ubuntu).
-- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
+- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, suwak pod nim ustawia głośność, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
 - **Opcje okien:** `topmost` (przy `false` okna są zwykłymi oknami, które inne mogą zasłonić), `sound` (dźwięk powiadomienia pulpitu) i `skip_fullscreen` (nic, gdy aktywne okno jest na pełnym ekranie) działają jak w Windows.
 - **Ustawienia:** kliknięcie ikony (albo **Ustawienia…** w jej menu) otwiera je w przeglądarce — te same opcje, opisy i test połączenia co w Windows; strona otwiera się tylko na tym komputerze. Przy pierwszym uruchomieniu otwiera się sama. Zapisują się w `~/.config/frigate-pip/config.ini` (opisane niżej).
 

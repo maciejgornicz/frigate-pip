@@ -229,6 +229,8 @@ pub struct Config {
     pub prebuffer: bool,
     pub gpu_warm: bool,
     pub camera_audio: bool,
+    /// Volume of the camera audio in a new window, in percent.
+    pub camera_volume: u8,
     /// Interface language: `auto` (system language) or a language code.
     pub language: String,
     /// Once a day ask GitHub whether a new version exists.
@@ -324,6 +326,7 @@ impl Config {
             prebuffer: boolean(g("video", "prebuffer"), false),
             gpu_warm: boolean(g("video", "gpu_warm"), false),
             camera_audio: boolean(g("video", "camera_audio"), false),
+            camera_volume: num(g("video", "camera_volume"), 100u32).min(100) as u8,
             language: opt(g("app", "language")).unwrap_or_else(|| "auto".into()),
             check_updates: boolean(g("app", "check_updates"), true),
 
@@ -395,7 +398,7 @@ pub fn ini_value(v: &str) -> String {
 /// Writes all settings to the INI document (existing lines and comments are kept).
 pub fn write_all(c: &Config, d: &mut IniDoc) {
     let quoted = ini_value;
-    let pairs: [(&str, &str, String); 36] = [
+    let pairs: [(&str, &str, String); 37] = [
         ("frigate", "url", c.url.clone()),
         ("frigate", "user", quoted(&c.user)),
         ("frigate", "password", quoted(&c.password)),
@@ -430,6 +433,7 @@ pub fn write_all(c: &Config, d: &mut IniDoc) {
         ("video", "prebuffer", flag(c.prebuffer).into()),
         ("video", "gpu_warm", flag(c.gpu_warm).into()),
         ("video", "camera_audio", flag(c.camera_audio).into()),
+        ("video", "camera_volume", c.camera_volume.to_string()),
         ("app", "language", c.language.clone()),
         ("app", "check_updates", flag(c.check_updates).into()),
     ];
@@ -573,6 +577,8 @@ gpu_warm = false
 ; Camera audio in the preview window (AAC / G.711 from the RTSP stream).
 ; Played on its own thread - it never delays the window or the video.
 camera_audio = false
+; Volume of the camera audio in a new window, 0-100 (each window has its own slider)
+camera_volume = 100
 
 [console]
 ; Linux version only (not used on Windows):
@@ -684,6 +690,7 @@ mod tests {
         c.prebuffer = true;
         c.gpu_warm = true;
         c.camera_audio = true;
+        c.camera_volume = 40;
         c.language = "de".into();
         c.check_updates = false;
         write_all(&c, &mut doc);
