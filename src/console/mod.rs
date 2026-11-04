@@ -84,6 +84,8 @@ pub trait Output {
     }
     /// Camera audio of window `id`: 0 = none, 1 = on, 2 = muted (desktop windows show a button).
     fn set_sound(&mut self, _id: u64, _state: u8) {}
+    /// The picture of window `id` is zoomed in (desktop windows: Ctrl + drag then moves it).
+    fn set_zoomed(&mut self, _id: u64, _zoomed: bool) {}
     /// The windows have their own buttons (close, sound).
     fn buttons(&self) -> bool {
         false
@@ -119,6 +121,8 @@ pub enum Action {
     Wheel(i32),
     /// Ctrl + mouse wheel: zoom in (+1) or out (-1) around this point of the window (0–1).
     Zoom(i32, f32, f32),
+    /// Ctrl + drag on a zoomed picture: the mouse moved by this part of the window (0–1).
+    Pan(f32, f32),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -193,8 +197,9 @@ Where the windows appear (--output):
   window       On the desktop (X11, or Wayland with XWayland): borderless windows above
                the others in a corner of the screen; runs in the background. Mouse: x
                closes, the speaker mutes, drag moves, the wheel resizes, Ctrl + wheel
-               zooms the picture around the mouse, a click pins, a double click opens
-               the camera in Frigate, the right button closes.
+               zooms the picture around the mouse, Ctrl + drag moves the zoomed picture,
+               a click pins, a double click opens the camera in Frigate, the right
+               button closes.
                A tray icon has the menu known from Windows; the settings open in the
                browser.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
@@ -1105,6 +1110,12 @@ impl App {
                 }
                 w.zoom = w.zoom.at(notches as f32, u, v);
                 // At once from the current pictures; sharp once the wheel stops.
+                w.resized = Some(Instant::now());
+                self.out.set_zoomed(id, !w.zoom.is_full());
+            }
+            Action::Pan(du, dv) => {
+                w.zoom = w.zoom.panned(du, dv);
+                // Like the wheel: sharp, with the new part live, once the mouse stops.
                 w.resized = Some(Instant::now());
             }
             Action::Wheel(step) => {

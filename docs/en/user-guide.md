@@ -118,6 +118,7 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 | **Click** | **Pins** the window: it stays open until you close it (the caption shows *pinned*). Click again to unpin. |
 | **Mouse wheel** | Makes the window bigger or smaller. |
 | **Ctrl + mouse wheel** | Zooms the picture in (up to 8×) or out around the mouse pointer; the caption shows the zoom, e.g. *2.0×*. How much detail there is depends on the stream: the main stream (`stream = main`) has the most. |
+| **Ctrl + drag** | On a zoomed picture: moves the picture, so that you can see another part of it. Without zoom the window moves, as usual. |
 | **×** (top-right corner) | Closes the window at once. The button appears when you point at the window. |
 | **Speaker** (left of ×) | Turns the window's sound off; click again to turn it back on. The button appears when you point at a window that plays camera audio; while the sound is off, the crossed-out speaker stays visible. |
 | **Right click** | Closes the window. |
@@ -419,7 +420,7 @@ On a Linux desktop the preview windows work like on Windows: borderless windows 
 - **Start:** applications menu → **FrigatePiP** (installed with apt), or `frigate-pip` in a terminal on the desktop. It runs in the background without a terminal; one copy runs per user. A second start (or `frigate-pip --settings`) opens the settings of the running copy.
 - **With the desktop session:** `frigate-pip --autostart on` (off again: `frigate-pip --autostart off`). To stop it: `frigate-pip --quit`.
 - **Tray icon:** with the same menu as on Windows (see [The tray icon](#4-the-tray-icon)); its colour shows the state: blue — connected, grey — not connected, amber — paused. It appears on KDE Plasma, Xfce, Cinnamon, MATE and Budgie, and on GNOME with the AppIndicator extension (included in Ubuntu).
-- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, a click pins it, a double click opens the camera in Frigate, and a window under the mouse does not close.
+- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, and a window under the mouse does not close.
 - **Window options:** `topmost` (with `false` the windows are ordinary windows that others can cover), `sound` (the desktop’s notification sound) and `skip_fullscreen` (nothing while the active window is full-screen) work like on Windows.
 - **Settings:** a click on the icon (or **Settings…** in its menu) opens them in the browser, with the same options, descriptions and connection test as on Windows; the page opens only on this computer. At the first start it opens by itself. They are saved in `~/.config/frigate-pip/config.ini` (described below).
 

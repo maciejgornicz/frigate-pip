@@ -1,7 +1,8 @@
 //! Desktop output: each preview window is a borderless always-on-top X11 window (an X11
 //! desktop, or Wayland through XWayland) in the chosen corner of the chosen monitor.
-//! The mouse works like on Windows: × closes, the speaker mutes, dragging moves, a click
-//! pins, a double click opens the camera in Frigate, the right button closes.
+//! The mouse works like on Windows: × closes, the speaker mutes, dragging moves (with Ctrl
+//! a zoomed picture, otherwise the window), a click pins, a double click opens the camera
+//! in Frigate, the right button closes.
 
 use super::canvas::{Font, Image};
 use super::x11::{Event, Monitor, BUTTON1_MASK, CONTROL_MASK, X11};
@@ -21,6 +22,8 @@ struct Press {
     root: (i32, i32),
     start: (i32, i32),
     moved: bool,
+    /// Ctrl + drag on a zoomed picture: `root` follows the mouse, the window stays.
+    pan: bool,
 }
 
 struct Win {
@@ -33,6 +36,8 @@ struct Win {
     hot: Hot,
     /// 0 = no camera audio, 1 = sound on, 2 = muted.
     sound: u8,
+    /// The picture is zoomed in.
+    zoomed: bool,
     press: Option<Press>,
     /// Time and place of the last left click (double clicks).
     last_click: Option<(u32, i32, i32)>,
@@ -193,6 +198,7 @@ impl Output for Desktop {
             hover: false,
             hot: Hot::None,
             sound: 0,
+            zoomed: false,
             press: None,
             last_click: None,
             on_top: *topmost,
@@ -252,6 +258,12 @@ impl Output for Desktop {
         }
     }
 
+    fn set_zoomed(&mut self, id: u64, zoomed: bool) {
+        if let Some(w) = self.wins.get_mut(&id) {
+            w.zoomed = zoomed;
+        }
+    }
+
     fn pointer(&mut self, e: &Event) -> Vec<(u64, Action)> {
         let window = match *e {
             Event::Press { window, .. } | Event::Release { window, .. } | Event::Motion { window, .. } => window,
@@ -300,7 +312,10 @@ impl Output for Desktop {
                 if let (Some(p), true) = (w.press.as_mut(), buttons & BUTTON1_MASK != 0) {
                     // Dragging (after a few pixels, so that a click stays a click).
                     let (dx, dy) = (root_x - p.root.0, root_y - p.root.1);
-                    if p.moved || dx * dx + dy * dy > 16 {
+                    if p.pan {
+                        p.root = (root_x, root_y);
+                        actions.push(Action::Pan(dx as f32 / w.rect.w.max(1) as f32, dy as f32 / w.rect.h.max(1) as f32));
+                    } else if p.moved || dx * dx + dy * dy > 16 {
                         p.moved = true;
                         let (nx, ny) = (p.start.0 + dx, p.start.1 + dy);
                         w.rect.x = nx;
@@ -315,9 +330,14 @@ impl Output for Desktop {
                     }
                 }
             }
-            Event::Press { button: 1, x, y, root_x, root_y, time, .. } => match hot_at(w, x, y) {
+            Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y) {
                 Hot::Close => actions.push(Action::Close),
                 Hot::Sound => actions.push(Action::Sound),
+                // With Ctrl a zoomed picture moves instead of the window; that is no click,
+                // however quickly the drags follow each other.
+                Hot::None if w.zoomed && state & CONTROL_MASK != 0 => {
+                    w.press = Some(Press { root: (root_x, root_y), start: (w.rect.x, w.rect.y), moved: false, pan: true });
+                }
                 Hot::None => {
                     let double =
                         w.last_click.is_some_and(|(t, cx, cy)| time.wrapping_sub(t) < 400 && (root_x - cx).abs() < 6 && (root_y - cy).abs() < 6);
@@ -332,12 +352,13 @@ impl Output for Desktop {
                                 (w.rect.x, w.rect.y) = (px, py);
                             }
                         }
-                        w.press = Some(Press { root: (root_x, root_y), start: (w.rect.x, w.rect.y), moved: false });
+                        w.press = Some(Press { root: (root_x, root_y), start: (w.rect.x, w.rect.y), moved: false, pan: false });
                     }
                 }
             },
             Event::Release { button: 1, x, y, .. } => {
                 match w.press.take() {
+                    Some(p) if p.pan => {}
                     Some(p) if p.moved => actions.push(Action::Moved(w.rect.x - area.x, w.rect.y - area.y)),
                     Some(_) => actions.push(Action::Pin),
                     None => {}

@@ -94,6 +94,8 @@ struct Popup {
     deadline: Instant,
     hard_deadline: Instant,
     hovered: bool,
+    /// Ctrl + drag on a zoomed picture: the last mouse position (screen pixels).
+    panning: Option<POINT>,
     pinned: bool,
     closing: bool,
     user_moved: bool,
@@ -544,6 +546,27 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
         // The release on a button is ours too (the default handling has nothing to do there).
         WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND) => LRESULT(0),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        // With Ctrl a zoomed picture moves instead of the window; that is no click, however
+        // quickly the drags follow each other.
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK
+            if wp.0 as u32 == HTCAPTION && GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 && with_app(|a| a.zoomed(hwnd)) == Some(true) =>
+        {
+            with_app(|a| a.start_pan(hwnd));
+            SetCapture(hwnd);
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            with_app(|a| a.pan(hwnd));
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            let _ = ReleaseCapture();
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            with_app(|a| a.end_pan(hwnd));
+            LRESULT(0)
+        }
         WM_NCLBUTTONDOWN => {
             // Dragging moves the window; a plain click pins / unpins it.
             let before = window_rect(hwnd);
@@ -945,6 +968,7 @@ impl App {
             deadline: now + dur,
             hard_deadline: now + max,
             hovered: false,
+            panning: None,
             pinned: false,
             closing: false,
             user_moved: place.as_ref().is_some_and(|p| p.moved_to.is_some()),
@@ -1286,7 +1310,7 @@ impl App {
                     return;
                 };
                 let p = &self.popups[i];
-                if p.hovered || p.pinned || p.preview {
+                if p.hovered || p.panning.is_some() || p.pinned || p.preview {
                     unsafe {
                         SetTimer(hwnd, TIMER_DEADLINE, 1000, None);
                     }
@@ -1377,12 +1401,60 @@ impl App {
             let _ = ScreenToClient(hwnd, &mut pt);
             let _ = GetClientRect(hwnd, &mut rc);
         }
-        // Where the picture is in the window (it may have bars when the aspect differs).
-        let (l, t, r, b) = crate::render::fit(((p.aspect * 1000.0).round() as u32, 1000), (rc.right.max(1) as u32, rc.bottom.max(1) as u32));
+        let (l, t, r, b) = Self::picture_rect(p, rc);
         let (u, v) = ((pt.x as f32 - l) / (r - l).max(1.0), (pt.y as f32 - t) / (b - t).max(1.0));
         let zoom = p.shared.zoom().at(delta as f32 / WHEEL_DELTA as f32, u, v);
         p.shared.set_zoom(zoom);
         p.shared.set_overlay(Self::popup_text(p));
+    }
+
+    /// Where the picture is in the window (it may have bars when the aspect differs).
+    fn picture_rect(p: &Popup, client: RECT) -> (f32, f32, f32, f32) {
+        crate::render::fit(((p.aspect * 1000.0).round() as u32, 1000), (client.right.max(1) as u32, client.bottom.max(1) as u32))
+    }
+
+    fn zoomed(&mut self, hwnd: HWND) -> bool {
+        self.find(hwnd).is_some_and(|p| !p.shared.zoom().is_full())
+    }
+
+    fn start_pan(&mut self, hwnd: HWND) {
+        let Some(p) = self.find(hwnd) else { return };
+        let mut at = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut at);
+        }
+        p.panning = Some(at);
+    }
+
+    /// The mouse moved during Ctrl + drag: the picture follows it.
+    fn pan(&mut self, hwnd: HWND) {
+        let Some(p) = self.find(hwnd) else { return };
+        let Some(last) = p.panning else { return };
+        let mut at = POINT::default();
+        let mut rc = RECT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut at);
+            let _ = GetClientRect(hwnd, &mut rc);
+        }
+        p.panning = Some(at);
+        let (l, t, r, b) = Self::picture_rect(p, rc);
+        let zoom = p.shared.zoom().panned((at.x - last.x) as f32 / (r - l).max(1.0), (at.y - last.y) as f32 / (b - t).max(1.0));
+        p.shared.set_zoom(zoom);
+    }
+
+    /// Ctrl + drag ended. The window had the mouse all to itself, so hovering starts over.
+    fn end_pan(&mut self, hwnd: HWND) {
+        let Some(p) = self.find(hwnd) else { return };
+        if p.panning.take().is_none() {
+            return;
+        }
+        p.hovered = false;
+        let mut at = POINT::default();
+        let inside = unsafe {
+            let _ = GetCursorPos(&mut at);
+            PtInRect(&window_rect(hwnd), at).as_bool()
+        };
+        self.hover(hwnd, inside, if inside { HTCAPTION } else { HTNOWHERE });
     }
 
     fn set_aspect(&mut self, hwnd: HWND, w: u32, h: u32) {
