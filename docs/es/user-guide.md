@@ -345,6 +345,11 @@ Empiece con **Probar conexión** en la configuración y con **Mostrar registro**
 - Active **Búfer previo** y **GPU preparada**.
 - Acorte el intervalo de fotogramas clave (intervalo de fotogramas I / GOP) del flujo sub de la cámara a 1–2 s.
 
+**La imagen de una cámara va por detrás de la de otra**
+- Las cámaras no comparten un reloj, así que FrigatePiP no puede alinear sus imágenes.
+- Cada ventana deja una línea en el registro al cerrarse: *timing - 73 frames, picture in 3 ms (max 96), late up to 177 ms, longest gap 238 ms*. *picture in* es el tiempo dentro de FrigatePiP, *late up to* indica cuánto se retrasaron los fotogramas respecto al ritmo de su flujo y *longest gap* es la pausa más larga entre dos fotogramas.
+- Si los valores son pequeños y la imagen sigue retrasada, el retraso se produce antes de que el vídeo llegue a FrigatePiP: compruebe los ajustes del flujo en la cámara. Los valores grandes apuntan a la red o, en *picture in*, al PC.
+
 **No se oye el sonido de la cámara**
 - **Audio de la cámara** debe estar marcado e **Imagen en vivo** configurada en **RTSP de go2rtc**.
 - El flujo de go2rtc debe contener audio: **Probar conexión** muestra *audio … Hz* o *sin audio*.

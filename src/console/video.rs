@@ -8,9 +8,11 @@ use crate::config::LiveMode;
 use crate::hub::{Feed, Hub};
 use crate::rtp::{AccessUnit, Codec, VideoTrack};
 use crate::rtsp::{self, Media};
+use crate::timing::Timing;
 use crate::util::Cancel;
 use crate::view::Zoom;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -187,6 +189,13 @@ enum Role {
     Takeover,
 }
 
+/// The timing of a window's video and when the frames now inside ffmpeg were received.
+#[derive(Default)]
+struct Measure {
+    timing: Timing,
+    in_ffmpeg: VecDeque<Instant>,
+}
+
 /// Feeds one RTSP stream (direct or from the prebuffer) to the ffmpeg decoder and player.
 struct Feeder<'a> {
     p: &'a Params,
@@ -207,6 +216,15 @@ struct Feeder<'a> {
     asc: Option<Vec<u8>>,
     aud: &'static [u8],
     started: bool,
+    measure: Arc<Mutex<Measure>>,
+}
+
+impl Drop for Feeder<'_> {
+    fn drop(&mut self) {
+        if let Some(line) = self.measure.lock().unwrap().timing.summary() {
+            crate::log!("{}: timing{} - {line}", self.p.camera, self.via);
+        }
+    }
 }
 
 impl<'a> Feeder<'a> {
@@ -226,6 +244,7 @@ impl<'a> Feeder<'a> {
             asc: None,
             aud: &[],
             started: false,
+            measure: Arc::default(),
         }
     }
 
@@ -252,6 +271,7 @@ impl<'a> Feeder<'a> {
                     self.video = Some((proc, stdin));
                     let (size, zoom, cam, t0, via) = (p.size, p.zoom, p.camera.clone(), p.t0, self.via);
                     let (shared, wake, role, handover) = (self.shared.clone(), self.wake.clone(), self.role, self.handover.clone());
+                    let measure = self.measure.clone();
                     let _ = std::thread::Builder::new().name(format!("decode-{cam}")).spawn(move || {
                         let mut first = true;
                         read_frames(out, size, |img| {
@@ -265,6 +285,11 @@ impl<'a> Feeder<'a> {
                                     handover.store(true, Ordering::Relaxed);
                                 }
                             }
+                            let mut m = measure.lock().unwrap();
+                            if let Some(arrived) = m.in_ffmpeg.pop_front() {
+                                m.timing.shown(arrived, Instant::now());
+                            }
+                            drop(m);
                             store(&shared, img, zoom, true, &wake);
                             !shared.cancel.is_set()
                         });
@@ -313,6 +338,10 @@ impl<'a> Feeder<'a> {
             crate::log!("{}: key frame after {} ms{}", self.p.camera, self.p.t0.elapsed().as_millis(), self.via);
         }
         self.started = true;
+        let mut m = self.measure.lock().unwrap();
+        m.timing.received(au.arrived, au.late);
+        m.in_ffmpeg.push_back(au.arrived);
+        drop(m);
         let aud = self.aud;
         match self.video.as_mut() {
             Some((_, stdin)) => stdin.write_all(&au.data).and_then(|_| stdin.write_all(aud)).is_ok() && self.alive(),

@@ -1,5 +1,8 @@
 //! SDP and RTP depacketization for H.264 (RFC 6184) and H.265 (RFC 7798).
 
+use crate::timing::Lateness;
+use std::time::{Duration, Instant};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Codec {
     H264,
@@ -107,6 +110,10 @@ pub fn parse_sdp(sdp: &str) -> Option<VideoTrack> {
 pub struct AccessUnit {
     pub data: Vec<u8>,
     pub key: bool,
+    /// When it was received (a prebuffered unit keeps the original moment).
+    pub arrived: Instant,
+    /// How far it came behind the timing of its stream.
+    pub late: Duration,
 }
 
 pub struct Depacketizer {
@@ -119,6 +126,7 @@ pub struct Depacketizer {
     /// H.264: SPS rewritten to `max_num_reorder_frames = 0` (disabled once B-frames are detected).
     low_delay: bool,
     sps_original: Option<Vec<u8>>,
+    lateness: Lateness,
 }
 
 const MAX_AU_BYTES: usize = 32 << 20;
@@ -134,6 +142,7 @@ impl Depacketizer {
             ts: None,
             low_delay: true,
             sps_original: None,
+            lateness: Lateness::default(),
         };
         for p in &track.params {
             let p = d.adjust_sps(p.clone());
@@ -281,7 +290,9 @@ impl Depacketizer {
             data.extend_from_slice(&[0, 0, 0, 1]);
             data.extend_from_slice(n);
         }
-        Some(AccessUnit { data, key })
+        let arrived = Instant::now();
+        let late = self.lateness.frame(self.ts.unwrap_or(0), arrived);
+        Some(AccessUnit { data, key, arrived, late })
     }
 }
 
@@ -316,6 +327,20 @@ mod tests {
 
     fn track264() -> VideoTrack {
         VideoTrack { codec: Codec::H264, payload_type: 96, control: String::new(), params: vec![vec![0x67, 1], vec![0x68, 2]] }
+    }
+
+    #[test]
+    fn units_say_when_they_arrived_and_how_late() {
+        let mut d = Depacketizer::new(&track264());
+        let mut out = vec![];
+        let before = Instant::now();
+        d.push(&[0x65, 1], 90_000, true, &mut out);
+        d.push(&[0x41, 2], 180_000, true, &mut out);
+        // A timestamp a second older arrives after the others: a second behind its stream.
+        d.push(&[0x41, 3], 90_000, true, &mut out);
+        assert!(out[0].arrived >= before && out[1].arrived >= out[0].arrived);
+        assert!(out[0].late < Duration::from_millis(50));
+        assert!(out[2].late > Duration::from_millis(900), "{:?}", out[2].late);
     }
 
     #[test]

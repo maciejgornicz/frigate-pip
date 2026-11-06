@@ -7,6 +7,7 @@ use crate::decoder::{Decoder, Frame};
 use crate::hub::{Feed, Hub, Sink};
 use crate::render::{Overlay, Renderer};
 use crate::rtp::{AccessUnit, VideoTrack};
+use crate::timing::Timing;
 use crate::util::Cancel;
 use crate::view::Zoom;
 use std::io::Read;
@@ -257,6 +258,7 @@ struct Source {
     got_key: bool,
     active: bool,
     failed: bool,
+    timing: Timing,
 }
 
 fn play(p: &Params, shared: &Arc<Shared>) {
@@ -347,7 +349,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         while let Ok(m) = rx.try_recv() {
             batch.push(m);
         }
-        let mut new_frame: Option<(usize, Frame)> = None;
+        let mut new_frame: Option<(usize, Frame, Instant)> = None;
         let mut new_jpeg: Option<Vec<u8>> = None;
         for m in batch {
             match m {
@@ -403,8 +405,9 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                         }
                     }
                     st.got_key = true;
+                    st.timing.received(au.arrived, au.late);
                     let d = st.dec.as_mut().unwrap();
-                    if let Err(e) = d.decode(&au.data, &mut |f| new_frame = Some((s, f))) {
+                    if let Err(e) = d.decode(&au.data, &mut |f| new_frame = Some((s, f, au.arrived))) {
                         crate::log!("{cam}: decoding error ({}): {e}", if d.hw { "hardware" } else { "software" });
                         if d.hw {
                             force_sw = true;
@@ -427,10 +430,11 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             mjpeg_active = true;
         }
 
-        if let Some((s, f)) = new_frame {
+        if let Some((s, f, arrived)) = new_frame {
             let gpu = matches!(f, Frame::Gpu { .. });
             match r.show_frame(f, &overlay_text(true)) {
                 Ok(size) => {
+                    src[s].timing.shown(arrived, Instant::now());
                     if shown != Some(s) {
                         let kind = if gpu { "hardware" } else { "software" };
                         let codec = src[s].track.as_ref().map(|t| t.codec.name()).unwrap_or("?");
@@ -481,6 +485,9 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             last_snapshot = Instant::now();
             spawn_snapshot(api.clone(), snapshot_path.clone(), tx.clone(), cancel.clone(), None);
         }
+    }
+    if let Some(line) = shown.and_then(|s| src[s].timing.summary()) {
+        crate::log!("{cam}: timing - {line}");
     }
     // Decoders are created before the renderer (they share the D3D11 device).
     drop(src);
