@@ -345,6 +345,11 @@ Beginnen Sie mit **Verbindung testen** in den Einstellungen und mit **Protokoll 
 - Aktivieren Sie **Vorpuffer** und **GPU bereithalten**.
 - Verkürzen Sie das Schlüsselbildintervall (I-Frame-Intervall / GOP) des Sub-Streams der Kamera auf 1–2 s.
 
+**Das Bild einer Kamera hinkt einer anderen hinterher**
+- Die Kameras haben keine gemeinsame Uhr, daher kann FrigatePiP ihre Bilder nicht angleichen.
+- Jedes Fenster hinterlässt beim Schließen eine Zeile im Protokoll: *timing - 73 frames, picture in 3 ms (max 96), late up to 177 ms, longest gap 238 ms*. *picture in* ist die Zeit in FrigatePiP, *late up to* zeigt, wie weit Bilder hinter dem Takt ihres Streams zurücklagen, und *longest gap* ist die längste Pause zwischen zwei Bildern.
+- Kleine Werte bei einem trotzdem verspäteten Bild bedeuten, dass die Verzögerung entsteht, bevor das Video FrigatePiP erreicht: Prüfen Sie die Stream-Einstellungen der Kamera. Große Werte deuten auf das Netzwerk oder, bei *picture in*, auf den PC hin.
+
 **Kein Kameraton**
 - **Kameraton** muss aktiviert und **Livebild** auf **RTSP von go2rtc** eingestellt sein.
 - Der go2rtc-Stream muss Audio enthalten — **Verbindung testen** zeigt *Audio … Hz* oder *kein Audio* an.

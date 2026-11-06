@@ -345,6 +345,11 @@ Comece por **Testar conexão** nas configurações e por **Mostrar registo** no 
 - Ative **Pré-buffer** e **GPU pronta**.
 - Reduza o intervalo de quadros-chave (intervalo de I-frames / GOP) do stream sub da câmara para 1–2 s.
 
+**A imagem de uma câmara está atrasada em relação à de outra**
+- As câmaras não partilham um relógio, por isso o FrigatePiP não consegue alinhar as imagens.
+- Cada janela deixa uma linha no registo ao fechar: *timing - 73 frames, picture in 3 ms (max 96), late up to 177 ms, longest gap 238 ms*. *picture in* é o tempo passado no FrigatePiP, *late up to* indica o atraso máximo das imagens face ao ritmo do seu fluxo e *longest gap* é a pausa mais longa entre duas imagens.
+- Valores pequenos com uma imagem ainda atrasada significam que o atraso surge antes de o vídeo chegar ao FrigatePiP: verifique as definições do fluxo na câmara. Valores grandes apontam para a rede ou, em *picture in*, para o PC.
+
 **Sem som da câmara**
 - **Áudio da câmara** tem de estar marcado e **Imagem ao vivo** definida como **RTSP do go2rtc**.
 - O stream go2rtc tem de conter áudio — **Testar conexão** mostra *áudio … Hz* ou *sem áudio*.

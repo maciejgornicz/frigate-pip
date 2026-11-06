@@ -17,6 +17,7 @@ mod mqtt;
 mod net;
 mod rtp;
 mod rtsp;
+mod timing;
 mod tls;
 mod view;
 mod ws;

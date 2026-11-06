@@ -345,6 +345,11 @@ Zacznij od **Testuj połączenie** w ustawieniach i od **Pokaż log** w menu w z
 - Włącz **Prebufor** i **Gotowe GPU**.
 - Skróć interwał klatek kluczowych (I-frame interval / GOP) sub-strumienia kamery do 1–2 s.
 
+**Obraz jednej kamery spóźnia się względem innej**
+- Kamery nie mają wspólnego zegara, więc FrigatePiP nie może wyrównać ich obrazów.
+- Każde okno przy zamknięciu zostawia wiersz w logu: *timing - 73 frames, picture in 3 ms (max 96), late up to 177 ms, longest gap 238 ms*. *picture in* to czas spędzony w FrigatePiP, *late up to* to największe spóźnienie klatek względem tempa ich strumienia, a *longest gap* to najdłuższa przerwa między dwiema klatkami.
+- Małe wartości przy wciąż spóźnionym obrazie oznaczają, że opóźnienie powstaje, zanim wideo dotrze do FrigatePiP: sprawdź ustawienia strumienia w kamerze. Duże wartości wskazują na sieć albo, przy *picture in*, na komputer.
+
 **Brak dźwięku z kamery**
 - Opcja **Dźwięk z kamery** musi być zaznaczona, a **Obraz na żywo** ustawiony na **RTSP z go2rtc**.
 - Strumień go2rtc musi zawierać dźwięk — **Testuj połączenie** pokazuje *dźwięk … Hz* lub *bez dźwięku*.
