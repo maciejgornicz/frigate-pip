@@ -345,6 +345,11 @@ Commencez par **Tester la connexion** dans les paramètres et par **Afficher le 
 - Activez **Préchargement** et **GPU prêt**.
 - Réduisez l’intervalle entre images clés (intervalle I-frame / GOP) du flux sub de la caméra à 1–2 s.
 
+**L’image d’une caméra est en retard sur celle d’une autre**
+- Les caméras ne partagent pas d’horloge : FrigatePiP ne peut donc pas aligner leurs images.
+- Chaque fenêtre laisse une ligne dans le journal à sa fermeture : *timing - 73 frames, picture in 3 ms (max 96), late up to 177 ms, longest gap 238 ms*. *picture in* est le temps passé dans FrigatePiP, *late up to* le retard maximal des images sur le rythme de leur flux et *longest gap* la plus longue pause entre deux images.
+- Des valeurs faibles avec une image toujours en retard signifient que le retard apparaît avant que la vidéo n’atteigne FrigatePiP : vérifiez les réglages du flux de la caméra. Des valeurs élevées désignent le réseau ou, pour *picture in*, le PC.
+
 **Pas de son de la caméra**
 - **Son de la caméra** doit être coché et **Image en direct** réglé sur **RTSP depuis go2rtc**.
 - Le flux go2rtc doit contenir de l’audio — **Tester la connexion** affiche *audio … Hz* ou *sans audio*.

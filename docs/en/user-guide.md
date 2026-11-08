@@ -345,6 +345,11 @@ Start with **Test connection** in the settings and with **Show log** in the tray
 - Enable **Prebuffer** and **Ready GPU**.
 - Shorten the key frame interval (I-frame interval / GOP) of the camera's sub stream to 1–2 s.
 
+**One camera's picture is behind another's**
+- The cameras share no clock, so FrigatePiP cannot line up their pictures.
+- Every window leaves a line in the log when it closes: *timing - 73 frames, picture in 3 ms (max 96), late up to 177 ms, longest gap 238 ms*. *picture in* is the time spent in FrigatePiP, *late up to* how far frames fell behind the timing of their stream, and *longest gap* the longest pause between two frames.
+- Small values with a picture that is still behind mean the delay arises before the video reaches FrigatePiP: check the camera's stream settings. Large values point to the network or, for *picture in*, to the PC.
+
 **No camera sound**
 - **Camera audio** must be checked and **Live picture** set to **RTSP from go2rtc**.
 - The go2rtc stream must contain audio — **Test connection** shows *audio … Hz* or *no audio*.
