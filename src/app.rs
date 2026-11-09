@@ -529,28 +529,31 @@ fn cursor_pos() -> POINT {
 const HT_SOUND: u32 = HTOBJECT;
 /// Hit-test code of the volume slider, likewise.
 const HT_VOLUME: u32 = HTBORDER;
+/// Hit-test code of the replay button, likewise (a popup has no menu to open).
+const HT_REPLAY: u32 = HTMENU;
 
 unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_NCHITTEST => {
             // The close button in the top-right corner, the sound button left of it and the
-            // volume slider under that (only with camera audio); the rest of the window drags it.
+            // volume slider under that (only with camera audio), then the replay button; the
+            // rest of the window drags it.
             let mut pt = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
             let _ = ScreenToClient(hwnd, &mut pt);
             let mut rc = RECT::default();
             let _ = GetClientRect(hwnd, &mut rc);
             let dpi = GetDpiForWindow(hwnd);
             let inside = |(l, t, r, b): (i32, i32, i32, i32)| pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
-            let button = inside(crate::render::sound_button_rect(rc.right, dpi));
-            let slider = crate::render::volume_slider_rect(rc.right, rc.bottom, dpi).is_some_and(inside);
+            let sound = with_app(|a| a.has_sound(hwnd)) == Some(true);
+            let replay = with_app(|a| a.has_replay(hwnd)) == Some(true);
             let hit = if inside(crate::render::close_button_rect(rc.right, dpi)) {
                 HTCLOSE
-            } else if (button || slider) && with_app(|a| a.has_sound(hwnd)) == Some(true) {
-                if button {
-                    HT_SOUND
-                } else {
-                    HT_VOLUME
-                }
+            } else if sound && inside(crate::render::sound_button_rect(rc.right, dpi)) {
+                HT_SOUND
+            } else if sound && crate::render::volume_slider_rect(rc.right, rc.bottom, dpi).is_some_and(inside) {
+                HT_VOLUME
+            } else if replay && inside(crate::render::replay_button_rect(rc.right, dpi, sound)) {
+                HT_REPLAY
             } else {
                 HTCAPTION
             };
@@ -565,8 +568,12 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             with_app(|a| a.toggle_sound(hwnd));
             LRESULT(0)
         }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HT_REPLAY => {
+            with_app(|a| a.toggle_replay(hwnd));
+            LRESULT(0)
+        }
         // The release on a button is ours too (the default handling has nothing to do there).
-        WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND) => LRESULT(0),
+        WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND | HT_REPLAY) => LRESULT(0),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         // With Ctrl a zoomed picture moves instead of the window; that is no click, however
         // quickly the drags follow each other.
@@ -1336,8 +1343,13 @@ impl App {
                     }
                     return;
                 };
-                let p = &self.popups[i];
-                if p.hovered || p.drag.is_some() || p.pinned || p.preview {
+                let p = &mut self.popups[i];
+                // A replay keeps the window open, and a few seconds of live video follow it.
+                let replaying = p.shared.replay() == 2;
+                if replaying {
+                    p.deadline = p.deadline.max(Instant::now() + Duration::from_secs(5));
+                }
+                if p.hovered || p.drag.is_some() || p.pinned || p.preview || replaying {
                     unsafe {
                         SetTimer(hwnd, TIMER_DEADLINE, 1000, None);
                     }
@@ -1362,6 +1374,7 @@ impl App {
             (false, _) => 0,
             (true, HTCLOSE) => 2,
             (true, HT_SOUND) => 3,
+            (true, HT_REPLAY) => 4,
             (true, _) => 1,
         });
         if on && !p.hovered {
@@ -1385,6 +1398,18 @@ impl App {
     /// The window plays camera audio (then it has a sound button).
     fn has_sound(&mut self, hwnd: HWND) -> bool {
         self.find(hwnd).is_some_and(|p| p.shared.sound.playing.load(Ordering::Relaxed))
+    }
+
+    /// The window has something to replay (then it has a replay button).
+    fn has_replay(&mut self, hwnd: HWND) -> bool {
+        self.find(hwnd).is_some_and(|p| p.shared.replay() > 0)
+    }
+
+    /// Replay button: starts or stops a replay of the event start (the player does it).
+    fn toggle_replay(&mut self, hwnd: HWND) {
+        if let Some(p) = self.find(hwnd) {
+            p.shared.press_replay();
+        }
     }
 
     /// Sound button: mutes / unmutes this window.

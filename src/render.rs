@@ -23,10 +23,12 @@ pub struct Overlay {
     pub text: String,
     pub live: bool,
     /// Close button: 0 = hidden, 1 = shown (mouse over the window), 2 = highlighted (mouse over the button),
-    /// 3 = shown with the sound button highlighted (mouse over that one).
+    /// 3 = shown with the sound button highlighted (mouse over that one), 4 = likewise the replay button.
     pub close: u8,
     /// Sound button: 0 = no camera audio (no button), 1 = sound on, 2 = muted.
     pub sound: u8,
+    /// Replay button: 0 = nothing to replay (no button), 1 = shown with the others, 2 = replaying (it stays).
+    pub replay: u8,
     /// Volume in percent (volume slider).
     pub volume: u8,
     /// The part of the picture that is shown (Ctrl + mouse wheel).
@@ -44,9 +46,13 @@ pub fn close_button_rect(client_width: i32, dpi: u32) -> (i32, i32, i32, i32) {
 
 /// Sound (mute) button, left of the close button and of the same size.
 pub fn sound_button_rect(client_width: i32, dpi: u32) -> (i32, i32, i32, i32) {
-    let (l, t, r, b) = close_button_rect(client_width, dpi);
-    let gap = (6.0 * dpi.max(96) as f32 / 96.0).round() as i32;
-    (l - gap - (r - l), t, l - gap, b)
+    crate::view::left_of(close_button_rect(client_width, dpi), dpi.max(96) as f32 / 96.0)
+}
+
+/// Replay button: left of the sound button when the window plays camera audio, otherwise in its place.
+pub fn replay_button_rect(client_width: i32, dpi: u32, sound: bool) -> (i32, i32, i32, i32) {
+    let right = if sound { sound_button_rect(client_width, dpi) } else { close_button_rect(client_width, dpi) };
+    crate::view::left_of(right, dpi.max(96) as f32 / 96.0)
 }
 
 /// Volume slider under the sound button, if the window is high enough for it.
@@ -420,9 +426,11 @@ impl Renderer {
         let button = (ov.close > 0).then(|| close_button_rect(self.size.0 as i32, dpi));
         // The sound button comes with the close button, and stays while muted so that it is clear why it is quiet.
         let sound = (ov.sound > 0 && (ov.close > 0 || ov.sound == 2)).then(|| sound_button_rect(self.size.0 as i32, dpi));
+        // Likewise the replay button stays while replaying, so that it can be stopped.
+        let replay = (ov.replay > 0 && (ov.close > 0 || ov.replay == 2)).then(|| replay_button_rect(self.size.0 as i32, dpi, ov.sound > 0));
         if !ov.text.is_empty() {
             // The caption must not run under the buttons.
-            self.draw_caption(ov, sound.or(button).map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
+            self.draw_caption(ov, replay.or(sound).or(button).map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
         }
         if let Some((l, t, r, b)) = button {
             let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
@@ -436,6 +444,9 @@ impl Renderer {
         }
         if let Some(rect) = sound {
             let _ = self.draw_sound_button(rect, ov.sound == 2, ov.close == 3);
+        }
+        if let Some(rect) = replay {
+            let _ = self.draw_replay_button(rect, ov.replay == 2, ov.close == 4);
         }
         if ov.sound > 0 && ov.close > 0 {
             if let Some(slider) = volume_slider_rect(self.size.0 as i32, self.size.1 as i32, dpi) {
@@ -458,6 +469,40 @@ impl Renderer {
         self.d2d.DrawLine(p(level), p(bottom as f32), &self.white, width, None);
         let knob = D2D1_ELLIPSE { point: p(level), radiusX: rad * 0.45, radiusY: rad * 0.45 };
         self.d2d.FillEllipse(&knob, &self.white);
+    }
+
+    /// An anticlockwise arrow in a circle, lit while replaying or under the mouse.
+    unsafe fn draw_replay_button(&self, (l, t, r, b): (i32, i32, i32, i32), running: bool, hot: bool) -> Result<()> {
+        let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
+        let circle = D2D1_ELLIPSE { point: D2D_POINT_2F { x: cx, y: cy }, radiusX: rad, radiusY: rad };
+        self.d2d.FillEllipse(&circle, &self.shade);
+        if hot || running {
+            self.d2d.FillEllipse(&circle, &self.light);
+        }
+        let icon = crate::view::replay_icon((cx, cy), rad);
+        let p = |(x, y): (f32, f32)| D2D_POINT_2F { x, y };
+        let at = |a: f32| (cx + icon.radius * a.cos(), cy + icon.radius * a.sin());
+        let ring = self.d2f.CreatePathGeometry()?;
+        let sink = ring.Open()?;
+        sink.BeginFigure(p(icon.end), D2D1_FIGURE_BEGIN_HOLLOW);
+        sink.AddArc(&D2D1_ARC_SEGMENT {
+            point: p(at(icon.to)),
+            size: D2D_SIZE_F { width: icon.radius, height: icon.radius },
+            rotationAngle: 0.0,
+            sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE,
+            arcSize: D2D1_ARC_SIZE_LARGE,
+        });
+        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+        sink.Close()?;
+        self.d2d.DrawGeometry(&ring, &self.white, (rad / 7.0).max(1.5), None);
+        let head = self.d2f.CreatePathGeometry()?;
+        let sink = head.Open()?;
+        sink.BeginFigure(p(icon.head[0]), D2D1_FIGURE_BEGIN_FILLED);
+        sink.AddLines(&[p(icon.head[1]), p(icon.head[2])]);
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        sink.Close()?;
+        self.d2d.FillGeometry(&head, &self.white, None);
+        Ok(())
     }
 
     /// A speaker in a circle: with sound waves, or crossed out when muted.

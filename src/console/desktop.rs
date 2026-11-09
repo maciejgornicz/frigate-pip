@@ -116,9 +116,8 @@ type Area = (i32, i32, i32, i32);
 fn button_rects(w: u32, scale: f32) -> (Area, Area) {
     let size = (24.0 * scale).round() as i32;
     let margin = (8.0 * scale).round() as i32;
-    let gap = (6.0 * scale).round() as i32;
     let close = (w as i32 - margin - size, margin, w as i32 - margin, margin + size);
-    (close, (close.0 - gap - size, margin, close.0 - gap, margin + size))
+    (close, crate::view::left_of(close, scale))
 }
 
 fn inside((x0, y0, x1, y1): Area, x: i32, y: i32) -> bool {

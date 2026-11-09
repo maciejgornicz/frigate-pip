@@ -66,6 +66,7 @@ impl History {
         self.gops.is_empty()
     }
 
+    #[cfg(test)]
     pub fn bytes(&self) -> usize {
         self.bytes
     }
