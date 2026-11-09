@@ -16,6 +16,7 @@ mod i18n;
 mod json;
 mod mqtt;
 mod net;
+mod replay;
 mod rtp;
 mod rtsp;
 mod timing;
