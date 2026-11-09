@@ -122,6 +122,7 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 | **×** (top-right corner) | Closes the window at once. The button appears when you point at the window. |
 | **Speaker** (left of ×) | Turns the window's sound off; click again to turn it back on. The button appears when you point at a window that plays camera audio; while the sound is off, the crossed-out speaker stays visible. |
 | **Volume slider** (under the speaker) | Sets the sound volume of this window: drag it or click on it. It appears together with the speaker; raising the volume also turns muted sound back on. On Linux you hear the new volume just after you let go. |
+| **Replay** ⟲ (left of the other buttons) | Plays the start of the event again at normal speed, without sound; the caption shows *Replay −12 s*: how far behind live the picture is. With the [prebuffer](#prebuffer) the replay starts 5 s before the window opened, without it when the window opened. Click again to return to live video at once; after the replay it returns by itself. The button appears when you point at a window with live video; the window stays open during the replay. |
 | **Right click** | Closes the window. |
 | **Double click** | Opens this camera in the Frigate web interface. |
 | **Hover** | While the mouse pointer is over the window, it does not close. After you move away it stays at least 3 more seconds. |
@@ -131,6 +132,7 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 - **Time after last movement** seconds after the object (or any other matching object on that camera) last moved.
 - At the latest after **at most** seconds, even if the object keeps moving.
 - Never while it is pinned or while the mouse pointer is over it.
+- Never during a replay; afterwards it stays at least 5 more seconds.
 
 ### More than one camera
 
@@ -217,7 +219,7 @@ FrigatePiP finds each camera's go2rtc streams in the Frigate configuration (`liv
 
 #### Prebuffer
 
-**Prebuffer** keeps a connection to the sub stream of every camera, so live video starts at once (about 0.15 s) instead of waiting for the next key frame (up to about 1 s, depending on the camera's key frame interval). Cost: about 0.1–0.5 Mbit/s of local network traffic per camera, all the time.
+**Prebuffer** keeps a connection to the sub stream of every camera, so live video starts at once (about 0.15 s) instead of waiting for the next key frame (up to about 1 s, depending on the camera's key frame interval). Cost: about 0.1–0.5 Mbit/s of local network traffic per camera, all the time. It also keeps the last 30 s of every camera in memory (as much as 30 s of its sub stream: about 0.2–2 MB per camera), so that the [replay](#mouse-actions) can start 5 s before the event.
 
 #### Ready GPU
 
@@ -427,7 +429,7 @@ On a Linux desktop the preview windows work like on Windows: borderless windows 
 - **Start:** applications menu → **FrigatePiP** (installed with apt), or `frigate-pip` in a terminal on the desktop. It runs in the background without a terminal; one copy runs per user. A second start (or `frigate-pip --settings`) opens the settings of the running copy.
 - **With the desktop session:** `frigate-pip --autostart on` (off again: `frigate-pip --autostart off`). To stop it: `frigate-pip --quit`.
 - **Tray icon:** with the same menu as on Windows (see [The tray icon](#4-the-tray-icon)); its colour shows the state: blue — connected, grey — not connected, amber — paused. It appears on KDE Plasma, Xfce, Cinnamon, MATE and Budgie, and on GNOME with the AppIndicator extension (included in Ubuntu).
-- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, the slider under it sets the volume, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, and a window under the mouse does not close.
+- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, the slider under it sets the volume, ⟲ replays the start of the event, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, and a window under the mouse does not close.
 - **Window options:** `topmost` (with `false` the windows are ordinary windows that others can cover), `sound` (the desktop’s notification sound) and `skip_fullscreen` (nothing while the active window is full-screen) work like on Windows.
 - **Settings:** a click on the icon (or **Settings…** in its menu) opens them in the browser, with the same options, descriptions and connection test as on Windows; the page opens only on this computer. At the first start it opens by itself. They are saved in `~/.config/frigate-pip/config.ini` (described below).
 
@@ -441,7 +443,7 @@ In this mode FrigatePiP has no window of its own: it waits for detections in the
 2. Open tmux for your own work — `tmux` starts a new session — and work there. The popups appear over this window.
 
 - To stop FrigatePiP: `tmux kill-session -t frigate-pip`. To use its keys (pause, show a camera): `tmux attach -t frigate-pip`.
-- The popup appears in the chosen **corner** (`position`) and its size follows the **window width** (`width`). It closes by itself after the usual time (`duration`, `max_duration`), or at once with **q**, **x** or **Esc**. **m** turns its sound off and on.
+- The popup appears in the chosen **corner** (`position`) and its size follows the **window width** (`width`). It closes by itself after the usual time (`duration`, `max_duration`), or at once with **q**, **x** or **Esc**. **m** turns its sound off and on. **r** replays the start of the event (from the moment the popup opened).
 - tmux shows one popup at a time: a detection on another camera replaces the open popup (or is skipped when `replace = false`).
 - For the full colours of the picture, tmux must pass 24-bit colour on: add `set -as terminal-features ",xterm-256color:RGB"` to `~/.tmux.conf` (use your `$TERM` outside tmux) and restart tmux. FrigatePiP writes this hint into its log when the colours are missing.
 
@@ -455,6 +457,7 @@ When FrigatePiP runs in a terminal or on a console:
 | **x** (or Esc) | Close all preview windows. |
 | **p** | Pause / resume notifications. |
 | **m** | Sound off / on (with `camera_audio = true`) for all windows, also those opened later; the caption then shows *sound off*. |
+| **r** | Replay the start of the event in every window (see [Mouse actions](#mouse-actions)); again: back to live video. |
 | **1**–**9** | Show camera 1–9 (in the order of the Frigate configuration). |
 
 ### Command line

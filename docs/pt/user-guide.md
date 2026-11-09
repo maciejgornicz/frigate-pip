@@ -122,6 +122,7 @@ As janelas de pré-visualização nunca recebem o foco do teclado, por isso não
 | **×** (canto superior direito) | Fecha a janela de imediato. O botão aparece quando aponta o rato para a janela. |
 | **Altifalante** (à esquerda do ×) | Desliga o som da janela; outro clique volta a ligá-lo. O botão aparece quando aponta para uma janela que reproduz o áudio da câmara; enquanto o som estiver desligado, o altifalante riscado continua visível. |
 | **Controlo de volume** (por baixo do altifalante) | Define o volume desta janela: arraste-o ou clique nele. Aparece com o altifalante; subir o volume também volta a ligar o som desligado. No Linux, o novo volume ouve-se logo depois de largar. |
+| **Repetição** ⟲ (à esquerda dos outros botões) | Reproduz de novo o início do evento à velocidade normal, sem som; a legenda mostra *Repetição −12 s*, ou seja, quanto a imagem está atrás do vídeo ao vivo. Com o [pré-buffer](#pré-buffer) a repetição começa 5 s antes de a janela abrir; sem ele, quando a janela abre. Clique novamente para voltar de imediato ao vídeo ao vivo; no fim da repetição volta sozinho. O botão aparece ao apontar para uma janela com vídeo ao vivo; durante a repetição a janela não fecha. |
 | **Clique direito** | Fecha a janela. |
 | **Duplo clique** | Abre esta câmara na interface web do Frigate. |
 | **Passar o rato por cima** | Enquanto o ponteiro do rato estiver sobre a janela, esta não se fecha. Depois de afastar o rato, fica aberta pelo menos mais 3 segundos. |
@@ -131,6 +132,7 @@ As janelas de pré-visualização nunca recebem o foco do teclado, por isso não
 - Passados os segundos definidos em **Tempo após o último movimento** desde o último movimento do objeto (ou de qualquer outro objeto correspondente nessa câmara).
 - O mais tardar após os segundos definidos em **no máximo**, mesmo que o objeto continue a mover-se.
 - Nunca enquanto estiver fixada ou enquanto o ponteiro do rato estiver sobre ela.
+- Nunca durante uma repetição; depois fica aberta pelo menos mais 5 segundos.
 
 ### Mais do que uma câmara
 
@@ -217,7 +219,7 @@ O FrigatePiP encontra os streams go2rtc de cada câmara na configuração do Fri
 
 #### Pré-buffer
 
-**Pré-buffer** mantém uma conexão ao stream sub de cada câmara, para que o vídeo ao vivo comece de imediato (cerca de 0,15 s) em vez de esperar pelo próximo quadro-chave (até cerca de 1 s, dependendo do intervalo de quadros-chave da câmara). Custo: cerca de 0,1–0,5 Mbit/s de tráfego na rede local por câmara, permanentemente.
+**Pré-buffer** mantém uma conexão ao stream sub de cada câmara, para que o vídeo ao vivo comece de imediato (cerca de 0,15 s) em vez de esperar pelo próximo quadro-chave (até cerca de 1 s, dependendo do intervalo de quadros-chave da câmara). Custo: cerca de 0,1–0,5 Mbit/s de tráfego na rede local por câmara, permanentemente. Também guarda em memória os últimos 30 s de cada câmara (o que ocupam 30 s do seu stream sub: cerca de 0,2–2 MB por câmara), para que a [repetição](#ações-do-rato) possa começar 5 s antes do evento.
 
 #### GPU pronta
 
@@ -427,7 +429,7 @@ Num ambiente de trabalho Linux, as janelas de pré-visualização funcionam como
 - **Iniciar:** menu de aplicações → **FrigatePiP** (instalado com o apt) ou `frigate-pip` num terminal do ambiente de trabalho. Funciona em segundo plano, sem terminal; funciona uma cópia por utilizador. Um segundo arranque (ou `frigate-pip --settings`) abre as configurações da cópia em execução.
 - **Com a sessão do ambiente de trabalho:** `frigate-pip --autostart on` (para desligar: `frigate-pip --autostart off`). Para parar: `frigate-pip --quit`.
 - **Ícone na área de notificação:** com o mesmo menu que no Windows (ver [O ícone na área de notificação](#4-o-ícone-na-área-de-notificação)); a cor mostra o estado: azul — ligado, cinzento — sem ligação, âmbar — em pausa. Aparece no KDE Plasma, Xfce, Cinnamon, MATE e Budgie, e no GNOME com a extensão AppIndicator (incluída no Ubuntu).
-- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, o controlo por baixo ajusta o volume, arrastar move a janela, a roda redimensiona-a, Ctrl + roda aproxima a imagem em torno do ponteiro, Ctrl + arrastar move a imagem aproximada, um clique fixa-a, um duplo clique abre a câmara no Frigate e uma janela sob o ponteiro não se fecha.
+- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, o controlo por baixo ajusta o volume, ⟲ repete o início do evento, arrastar move a janela, a roda redimensiona-a, Ctrl + roda aproxima a imagem em torno do ponteiro, Ctrl + arrastar move a imagem aproximada, um clique fixa-a, um duplo clique abre a câmara no Frigate e uma janela sob o ponteiro não se fecha.
 - **Opções das janelas:** `topmost` (com `false`, as janelas são janelas normais que outras podem tapar), `sound` (o som de notificação do ambiente de trabalho) e `skip_fullscreen` (nada enquanto a janela ativa estiver em ecrã inteiro) funcionam como no Windows.
 - **Configurações:** um clique no ícone (ou **Configurações…** no seu menu) abre-as no navegador, com as mesmas opções, descrições e teste de ligação que no Windows; a página só se abre neste computador. No primeiro arranque abre-se sozinha. São guardadas em `~/.config/frigate-pip/config.ini` (descrito abaixo).
 
@@ -441,7 +443,7 @@ Neste modo, o FrigatePiP não tem janela própria: aguarda deteções em segundo
 2. Abra o tmux para o seu próprio trabalho — `tmux` inicia uma nova sessão — e trabalhe nele. Os popups aparecem por cima dessa janela.
 
 - Para parar o FrigatePiP: `tmux kill-session -t frigate-pip`. Para usar as suas teclas (pausar, mostrar uma câmara): `tmux attach -t frigate-pip`.
-- O popup aparece no **canto** escolhido (`position`) e o seu tamanho segue a **largura da janela** (`width`). Fecha-se sozinho após o tempo habitual (`duration`, `max_duration`) ou de imediato com **q**, **x** ou **Esc**. **m** desliga e volta a ligar o seu som.
+- O popup aparece no **canto** escolhido (`position`) e o seu tamanho segue a **largura da janela** (`width`). Fecha-se sozinho após o tempo habitual (`duration`, `max_duration`) ou de imediato com **q**, **x** ou **Esc**. **m** desliga e volta a ligar o seu som. **r** repete o início do evento (desde a abertura do popup).
 - O tmux mostra um popup de cada vez: uma deteção noutra câmara substitui o popup aberto (ou é ignorada quando `replace = false`).
 - Para as cores completas da imagem, o tmux tem de transmitir a cor de 24 bits: adicione `set -as terminal-features ",xterm-256color:RGB"` ao `~/.tmux.conf` (use o seu `$TERM` fora do tmux) e reinicie o tmux. O FrigatePiP escreve esta sugestão no registo quando faltam as cores.
 
@@ -455,6 +457,7 @@ Quando o FrigatePiP é executado num terminal ou numa consola:
 | **x** (ou Esc) | Fechar todas as janelas de pré-visualização. |
 | **p** | Pausar / retomar as notificações. |
 | **m** | Desliga / liga o som (com `camera_audio = true`) em todas as janelas, também nas abertas depois; a legenda mostra então *som desligado*. |
+| **r** | Repetir o início do evento em todas as janelas (ver [Ações do rato](#ações-do-rato)); de novo: voltar ao vídeo ao vivo. |
 | **1**–**9** | Mostrar a câmara 1–9 (pela ordem da configuração do Frigate). |
 
 ### Linha de comandos

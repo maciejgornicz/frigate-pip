@@ -122,6 +122,7 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 | **×** (coin supérieur droit) | Ferme immédiatement la fenêtre. Le bouton apparaît lorsque vous pointez la souris sur la fenêtre. |
 | **Haut-parleur** (à gauche de ×) | Coupe le son de la fenêtre ; un nouveau clic le rétablit. Le bouton apparaît lorsque vous pointez une fenêtre qui diffuse le son de la caméra ; tant que le son est coupé, le haut-parleur barré reste visible. |
 | **Curseur de volume** (sous le haut-parleur) | Règle le volume de cette fenêtre : faites-le glisser ou cliquez dessus. Il apparaît avec le haut-parleur ; monter le volume réactive aussi le son coupé. Sous Linux, le nouveau volume s’entend juste après avoir relâché. |
+| **Relecture** ⟲ (à gauche des autres boutons) | Rejoue le début de l’événement à vitesse normale, sans son ; la légende affiche *Relecture −12 s*, c’est-à-dire le retard de l’image sur le direct. Avec le [préchargement](#préchargement), la relecture commence 5 s avant l’ouverture de la fenêtre ; sans lui, à l’ouverture de la fenêtre. Cliquez à nouveau pour revenir aussitôt à la vidéo en direct ; après la relecture, elle revient d’elle-même. Le bouton apparaît quand vous pointez une fenêtre avec vidéo en direct ; la fenêtre reste ouverte pendant la relecture. |
 | **Clic droit** | Ferme la fenêtre. |
 | **Double-clic** | Ouvre cette caméra dans l’interface web de Frigate. |
 | **Survol** | Tant que le pointeur de la souris se trouve sur la fenêtre, celle-ci ne se ferme pas. Une fois le pointeur éloigné, elle reste encore au moins 3 secondes. |
@@ -131,6 +132,7 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 - Après le nombre de secondes défini dans **Durée après dernier mouvement**, compté depuis le dernier mouvement de l’objet (ou de tout autre objet correspondant sur cette caméra).
 - Au plus tard après le nombre de secondes défini dans **au plus**, même si l’objet continue de bouger.
 - Jamais tant qu’elle est épinglée ou que le pointeur de la souris se trouve dessus.
+- Jamais pendant une relecture ; ensuite, elle reste encore ouverte au moins 5 secondes.
 
 ### Plusieurs caméras
 
@@ -217,7 +219,7 @@ L’option **Son de la caméra** joue le son de la caméra (AAC ou G.711 issu du
 
 #### Préchargement
 
-Le **Préchargement** maintient une connexion au flux sub de chaque caméra, de sorte que la vidéo en direct démarre immédiatement (environ 0,15 s) au lieu d’attendre la prochaine image clé (jusqu’à environ 1 s, selon l’intervalle entre images clés de la caméra). Coût : environ 0,1–0,5 Mbit/s de trafic sur le réseau local par caméra, en permanence.
+Le **Préchargement** maintient une connexion au flux sub de chaque caméra, de sorte que la vidéo en direct démarre immédiatement (environ 0,15 s) au lieu d’attendre la prochaine image clé (jusqu’à environ 1 s, selon l’intervalle entre images clés de la caméra). Coût : environ 0,1–0,5 Mbit/s de trafic sur le réseau local par caméra, en permanence. Il garde aussi en mémoire les 30 dernières secondes de chaque caméra (autant que 30 s de son flux sub : environ 0,2 à 2 Mo par caméra), pour que la [relecture](#actions-de-la-souris) puisse commencer 5 s avant l’événement.
 
 #### GPU prêt
 
@@ -427,7 +429,7 @@ Sur un bureau Linux, les fenêtres d’aperçu fonctionnent comme sous Windows 
 - **Lancement :** menu des applications → **FrigatePiP** (installé avec apt), ou `frigate-pip` dans un terminal du bureau. Il s’exécute en arrière-plan sans terminal ; une seule copie s’exécute par utilisateur. Un second lancement (ou `frigate-pip --settings`) ouvre les paramètres de la copie en cours d’exécution.
 - **Avec la session du bureau :** `frigate-pip --autostart on` (pour désactiver : `frigate-pip --autostart off`). Pour l’arrêter : `frigate-pip --quit`.
 - **Icône dans la zone de notification :** avec le même menu que sous Windows (voir [Icône de la zone de notification](#4-icône-de-la-zone-de-notification)) ; sa couleur indique l’état : bleu — connecté, gris — non connecté, orange — en pause. Elle apparaît sous KDE Plasma, Xfce, Cinnamon, MATE et Budgie, ainsi que sous GNOME avec l’extension AppIndicator (incluse dans Ubuntu).
-- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, le curseur en dessous règle le volume, un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, et une fenêtre sous la souris ne se ferme pas.
+- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, le curseur en dessous règle le volume, ⟲ rejoue le début de l’événement, un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, et une fenêtre sous la souris ne se ferme pas.
 - **Options des fenêtres :** `topmost` (avec `false`, les fenêtres sont des fenêtres ordinaires que d’autres peuvent recouvrir), `sound` (le son de notification du bureau) et `skip_fullscreen` (rien tant que la fenêtre active est en plein écran) fonctionnent comme sous Windows.
 - **Paramètres :** un clic sur l’icône (ou **Paramètres…** dans son menu) les ouvre dans le navigateur, avec les mêmes options, descriptions et le même test de connexion que sous Windows ; la page ne s’ouvre que sur cet ordinateur. Au premier lancement, elle s’ouvre d’elle-même. Ils sont enregistrés dans `~/.config/frigate-pip/config.ini` (décrit plus bas).
 
@@ -441,7 +443,7 @@ Dans ce mode, FrigatePiP n’a pas de fenêtre propre : il attend les détectio
 2. Ouvrez tmux pour votre propre travail — `tmux` démarre une nouvelle session — et travaillez-y. Les popups apparaissent par-dessus cette fenêtre.
 
 - Pour arrêter FrigatePiP : `tmux kill-session -t frigate-pip`. Pour utiliser ses touches (pause, affichage d’une caméra) : `tmux attach -t frigate-pip`.
-- La popup apparaît dans le **coin** choisi (`position`) et sa taille suit la **largeur de la fenêtre** (`width`). Elle se ferme d’elle-même après le délai habituel (`duration`, `max_duration`), ou immédiatement avec **q**, **x** ou **Échap**. **m** coupe et rétablit son son.
+- La popup apparaît dans le **coin** choisi (`position`) et sa taille suit la **largeur de la fenêtre** (`width`). Elle se ferme d’elle-même après le délai habituel (`duration`, `max_duration`), ou immédiatement avec **q**, **x** ou **Échap**. **m** coupe et rétablit son son. **r** rejoue le début de l’événement (depuis l’ouverture de la popup).
 - tmux n’affiche qu’une popup à la fois : une détection sur une autre caméra remplace la popup ouverte (ou est ignorée si `replace = false`).
 - Pour obtenir toutes les couleurs de l’image, tmux doit transmettre les couleurs 24 bits : ajoutez `set -as terminal-features ",xterm-256color:RGB"` à `~/.tmux.conf` (en indiquant la valeur de votre `$TERM` hors de tmux) et redémarrez tmux. FrigatePiP inscrit cette indication dans son journal lorsque les couleurs manquent.
 
@@ -455,6 +457,7 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 | **x** (ou Échap) | Fermer toutes les fenêtres d’aperçu. |
 | **p** | Suspendre / reprendre les notifications. |
 | **m** | Coupe / rétablit le son (avec `camera_audio = true`) dans toutes les fenêtres, y compris celles ouvertes ensuite ; la légende affiche alors *son coupé*. |
+| **r** | Rejouer le début de l’événement dans toutes les fenêtres (voir [Actions de la souris](#actions-de-la-souris)) ; à nouveau : retour à la vidéo en direct. |
 | **1**–**9** | Afficher la caméra 1 à 9 (dans l’ordre de la configuration de Frigate). |
 
 ### Ligne de commande
