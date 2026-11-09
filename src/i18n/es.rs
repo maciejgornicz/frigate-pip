@@ -179,7 +179,8 @@ pub static STRINGS: Strings = Strings {
     tip_check_updates: "Una vez al día FrigatePiP consulta en GitHub si hay una versión nueva (no se envía ningún dato sobre usted ni sus cámaras) y ofrece instalarla.",
     tip_update: "Busca ahora una versión nueva, o descarga e instala la versión encontrada. La configuración se conserva.",
 
-    console_keys: "q salir · x cerrar ventanas · p pausar · m sonido · 1–9 mostrar cámara",
+    replay: "Repetición",
+    console_keys: "q salir · x cerrar ventanas · p pausar · m sonido · r repetición · 1–9 mostrar cámara",
     console_tmux_running: "se ejecuta en segundo plano: las ventanas de las cámaras se abren como ventanas emergentes de tmux (Ctrl+C lo detiene).",
     console_sound_off: "sonido desactivado",
     console_list_title: "Cámaras en Frigate ({0}): {1}",
