@@ -11,6 +11,7 @@ mod config;
 mod filter;
 mod frigate;
 mod h264;
+mod history;
 mod i18n;
 mod json;
 mod mqtt;
