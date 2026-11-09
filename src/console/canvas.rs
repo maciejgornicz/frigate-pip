@@ -191,6 +191,35 @@ impl Image {
         }
     }
 
+    /// A ring `width` pixels thick, drawn clockwise (y down) from angle `from` to `to` (radians).
+    fn ring(&mut self, (cx, cy): (f32, f32), r: f32, from: f32, to: f32, width: f32, color: (u8, u8, u8)) {
+        let h = width / 2.0;
+        let sweep = (to - from).rem_euclid(std::f32::consts::TAU);
+        for y in (cy - r - h - 1.0) as i32..=(cy + r + h + 1.0) as i32 {
+            for x in (cx - r - h - 1.0) as i32..=(cx + r + h + 1.0) as i32 {
+                let (px, py) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                if (py.atan2(px) - from).rem_euclid(std::f32::consts::TAU) > sweep {
+                    continue;
+                }
+                let d = ((px * px + py * py).sqrt() - r).abs();
+                self.blend(x, y, color, ((h - d + 0.5).clamp(0.0, 1.0) * 255.0) as u8);
+            }
+        }
+    }
+
+    /// Round replay button: an anticlockwise arrow, lit while replaying or under the mouse.
+    pub fn replay_button(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), running: bool, hot: bool) {
+        let (cx, cy, rad) = ((x0 + x1) as f32 / 2.0, y0 as f32 + (x1 - x0) as f32 / 2.0, (x1 - x0) as f32 / 2.0);
+        self.disc_alpha(cx, cy, rad, (0, 0, 0), 0.55);
+        if hot || running {
+            self.disc_alpha(cx, cy, rad, (255, 255, 255), 0.3);
+        }
+        let icon = crate::view::replay_icon((cx, cy), rad);
+        let white = (255, 255, 255);
+        self.ring((cx, cy), icon.radius, icon.from, icon.to, (rad / 7.0).max(1.5), white);
+        self.polygon(&icon.head, white);
+    }
+
     /// Round close button (×) in `rect` (x0, y0, x1, y1); red under the mouse — like on Windows.
     pub fn close_button(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), hot: bool) {
         let (cx, cy, rad) = ((x0 + x1) as f32 / 2.0, y0 as f32 + (x1 - x0) as f32 / 2.0, (x1 - x0) as f32 / 2.0);
