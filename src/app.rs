@@ -1405,11 +1405,13 @@ impl App {
         self.find(hwnd).is_some_and(|p| p.shared.replay() > 0)
     }
 
-    /// Replay button: starts or stops a replay of the event start (the player does it).
+    /// Replay button: starts or stops a replay of the event start (the player does it). A
+    /// stopped replay, too, leaves a few seconds of live video before the window closes.
     fn toggle_replay(&mut self, hwnd: HWND) {
-        if let Some(p) = self.find(hwnd) {
-            p.shared.press_replay();
-        }
+        let Some(p) = self.find(hwnd) else { return };
+        p.shared.press_replay();
+        p.deadline = p.deadline.max(Instant::now() + Duration::from_secs(5));
+        Self::arm(p);
     }
 
     /// Sound button: mutes / unmutes this window.
