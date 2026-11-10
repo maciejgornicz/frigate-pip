@@ -43,6 +43,10 @@ pub const ID_ZONES: i32 = 203;
 pub const ID_STATIONARY: i32 = 204;
 pub const ID_MINSCORE: i32 = 205;
 pub const ID_MINSCORE_LBL: i32 = 206;
+/// Whose objects the object list shows: all cameras or one camera.
+pub const ID_LABELS_FOR: i32 = 207;
+/// "Same as all cameras": removes the shown camera's own object list.
+pub const ID_LABELS_SAME: i32 = 208;
 pub const ID_MONITOR: i32 = 300;
 pub const ID_POSITION: i32 = 301;
 pub const ID_WIDTH: i32 = 302;
@@ -109,6 +113,12 @@ pub struct Settings {
     labels: Vec<String>,
     zones: Vec<String>,
     monitors: usize,
+    /// The object lists, as they were when the object list last showed another scope.
+    objects: Objects,
+    /// The scope shown in the object list: 0 = all cameras, n = `cameras[n - 1]`.
+    scope: usize,
+    /// Texts of the scope combo (a camera with its own list has " *").
+    scope_texts: Vec<String>,
 }
 
 fn wide(s: &str) -> HSTRING {
@@ -254,6 +264,72 @@ pub fn help_url() -> String {
     format!("https://github.com/maciejgornicz/frigate-pip/blob/main/docs/{}/user-guide.md", i18n::current().code())
 }
 
+/// An object in the list: its name in the interface language, with Frigate's in brackets.
+fn label_text(l: &str) -> String {
+    let name = i18n::label(l);
+    if name == l {
+        l.to_string()
+    } else {
+        format!("{name} ({l})")
+    }
+}
+
+/// The checked entries of a list: everything or nothing checked = everything (an empty
+/// list, which also takes in cameras and objects added to Frigate later).
+fn pick(names: &[String], checked: &[String]) -> Vec<String> {
+    let on: Vec<String> = names.iter().filter(|n| checked.iter().any(|c| c.eq_ignore_ascii_case(n))).cloned().collect();
+    if on.is_empty() || on.len() == names.len() {
+        Vec::new()
+    } else {
+        on
+    }
+}
+
+/// Objects as set in the window: for all cameras (empty = every object) and the own list of
+/// each camera of the camera list (empty = none: the one for all cameras).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Objects {
+    all: Vec<String>,
+    own: Vec<Vec<String>>,
+}
+
+impl Objects {
+    fn from_config(c: &Config, cameras: &[(String, String)]) -> Objects {
+        Objects { all: c.labels.clone(), own: cameras.iter().map(|(n, _)| c.own_labels(n).map(<[String]>::to_vec).unwrap_or_default()).collect() }
+    }
+
+    /// The objects checked in the list for a scope: 0 = all cameras, n = the n-th camera.
+    fn checks(&self, scope: usize, labels: &[String]) -> Vec<String> {
+        let list = self.own.get(scope.wrapping_sub(1)).filter(|o| !o.is_empty()).unwrap_or(&self.all);
+        labels.iter().filter(|l| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(l))).cloned().collect()
+    }
+
+    /// With the checks of one scope changed; a camera list that is the same as the one for
+    /// all cameras is none.
+    fn with_checks(&self, scope: usize, checked: &[String], labels: &[String]) -> Objects {
+        let mut o = self.clone();
+        match scope {
+            0 => o.all = pick(labels, checked),
+            n => {
+                if let Some(own) = o.own.get_mut(n - 1) {
+                    *own = checked.to_vec();
+                }
+            }
+        }
+        for own in &mut o.own {
+            *own = crate::view::own_labels(own, &o.all, labels);
+        }
+        o
+    }
+
+    fn apply(&self, c: &mut Config, cameras: &[(String, String)]) {
+        c.labels = self.all.clone();
+        for ((n, _), own) in cameras.iter().zip(&self.own) {
+            c.set_own_labels(n, own.clone());
+        }
+    }
+}
+
 fn on_pane(h: HWND) -> HWND {
     unsafe {
         SetWindowLongPtrW(h, GWLP_USERDATA, ON_PANE);
@@ -317,6 +393,7 @@ impl Settings {
             let cfg = init.cfg;
             let cameras: Vec<(String, String)> = init.cameras.iter().map(|c| (c.name.clone(), c.title.clone())).collect();
             let (cameras_all, labels, zones) = choices(init.cameras, cfg);
+            let objects = Objects::from_config(cfg, &cameras_all);
 
             let mut s = Settings {
                 hwnd,
@@ -330,6 +407,9 @@ impl Settings {
                 labels,
                 zones,
                 monitors: init.monitors.len(),
+                objects,
+                scope: 0,
+                scope_texts: Vec::new(),
             };
             s.build(cfg, init.autostart, &init.monitors, &cameras);
             if let Some(color) = sample_pane(s.tab) {
@@ -603,15 +683,27 @@ impl Settings {
         for (i, (title, id, items, tip)) in lists.into_iter().enumerate() {
             let x = lx + i as i32 * (colw + 12);
             let l = self.label(p, title, x, 88, colw);
-            let e = self.checklist(p, id, &items, x, 110, colw, 200);
+            if id != ID_LABELS {
+                let e = self.checklist(p, id, &items, x, 110, colw, 200);
+                self.tip(&[l, e], tip);
+                continue;
+            }
+            // Objects: whose list is shown (all cameras or one camera), the list, and a
+            // button that gives the shown camera the list for all cameras again.
+            let e = self.combo(Some(p), ID_LABELS_FOR, &[], 0, x, 112, colw);
+            self.tip(&[e], t.tip_objects_for);
+            let e = self.checklist(p, id, &items, x, 142, colw, 168);
             self.tip(&[l, e], tip);
+            let b = self.add(Some(p), WC_BUTTONW, t.objects_same_as_all, WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_LABELS_SAME, x, 316, colw, 26);
+            self.tip(&[b], t.tip_objects_same_as_all);
         }
-        self.note(p, t.detection_note, lx, 316, full, 36);
-        let e = self.check(Some(p), ID_STATIONARY, t.ignore_stationary, c.ignore_stationary, lx, 358, full);
+        self.update_objects(c);
+        self.note(p, t.detection_note, lx, 352, full, 36);
+        let e = self.check(Some(p), ID_STATIONARY, t.ignore_stationary, c.ignore_stationary, lx, 394, full);
         self.tip(&[e], t.tip_ignore_stationary);
-        let l = self.label(p, t.min_score, lx, 394, lw);
-        let e = self.track(p, ID_MINSCORE, 0, 100, (c.min_score * 100.0).round() as i32, cx, 392, cw - 60);
-        self.label(p, "", RIGHT - 55, 394, 55);
+        let l = self.label(p, t.min_score, lx, 430, lw);
+        let e = self.track(p, ID_MINSCORE, 0, 100, (c.min_score * 100.0).round() as i32, cx, 428, cw - 60);
+        self.label(p, "", RIGHT - 55, 430, 55);
         self.set_id_of_last(ID_MINSCORE_LBL);
         self.tip(&[l, e], t.tip_min_score);
 
@@ -730,14 +822,7 @@ impl Settings {
     fn list_items(&self, c: &Config) -> (Vec<(String, bool)>, Vec<(String, bool)>, Vec<(String, bool)>) {
         let all = |list: &[String], name: &str| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(name));
         let cams = self.cameras.iter().map(|(n, t)| (t.clone(), all(&c.cameras, n))).collect();
-        let labels = self
-            .labels
-            .iter()
-            .map(|l| {
-                let name = i18n::label(l);
-                (if name == l { l.clone() } else { format!("{name} ({l})") }, all(&c.labels, l))
-            })
-            .collect();
+        let labels = self.labels.iter().map(|l| (label_text(l), all(&c.labels, l))).collect();
         let zones = self.zones.iter().map(|z| (z.clone(), c.zones.iter().any(|x| x.eq_ignore_ascii_case(z)))).collect();
         (cams, labels, zones)
     }
@@ -754,6 +839,11 @@ impl Settings {
         self.labels = labels;
         self.zones = zones;
         self.real_cameras = cams.len();
+        // The object list starts again with all cameras.
+        self.objects = Objects::from_config(&draft, &self.cameras);
+        self.scope = 0;
+        self.scope_texts.clear();
+        self.update_objects(&draft);
         let (c, l, z) = self.list_items(&draft);
         self.fill_list(ID_CAMS, &c);
         self.fill_list(ID_LABELS, &l);
@@ -813,6 +903,59 @@ impl Settings {
         (0..n).map(|i| unsafe { (SendMessageW(lv, LVM_GETITEMSTATE, WPARAM(i), LPARAM(LVIS_STATEIMAGEMASK.0 as isize)).0 >> 12) == 2 }).collect()
     }
 
+    /// The entries of `names` checked in a list (in the same order).
+    fn checked_names(&self, id: i32, names: &[String]) -> Vec<String> {
+        names.iter().zip(self.list_checks(id, names.len())).filter(|(_, on)| *on).map(|(n, _)| n.clone()).collect()
+    }
+
+    /// The object list shows another scope (all cameras or one camera).
+    pub fn switch_scope(&mut self) {
+        let new = self.sel(ID_LABELS_FOR);
+        if new == self.scope {
+            return;
+        }
+        self.objects = self.objects.with_checks(self.scope, &self.checked_names(ID_LABELS, &self.labels), &self.labels);
+        self.scope = new;
+        self.show_objects();
+    }
+
+    /// "Same as all cameras": the shown camera loses its own object list.
+    pub fn same_as_all(&mut self) {
+        if self.scope > 0 {
+            self.objects = self.objects.with_checks(self.scope, &[], &self.labels);
+            self.show_objects();
+        }
+    }
+
+    fn show_objects(&self) {
+        let on = self.objects.checks(self.scope, &self.labels);
+        let items: Vec<(String, bool)> = self.labels.iter().map(|l| (label_text(l), on.contains(l))).collect();
+        self.fill_list(ID_LABELS, &items);
+    }
+
+    /// The scope combo (" *" after a camera with its own object list) and the "Same as all
+    /// cameras" button, which works only for such a camera.
+    pub fn update_objects(&mut self, draft: &Config) {
+        let texts: Vec<String> = std::iter::once(i18n::t().objects_all_cameras.to_string())
+            .chain(self.cameras.iter().map(|(n, title)| if draft.own_labels(n).is_some() { format!("{title} *") } else { title.clone() }))
+            .collect();
+        let combo = self.item(ID_LABELS_FOR);
+        if texts != self.scope_texts {
+            unsafe {
+                let _ = SendMessageW(combo, CB_RESETCONTENT, WPARAM(0), LPARAM(0));
+                for text in &texts {
+                    let _ = SendMessageW(combo, CB_ADDSTRING, WPARAM(0), LPARAM(wide(text).as_ptr() as isize));
+                }
+                let _ = SendMessageW(combo, CB_SETCURSEL, WPARAM(self.scope), LPARAM(0));
+            }
+            self.scope_texts = texts;
+        }
+        let own = self.scope > 0 && self.cameras.get(self.scope - 1).is_some_and(|(n, _)| draft.own_labels(n).is_some());
+        unsafe {
+            let _ = EnableWindow(self.item(ID_LABELS_SAME), own);
+        }
+    }
+
     pub fn preview_camera(&self) -> Option<usize> {
         (self.real_cameras > 0).then(|| self.sel(ID_PREV_CAM))
     }
@@ -838,17 +981,10 @@ impl Settings {
         };
 
         c.mode = TriggerMode::ALL[self.sel(ID_MODE).min(2)];
-        let pick = |names: Vec<String>, checks: Vec<bool>| -> Vec<String> {
-            let on = checks.iter().filter(|b| **b).count();
-            if on == 0 || on == names.len() {
-                Vec::new()
-            } else {
-                names.into_iter().zip(checks).filter(|(_, b)| *b).map(|(n, _)| n).collect()
-            }
-        };
         let cam_names: Vec<String> = self.cameras.iter().map(|(n, _)| n.clone()).collect();
-        c.cameras = pick(cam_names, self.list_checks(ID_CAMS, self.cameras.len()));
-        c.labels = pick(self.labels.clone(), self.list_checks(ID_LABELS, self.labels.len()));
+        c.cameras = pick(&cam_names, &self.checked_names(ID_CAMS, &cam_names));
+        // The object list shows one scope; the others are as they were when last shown.
+        self.objects.with_checks(self.scope, &self.checked_names(ID_LABELS, &self.labels), &self.labels).apply(&mut c, &self.cameras);
         c.zones = self.zones.iter().zip(self.list_checks(ID_ZONES, self.zones.len())).filter(|(_, b)| *b).map(|(z, _)| z.clone()).collect();
         c.ignore_stationary = self.checked(ID_STATIONARY);
         c.min_score = self.pos(ID_MINSCORE) as f32 / 100.0;
@@ -971,5 +1107,67 @@ impl Drop for Settings {
                 let _ = DeleteObject(HBRUSH(brush as _));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::IniDoc;
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn cams() -> Vec<(String, String)> {
+        vec![("gate".into(), "Gate".into()), ("yard".into(), "Yard".into())]
+    }
+
+    fn labels() -> Vec<String> {
+        names(&["person", "car", "dog"])
+    }
+
+    #[test]
+    fn checks_shown_for_every_scope() {
+        let c = Config::from_ini(&IniDoc::parse("[trigger]\nlabels = person\n[camera.Yard]\nlabels = dog\n"));
+        let o = Objects::from_config(&c, &cams());
+        // 0 = all cameras, then the cameras: their own list, or the one for all cameras.
+        assert_eq!(
+            (o.checks(0, &labels()), o.checks(1, &labels()), o.checks(2, &labels())),
+            (names(&["person"]), names(&["person"]), names(&["dog"]))
+        );
+        // Every object for all cameras: all checked.
+        let o = Objects::from_config(&Config::from_ini(&IniDoc::parse("")), &cams());
+        assert_eq!(o.checks(0, &labels()), labels());
+    }
+
+    #[test]
+    fn cameras_without_a_list_follow_the_one_for_all_cameras() {
+        let c = Config::from_ini(&IniDoc::parse("[trigger]\nlabels = person\n[camera.yard]\nlabels = dog\n"));
+        let o = Objects::from_config(&c, &cams());
+        // Gate shown, not changed, then the list for all cameras changed: gate follows it.
+        let o = o.with_checks(1, &names(&["person"]), &labels()).with_checks(0, &names(&["person", "car"]), &labels());
+        assert_eq!(o.checks(1, &labels()), names(&["person", "car"]));
+        assert_eq!(o.own, [names(&[]), names(&["dog"])]);
+        // A camera list made the same as for all cameras is none.
+        assert_eq!(o.with_checks(2, &names(&["car", "person"]), &labels()).own[1], names(&[]));
+        // Nothing checked for a camera: none either.
+        assert_eq!(o.with_checks(2, &[], &labels()).own[1], names(&[]));
+        assert_eq!(o.with_checks(1, &names(&["dog"]), &labels()).own[0], names(&["dog"]));
+    }
+
+    #[test]
+    fn objects_back_into_the_settings() {
+        let mut c = Config::from_ini(&IniDoc::parse("[camera.yard]\nlabels = dog\n[camera.old]\nlabels = car\n"));
+        let o = Objects::from_config(&c, &cams()).with_checks(1, &names(&["person"]), &labels()).with_checks(2, &labels(), &labels());
+        o.apply(&mut c, &cams());
+        // Everything checked for yard is the same as for all cameras (every object).
+        assert!(c.labels.is_empty());
+        assert_eq!((c.own_labels("gate"), c.own_labels("yard")), (Some(&names(&["person"])[..]), None));
+        // A camera that is not in the list keeps its own.
+        assert_eq!(c.own_labels("old"), Some(&names(&["car"])[..]));
+        let o = o.with_checks(0, &names(&["person", "car"]), &labels());
+        o.apply(&mut c, &cams());
+        assert_eq!(c.labels, names(&["person", "car"]));
     }
 }

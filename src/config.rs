@@ -186,6 +186,8 @@ pub struct CamOverride {
     pub name: Option<String>,
     pub main: Option<String>,
     pub sub: Option<String>,
+    /// Objects that open a window on this camera, instead of `[trigger] labels` (empty = those).
+    pub labels: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -265,7 +267,10 @@ impl Config {
         let mut overrides = HashMap::new();
         for sec in d.sections() {
             if let Some(cam) = sec.strip_prefix("camera.") {
-                overrides.insert(cam.to_string(), CamOverride { name: opt(g(&sec, "name")), main: opt(g(&sec, "main")), sub: opt(g(&sec, "sub")) });
+                overrides.insert(
+                    cam.to_string(),
+                    CamOverride { name: opt(g(&sec, "name")), main: opt(g(&sec, "main")), sub: opt(g(&sec, "sub")), labels: list(g(&sec, "labels")) },
+                );
             }
         }
         Config {
@@ -341,6 +346,29 @@ impl Config {
 
     pub fn rtsp_url(&self, stream: &str) -> String {
         self.rtsp.replace("{host}", &self.host()).replace("{stream}", stream)
+    }
+
+    /// The camera's own object list (`labels` in `[camera.<name>]`), if it has one.
+    pub fn own_labels(&self, camera: &str) -> Option<&[String]> {
+        self.overrides.iter().find(|(k, o)| k.eq_ignore_ascii_case(camera) && !o.labels.is_empty()).map(|(_, o)| o.labels.as_slice())
+    }
+
+    /// Objects that open a window on the camera: its own list, or the list for all cameras
+    /// (empty = every object).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn labels_for(&self, camera: &str) -> &[String] {
+        self.own_labels(camera).unwrap_or(&self.labels)
+    }
+
+    /// Sets the camera's own object list (empty = the list for all cameras).
+    pub fn set_own_labels(&mut self, camera: &str, labels: Vec<String>) {
+        match self.overrides.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(camera)) {
+            Some((_, o)) => o.labels = labels,
+            None if !labels.is_empty() => {
+                self.overrides.insert(camera.to_string(), CamOverride { labels, ..Default::default() });
+            }
+            None => {}
+        }
     }
 }
 
@@ -439,6 +467,16 @@ pub fn write_all(c: &Config, d: &mut IniDoc) {
     ];
     for (section, key, value) in pairs {
         d.set(section, key, &value);
+    }
+    // Object lists of single cameras; a removed list leaves its key empty, and a camera
+    // without one gets no section.
+    let mut cams: Vec<(&String, &CamOverride)> = c.overrides.iter().collect();
+    cams.sort_by_key(|(k, _)| k.to_ascii_lowercase());
+    for (cam, o) in cams {
+        let section = format!("camera.{cam}");
+        if !o.labels.is_empty() || d.get(&section, "labels").is_some() {
+            d.set(&section, "labels", &o.labels.join(", "));
+        }
     }
 }
 
@@ -594,6 +632,9 @@ camera_volume = 100
 ; name = Front door
 ; main = front_door
 ; sub = front_door_sub
+; Objects that open a window on this camera, instead of labels in [trigger]
+; (empty = the same as for all cameras)
+; labels = person, car, dog
 ";
 
 #[cfg(test)]
@@ -717,6 +758,55 @@ mod tests {
         drop(lock);
         assert_eq!(load(&path).unwrap().0.url, "http://10.1.1.1:5000");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn camera_labels_replace_the_global_list() {
+        let c = Config::from_ini(&IniDoc::parse(
+            "[trigger]\nlabels = person\n\n[camera.Garden]\nlabels = person, dog\n\n[camera.gate]\nname = Gate\nlabels =\n",
+        ));
+        assert_eq!(c.labels_for("garden"), ["person", "dog"]);
+        assert_eq!(c.own_labels("GARDEN"), Some(&["person".to_string(), "dog".to_string()][..]));
+        // Empty or missing = the list for all cameras.
+        assert_eq!(c.own_labels("gate"), None);
+        assert_eq!(c.labels_for("gate"), ["person"]);
+        assert_eq!(c.labels_for("other"), ["person"]);
+    }
+
+    #[test]
+    fn set_own_labels_keeps_the_section_name() {
+        let mut c = Config::from_ini(&IniDoc::parse("[camera.Garden]\nname = Ogród\n"));
+        c.set_own_labels("garden", vec!["dog".into()]);
+        c.set_own_labels("gate", vec!["car".into()]);
+        assert_eq!(c.overrides["Garden"].labels, ["dog"]);
+        assert_eq!(c.overrides["Garden"].name.as_deref(), Some("Ogród"));
+        assert_eq!(c.own_labels("gate"), Some(&["car".to_string()][..]));
+        c.set_own_labels("GATE", Vec::new());
+        assert_eq!(c.own_labels("gate"), None);
+    }
+
+    #[test]
+    fn write_all_writes_camera_labels() {
+        let mut doc = IniDoc::parse("[trigger]\nlabels = person\n\n[camera.gate]\nname = Gate\n; komentarz\n\n[camera.yard]\nsub = yard_sub\n");
+        let mut c = Config::from_ini(&doc);
+        c.set_own_labels("gate", vec!["person".into(), "car".into()]);
+        c.set_own_labels("garden", vec!["dog".into(), "cat".into()]);
+        write_all(&c, &mut doc);
+        assert_eq!(doc.get("camera.gate", "labels").as_deref(), Some("person, car"));
+        assert_eq!(doc.get("camera.garden", "labels").as_deref(), Some("dog, cat"));
+        assert!(doc.lines.iter().any(|l| l == "; komentarz"));
+        // A camera without its own list gets no `labels` (and no section).
+        assert_eq!(doc.get("camera.yard", "labels"), None);
+        assert_eq!(Config::from_ini(&IniDoc::parse(&doc.to_text())), c);
+        // A list removed in the settings: the key stays, empty (= the list for all cameras).
+        c.set_own_labels("gate", Vec::new());
+        c.set_own_labels("drive", Vec::new());
+        write_all(&c, &mut doc);
+        assert_eq!(doc.get("camera.gate", "labels").as_deref(), Some(""));
+        assert!(!doc.sections().iter().any(|s| s == "camera.drive"));
+        let back = Config::from_ini(&IniDoc::parse(&doc.to_text()));
+        assert_eq!(back.own_labels("gate"), None);
+        assert_eq!(back.own_labels("garden"), Some(&["dog".to_string(), "cat".to_string()][..]));
     }
 
     #[test]

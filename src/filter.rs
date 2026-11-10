@@ -27,6 +27,8 @@ pub struct EventFilter {
     mode: TriggerMode,
     cameras: Vec<String>,
     labels: Vec<String>,
+    /// Cameras with their own object list (`labels` in `[camera.<name>]`), used instead of `labels`.
+    camera_labels: Vec<(String, Vec<String>)>,
     zones: Vec<String>,
     ignore_stationary: bool,
     min_score: f32,
@@ -92,6 +94,7 @@ impl EventFilter {
             mode: cfg.mode,
             cameras: cfg.cameras.clone(),
             labels: cfg.labels.clone(),
+            camera_labels: cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty()).map(|(cam, o)| (cam.clone(), o.labels.clone())).collect(),
             zones: cfg.zones.clone(),
             ignore_stationary: cfg.ignore_stationary,
             min_score: cfg.min_score,
@@ -152,6 +155,16 @@ impl EventFilter {
         self.cameras.is_empty() || any_in(std::iter::once(cam), &self.cameras)
     }
 
+    /// Objects that may open a window on the camera (empty = all).
+    fn labels(&self, cam: &str) -> &[String] {
+        self.camera_labels.iter().find(|(c, _)| c.eq_ignore_ascii_case(cam)).map_or(&self.labels, |(_, l)| l)
+    }
+
+    fn label_ok(&self, cam: &str, labels: impl Iterator<Item = impl AsRef<str>>) -> bool {
+        let wanted = self.labels(cam);
+        wanted.is_empty() || any_in(labels, wanted)
+    }
+
     fn object_matches(&self, o: &Json) -> bool {
         if !o.is_obj() || o.get("false_positive").bool() == Some(true) {
             return false;
@@ -160,7 +173,7 @@ impl EventFilter {
         if !self.camera_ok(cam) {
             return false;
         }
-        if !self.labels.is_empty() && !any_in(std::iter::once(label), &self.labels) {
+        if !self.label_ok(cam, std::iter::once(label)) {
             return false;
         }
         if !self.zones.is_empty() {
@@ -211,7 +224,7 @@ impl EventFilter {
             return false;
         }
         let data = r.get("data");
-        if !self.labels.is_empty() && !any_in(data.get("objects").strs().map(base_label), &self.labels) {
+        if !self.label_ok(cam, data.get("objects").strs().map(base_label)) {
             return false;
         }
         self.zones.is_empty() || any_in(data.get("zones").strs(), &self.zones)
@@ -293,7 +306,7 @@ impl EventFilter {
         let objects: Vec<&str> = data.get("objects").strs().map(base_label).collect();
         let label = objects
             .iter()
-            .find(|o| self.labels.is_empty() || any_in(std::iter::once(**o), &self.labels))
+            .find(|o| self.label_ok(&camera, std::iter::once(**o)))
             .or(objects.first())
             .or(data.get("audio").strs().next().as_ref())
             .copied()
@@ -603,6 +616,67 @@ mod tests {
         // An alert that began before the connection does not pop up.
         let old = item(&f, "r2", "alert", &["person"], &["e2"], -60.0);
         assert_eq!(f.on_message("reviews", &event("update", &old, &old)), Verdict::Activity("brama".into()));
+    }
+
+    /// Settings with `[trigger]` lines and further sections.
+    fn cfg_with(trigger: &str, more: &str) -> Config {
+        Config::from_ini(&IniDoc::parse(&format!("[trigger]\n{trigger}\n{more}\n")))
+    }
+
+    #[test]
+    fn camera_object_list_replaces_the_global_one() {
+        let mut f = EventFilter::new(&cfg_with("labels = person", "[camera.ogrod]\nlabels = dog, cat"));
+        let dog = obj("d1", "ogrod", "dog", false, &[]);
+        let person = obj("p1", "ogrod", "person", false, &[]);
+        assert!(matches!(f.on_message("events", &event("new", &dog, &dog)), Verdict::Show(_)));
+        assert_eq!(f.on_message("events", &event("new", &person, &person)), Verdict::Ignore);
+        // Other cameras keep the list for all cameras.
+        let person = obj("p2", "brama", "person", false, &[]);
+        let dog = obj("d2", "brama", "dog", false, &[]);
+        assert!(matches!(f.on_message("events", &event("new", &person, &person)), Verdict::Show(_)));
+        assert_eq!(f.on_message("events", &event("new", &dog, &dog)), Verdict::Ignore);
+    }
+
+    #[test]
+    fn camera_object_list_matches_any_case_and_empty_means_global() {
+        let mut f = EventFilter::new(&cfg_with("labels = person", "[camera.Ogrod]\nlabels = dog\n[camera.brama]\nlabels =\nname = Brama"));
+        let dog = obj("d1", "ogrod", "dog", false, &[]);
+        assert!(matches!(f.on_message("events", &event("new", &dog, &dog)), Verdict::Show(_)));
+        let dog = obj("d2", "brama", "dog", false, &[]);
+        assert_eq!(f.on_message("events", &event("new", &dog, &dog)), Verdict::Ignore);
+        // A camera list without any list for all cameras.
+        let mut f = EventFilter::new(&cfg_with("", "[camera.brama]\nlabels = car"));
+        let person = obj("p1", "brama", "person", false, &[]);
+        let other = obj("p2", "ogrod", "person", false, &[]);
+        assert_eq!(f.on_message("events", &event("new", &person, &person)), Verdict::Ignore);
+        assert!(matches!(f.on_message("events", &event("new", &other, &other)), Verdict::Show(_)));
+    }
+
+    #[test]
+    fn camera_object_list_in_review_modes() {
+        // The review items of the helper come from camera "brama".
+        let mut f = EventFilter::new(&cfg_with("mode = reviews\nlabels = person", "[camera.brama]\nlabels = dog"));
+        let person = review("r1", "detection", &["person"]);
+        assert_eq!(f.on_message("reviews", &event("new", &person, &person)), Verdict::Ignore);
+        let both = review("r2", "alert", &["person", "dog"]);
+        let v = f.on_message("reviews", &event("new", &both, &both));
+        // The caption shows the object that matched the camera's list.
+        assert!(matches!(v, Verdict::Show(ref d) if d.label == "dog"), "{v:?}");
+        let mut f = EventFilter::new(&cfg_with("mode = alerts\nlabels = person", "[camera.brama]\nlabels = car"));
+        let alert = review("r3", "alert", &["person"]);
+        assert_eq!(f.on_message("reviews", &event("new", &alert, &alert)), Verdict::Ignore);
+        let alert = review("r4", "alert", &["car"]);
+        assert!(matches!(f.on_message("reviews", &event("new", &alert, &alert)), Verdict::Show(_)));
+    }
+
+    #[test]
+    fn camera_object_list_applies_to_manual_events() {
+        let mut f = EventFilter::new(&cfg_with("labels = person, car", "[camera.brama]\nlabels = doorbell"));
+        let bell = item(&f, "r1", "alert", &["doorbell"], &["e1"], 1.0);
+        let v = f.on_message("reviews", &event("update", &bell, &bell));
+        assert!(matches!(v, Verdict::Show(ref d) if d.label == "doorbell"), "{v:?}");
+        let person = item(&f, "r2", "alert", &["person"], &["e2"], 1.0);
+        assert_eq!(f.on_message("reviews", &event("update", &person, &person)), Verdict::Ignore);
     }
 
     #[test]

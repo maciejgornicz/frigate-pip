@@ -69,9 +69,26 @@ pub fn choices(cams: &[CameraInfo], cfg: &Config) -> (Vec<(String, String)>, Vec
     if known.is_empty() {
         known = vec!["person".into(), "car".into()];
     }
-    let labels = union(known.iter(), &cfg.labels);
+    let mut own: Vec<&String> = cfg.overrides.values().flat_map(|o| o.labels.iter()).collect();
+    own.sort();
+    let wanted: Vec<String> = cfg.labels.iter().chain(own).cloned().collect();
+    let labels = union(known.iter(), &wanted);
     let zones = union(cams.iter().flat_map(|c| c.zones.iter()), &cfg.zones);
     (cameras, labels, zones)
+}
+
+/// The objects checked for one camera in the settings, as its own list: none (empty) when
+/// they are the same as for all cameras (`global`; empty = every one of `all`) or when
+/// nothing is checked.
+pub fn own_labels(picked: &[String], global: &[String], all: &[String]) -> Vec<String> {
+    let global = if global.is_empty() { all } else { global };
+    let has = |list: &[String], x: &String| list.iter().any(|y| y.eq_ignore_ascii_case(x));
+    let same = picked.iter().all(|p| has(global, p)) && global.iter().all(|g| has(picked, g));
+    if picked.is_empty() || same {
+        Vec::new()
+    } else {
+        picked.to_vec()
+    }
 }
 
 fn union<'a>(base: impl Iterator<Item = &'a String>, extra: &'a [String]) -> Vec<String> {
@@ -274,6 +291,41 @@ mod tests {
         // Never past the picture.
         assert_eq!(z.panned(9.0, -9.0), Zoom { x: 0.0, y: 0.5, size: 0.5 });
         assert_eq!(Zoom::FULL.panned(0.5, -0.5), Zoom::FULL);
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn camera_list_equal_to_the_global_one_is_no_list() {
+        let all = names(&["person", "car", "dog", "cat"]);
+        let global = names(&["person", "car"]);
+        assert!(own_labels(&names(&["car", "Person"]), &global, &all).is_empty());
+        assert_eq!(own_labels(&names(&["person", "dog"]), &global, &all), names(&["person", "dog"]));
+        // Nothing checked: as for all cameras.
+        assert!(own_labels(&[], &global, &all).is_empty());
+        // Every object for all cameras (an empty list): only all checked is the same.
+        assert!(own_labels(&all, &[], &all).is_empty());
+        assert_eq!(own_labels(&names(&["dog"]), &[], &all), names(&["dog"]));
+        // Every object for one camera while the others have a list: a list of them all.
+        assert_eq!(own_labels(&all, &global, &all), all);
+    }
+
+    #[test]
+    fn choices_offer_the_objects_of_camera_lists() {
+        let cfg = Config::from_ini(&crate::config::IniDoc::parse("[trigger]\nlabels = car\n[camera.yard]\nlabels = dog, person\n"));
+        let cams = [CameraInfo {
+            name: "gate".into(),
+            title: "Gate".into(),
+            main: None,
+            sub: None,
+            aspect: 1.78,
+            labels: names(&["person"]),
+            zones: vec![],
+        }];
+        let (_, labels, _) = choices(&cams, &cfg);
+        assert_eq!(labels, names(&["person", "car", "dog"]));
     }
 
     #[test]
