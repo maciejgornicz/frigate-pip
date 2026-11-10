@@ -37,7 +37,7 @@ pub fn caption(title: &str, d: &Detection) -> String {
     if d.score > 0.0 {
         s.push_str(&format!(" {:.0}%", d.score * 100.0));
     }
-    s.push_str(&format!(" · {}", crate::util::local_time(false)));
+    s.push_str(&format!(" · {}", crate::util::local_time()));
     s
 }
 

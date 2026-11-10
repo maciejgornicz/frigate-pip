@@ -357,6 +357,10 @@ Comece por **Testar conexão** nas configurações e por **Mostrar registo** no 
 - O stream go2rtc tem de conter áudio — **Testar conexão** mostra *áudio … Hz* ou *sem áudio*.
 - Verifique o volume de *FrigatePiP* no Misturador de volume do Windows.
 
+**O FrigatePiP fecha-se sozinho**
+- Cada linha do registo começa com a data e a hora. Uma falha do FrigatePiP deixa uma última linha que começa por *Crash in thread*: anexe-a a uma issue (ver abaixo).
+- Se o registo simplesmente para, sem *Shutting down* e sem *Crash*, outra coisa fechou o programa: o encerramento ou uma atualização do Windows, ou o fecho do programa que o iniciou (por exemplo, uma janela de terminal).
+
 **Outro problema** — abra uma [issue no GitHub](https://github.com/maciejgornicz/frigate-pip/issues) e anexe a parte relevante do registo. Remova os endereços e os nomes de câmaras que não pretende partilhar.
 
 ---

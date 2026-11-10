@@ -186,13 +186,39 @@ pub fn init_log(to_stderr: bool) {
     }
     *LOG.lock().unwrap() = OpenOptions::new().create(true).append(true).open(path).ok();
     LOG_STDERR.store(to_stderr, Ordering::Relaxed);
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(log_crashes);
+}
+
+/// Writes a crash (a panic) to the log before the program ends (`panic = "abort"`): a
+/// window application has no console that would show it.
+fn log_crashes() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let at = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
+        let thread = std::thread::current();
+        log_line(&crash_line(thread.name(), panic_text(info.payload()), at.as_deref()));
+        default(info);
+    }));
+}
+
+/// The log line of a crash: what happened, in which thread and where in the code.
+fn crash_line(thread: Option<&str>, message: &str, location: Option<&str>) -> String {
+    let who = thread.map_or_else(|| "a thread without a name".to_string(), |name| format!("thread '{name}'"));
+    let at = location.map(|l| format!(" ({l})")).unwrap_or_default();
+    format!("Crash in {who}: {message}{at}")
+}
+
+/// The text of a panic (`panic!` gives a `&str` or a `String`).
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload.downcast_ref::<&str>().copied().or_else(|| payload.downcast_ref::<String>().map(String::as_str)).unwrap_or("(no message)")
 }
 
 /// Line ending of the files FrigatePiP writes (log, settings): CRLF for Notepad on Windows.
 pub const NEWLINE: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
 pub fn log_line(msg: &str) {
-    let line = format!("{} {}{NEWLINE}", local_time(true), msg);
+    let line = format!("{} {}{NEWLINE}", log_stamp(&LocalTime::now()), msg);
     if LOG_STDERR.load(Ordering::Relaxed) {
         eprint!("{line}");
     }
@@ -206,27 +232,61 @@ macro_rules! log {
     ($($t:tt)*) => { $crate::util::log_line(&format!($($t)*)) };
 }
 
-/// Local time as `HH:MM:SS` (with milliseconds if `ms`).
-pub fn local_time(ms: bool) -> String {
-    #[cfg(windows)]
-    let (h, m, s, millis) = {
-        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
-        (t.wHour as i32, t.wMinute as i32, t.wSecond as i32, t.wMilliseconds as u32)
-    };
-    #[cfg(not(windows))]
-    let (h, m, s, millis) = {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-        #[allow(deprecated)] // musl: libc::time_t is going to become 64-bit
-        let secs = now.as_secs() as libc::time_t;
-        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        unsafe { libc::localtime_r(&secs, &mut tm) };
-        (tm.tm_hour, tm.tm_min, tm.tm_sec, now.subsec_millis())
-    };
-    if ms {
-        format!("{h:02}:{m:02}:{s:02}.{millis:03}")
-    } else {
-        format!("{h:02}:{m:02}:{s:02}")
+/// The local date and time.
+pub struct LocalTime {
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
+    pub hour: u32,
+    pub minute: u32,
+    pub second: u32,
+    pub millis: u32,
+}
+
+impl LocalTime {
+    pub fn now() -> LocalTime {
+        #[cfg(windows)]
+        {
+            let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+            LocalTime {
+                year: t.wYear as i32,
+                month: t.wMonth as u32,
+                day: t.wDay as u32,
+                hour: t.wHour as u32,
+                minute: t.wMinute as u32,
+                second: t.wSecond as u32,
+                millis: t.wMilliseconds as u32,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+            #[allow(deprecated)] // musl: libc::time_t is going to become 64-bit
+            let secs = now.as_secs() as libc::time_t;
+            let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+            unsafe { libc::localtime_r(&secs, &mut tm) };
+            LocalTime {
+                year: tm.tm_year + 1900,
+                month: (tm.tm_mon + 1) as u32,
+                day: tm.tm_mday as u32,
+                hour: tm.tm_hour as u32,
+                minute: tm.tm_min as u32,
+                second: tm.tm_sec as u32,
+                millis: now.subsec_millis(),
+            }
+        }
     }
+}
+
+/// The start of a log line: `2026-11-10 23:15:51.396` (the log spans days).
+fn log_stamp(t: &LocalTime) -> String {
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}", t.year, t.month, t.day, t.hour, t.minute, t.second, t.millis)
+}
+
+/// Local time as `HH:MM:SS` (for captions).
+pub fn local_time() -> String {
+    let t = LocalTime::now();
+    format!("{:02}:{:02}:{:02}", t.hour, t.minute, t.second)
 }
 
 /// Returns unused working-set memory to the OS (after preview windows close).
@@ -257,6 +317,31 @@ pub fn random_u64() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_lines_carry_the_date() {
+        let t = LocalTime { year: 2026, month: 11, day: 1, hour: 9, minute: 5, second: 7, millis: 42 };
+        assert_eq!(log_stamp(&t), "2026-11-01 09:05:07.042");
+    }
+
+    #[test]
+    fn a_crash_says_what_and_where() {
+        assert_eq!(
+            crash_line(Some("player"), "index out of bounds", Some("src/player.rs:12:5")),
+            "Crash in thread 'player': index out of bounds (src/player.rs:12:5)"
+        );
+        assert_eq!(crash_line(None, "boom", None), "Crash in a thread without a name: boom");
+    }
+
+    #[test]
+    fn the_crash_message_comes_from_either_kind_of_payload() {
+        let text: Box<dyn std::any::Any + Send> = Box::new("boom");
+        let owned: Box<dyn std::any::Any + Send> = Box::new(String::from("bang"));
+        let other: Box<dyn std::any::Any + Send> = Box::new(7u8);
+        assert_eq!(panic_text(text.as_ref()), "boom");
+        assert_eq!(panic_text(owned.as_ref()), "bang");
+        assert_eq!(panic_text(other.as_ref()), "(no message)");
+    }
 
     #[test]
     fn base64_rfc4648_vectors() {

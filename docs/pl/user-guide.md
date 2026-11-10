@@ -357,6 +357,10 @@ Zacznij od **Testuj połączenie** w ustawieniach i od **Pokaż log** w menu w z
 - Strumień go2rtc musi zawierać dźwięk — **Testuj połączenie** pokazuje *dźwięk … Hz* lub *bez dźwięku*.
 - Sprawdź głośność *FrigatePiP* w Mikserze głośności Windows.
 
+**FrigatePiP sam się zamyka**
+- Każda linia logu zaczyna się od daty i godziny. Awaria FrigatePiP zostawia ostatnią linię zaczynającą się od *Crash in thread* — dołącz ją do zgłoszenia (zob. niżej).
+- Jeśli log po prostu się urywa, bez *Shutting down* i bez *Crash*, program zamknęło coś innego: wyłączenie lub aktualizacja Windows albo zamknięcie programu, który go uruchomił (np. okna terminala).
+
 **Coś innego** — zgłoś [problem na GitHubie](https://github.com/maciejgornicz/frigate-pip/issues) i dołącz odpowiedni fragment logu. Usuń adresy i nazwy kamer, których nie chcesz udostępniać.
 
 ---

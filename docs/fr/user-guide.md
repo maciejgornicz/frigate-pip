@@ -357,6 +357,10 @@ Commencez par **Tester la connexion** dans les paramètres et par **Afficher le 
 - Le flux go2rtc doit contenir de l’audio — **Tester la connexion** affiche *audio … Hz* ou *sans audio*.
 - Vérifiez le volume de *FrigatePiP* dans le Mélangeur de volume de Windows.
 
+**FrigatePiP se ferme tout seul**
+- Chaque ligne du journal commence par la date et l’heure. Un plantage de FrigatePiP laisse une dernière ligne commençant par *Crash in thread* : joignez-la à un ticket (voir ci-dessous).
+- Si le journal s’arrête simplement, sans *Shutting down* ni *Crash*, autre chose a fermé le programme : l’arrêt ou une mise à jour de Windows, ou la fermeture du programme qui l’a lancé (par exemple une fenêtre de terminal).
+
 **Autre problème** — ouvrez un [ticket sur GitHub](https://github.com/maciejgornicz/frigate-pip/issues) et joignez la partie pertinente du journal. Supprimez les adresses et les noms de caméras que vous ne souhaitez pas partager.
 
 ---
