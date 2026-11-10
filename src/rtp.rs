@@ -114,6 +114,8 @@ pub struct AccessUnit {
     pub arrived: Instant,
     /// How far it came behind the timing of its stream.
     pub late: Duration,
+    /// RTP timestamp (90 kHz): the pace of a replay.
+    pub ts: u32,
 }
 
 pub struct Depacketizer {
@@ -291,8 +293,9 @@ impl Depacketizer {
             data.extend_from_slice(n);
         }
         let arrived = Instant::now();
-        let late = self.lateness.frame(self.ts.unwrap_or(0), arrived);
-        Some(AccessUnit { data, key, arrived, late })
+        let ts = self.ts.unwrap_or(0);
+        let late = self.lateness.frame(ts, arrived);
+        Some(AccessUnit { data, key, arrived, late, ts })
     }
 }
 
@@ -341,6 +344,15 @@ mod tests {
         assert!(out[0].arrived >= before && out[1].arrived >= out[0].arrived);
         assert!(out[0].late < Duration::from_millis(50));
         assert!(out[2].late > Duration::from_millis(900), "{:?}", out[2].late);
+    }
+
+    #[test]
+    fn units_carry_their_rtp_timestamp() {
+        let mut d = Depacketizer::new(&track264());
+        let mut out = vec![];
+        d.push(&[0x65, 1], 90_000, true, &mut out);
+        d.push(&[0x41, 2], 99_000, true, &mut out);
+        assert_eq!(out.iter().map(|u| u.ts).collect::<Vec<_>>(), [90_000, 99_000]);
     }
 
     #[test]

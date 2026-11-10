@@ -1,8 +1,9 @@
 //! Desktop output: each preview window is a borderless always-on-top X11 window (an X11
 //! desktop, or Wayland through XWayland) in the chosen corner of the chosen monitor.
 //! The mouse works like on Windows: × closes, the speaker mutes, the slider under it sets
-//! the volume, dragging moves (with Ctrl a zoomed picture, otherwise the window), a click
-//! pins, a double click opens the camera in Frigate, the right button closes.
+//! the volume, ⟲ replays the start of the event, dragging moves (with Ctrl a zoomed
+//! picture, otherwise the window), a click pins, a double click opens the camera in
+//! Frigate, the right button closes.
 
 use super::canvas::{Font, Image};
 use super::x11::{Event, Monitor, BUTTON1_MASK, CONTROL_MASK, X11};
@@ -17,6 +18,7 @@ enum Hot {
     Close,
     Sound,
     Volume,
+    Replay,
 }
 
 /// Left button held on a window.
@@ -80,6 +82,8 @@ struct Win {
     hot: Hot,
     /// 0 = no camera audio, 1 = sound on, 2 = muted.
     sound: u8,
+    /// 0 = nothing to replay, 1 = possible, 2 = replaying.
+    replay: u8,
     /// Volume in percent.
     volume: u8,
     /// The picture is zoomed in.
@@ -116,9 +120,13 @@ type Area = (i32, i32, i32, i32);
 fn button_rects(w: u32, scale: f32) -> (Area, Area) {
     let size = (24.0 * scale).round() as i32;
     let margin = (8.0 * scale).round() as i32;
-    let gap = (6.0 * scale).round() as i32;
     let close = (w as i32 - margin - size, margin, w as i32 - margin, margin + size);
-    (close, (close.0 - gap - size, margin, close.0 - gap, margin + size))
+    (close, crate::view::left_of(close, scale))
+}
+
+/// Replay button: left of the sound button with camera audio, otherwise in its place.
+fn replay_rect(close: Area, sound: Area, with_sound: bool, scale: f32) -> Area {
+    crate::view::left_of(if with_sound { sound } else { close }, scale)
 }
 
 fn inside((x0, y0, x1, y1): Area, x: i32, y: i32) -> bool {
@@ -193,9 +201,14 @@ impl Desktop {
         let Some((img, caption, live)) = &w.last else { return };
         let mut pic = if (img.w, img.h) == (w.rect.w, w.rect.h) { img.clone() } else { img.resized(w.rect.w, w.rect.h) };
         let (close, sound) = button_rects(pic.w, self.scale);
-        // The speaker stays while muted, so that it is clear why the window is quiet.
+        // The speaker stays while muted, so that it is clear why the window is quiet; the
+        // replay button while replaying, so that the replay can be stopped.
         let show_sound = w.sound > 0 && (w.hover || w.sound == 2);
-        let left = if show_sound {
+        let replay = replay_rect(close, sound, w.sound > 0, self.scale);
+        let show_replay = w.replay > 0 && (w.hover || w.replay == 2);
+        let left = if show_replay {
+            replay.0
+        } else if show_sound {
             sound.0
         } else if w.hover {
             close.0
@@ -211,6 +224,9 @@ impl Desktop {
         }
         if show_sound {
             pic.sound_button(sound, w.sound == 2, w.hot == Hot::Sound);
+        }
+        if show_replay {
+            pic.replay_button(replay, w.replay == 2, w.hot == Hot::Replay);
         }
         if let Some(slider) = crate::view::volume_slider(sound, pic.h as i32, self.scale).filter(|_| w.hover && w.sound > 0) {
             pic.volume_slider(slider, w.volume);
@@ -247,6 +263,7 @@ impl Output for Desktop {
             hover: false,
             hot: Hot::None,
             sound: 0,
+            replay: 0,
             volume: 100,
             zoomed: false,
             press: None,
@@ -308,6 +325,15 @@ impl Output for Desktop {
         }
     }
 
+    fn set_replay(&mut self, id: u64, state: u8) {
+        if let Some(w) = self.wins.get_mut(&id) {
+            if w.replay != state {
+                w.replay = state;
+                self.paint(id);
+            }
+        }
+    }
+
     fn set_volume(&mut self, id: u64, volume: u8) {
         if let Some(w) = self.wins.get_mut(&id).filter(|w| !matches!(w.press, Some(Press::Volume(_)))) {
             w.volume = volume;
@@ -353,11 +379,13 @@ impl Output for Desktop {
         let Some(w) = self.wins.get_mut(&id) else { return Vec::new() };
         let (close, sound) = button_rects(w.rect.w, scale);
         let slider = crate::view::volume_slider(sound, w.rect.h as i32, scale);
+        let replay = replay_rect(close, sound, w.sound > 0, scale);
         let hot_at = |w: &Win, x: i32, y: i32| match () {
             _ if !w.hover => Hot::None,
             _ if inside(close, x, y) => Hot::Close,
             _ if w.sound > 0 && inside(sound, x, y) => Hot::Sound,
             _ if w.sound > 0 && slider.is_some_and(|s| inside(s, x, y)) => Hot::Volume,
+            _ if w.replay > 0 && inside(replay, x, y) => Hot::Replay,
             _ => Hot::None,
         };
         let mut actions = Vec::new();
@@ -405,6 +433,7 @@ impl Output for Desktop {
             Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y) {
                 Hot::Close => actions.push(Action::Close),
                 Hot::Sound => actions.push(Action::Sound),
+                Hot::Replay => actions.push(Action::Replay),
                 Hot::Volume => {
                     if let Some(slider) = slider {
                         w.volume = crate::view::volume_at(slider, y);
@@ -509,6 +538,14 @@ mod tests {
         // 480 px at 100 %: × 24 px, 8 px from the edges; the speaker 6 px to its left.
         assert_eq!(button_rects(480, 1.0), ((448, 8, 472, 32), (418, 8, 442, 32)));
         assert_eq!(button_rects(960, 2.0).0, (896, 16, 944, 64));
+    }
+
+    #[test]
+    fn the_replay_button_comes_left_of_the_others() {
+        let (close, sound) = button_rects(480, 1.0);
+        assert_eq!(replay_rect(close, sound, true, 1.0), (388, 8, 412, 32));
+        // Without camera audio it takes the speaker's place.
+        assert_eq!(replay_rect(close, sound, false, 1.0), sound);
     }
 
     #[test]

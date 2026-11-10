@@ -5,6 +5,7 @@ use super::canvas::Image;
 use super::ffmpeg::{adts_header, read_frames, Ffmpeg, Proc};
 use crate::audio::{AudioCodec, AudioTrack};
 use crate::config::LiveMode;
+use crate::history::Recorder;
 use crate::hub::{Feed, Hub};
 use crate::rtp::{AccessUnit, Codec, VideoTrack};
 use crate::rtsp::{self, Media};
@@ -14,7 +15,7 @@ use crate::view::Zoom;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -34,6 +35,12 @@ pub struct Shared {
     pub audio: AtomicBool,
     /// Volume of the camera audio in percent.
     pub volume: AtomicU8,
+    /// Replay: 0 = nothing to replay, 1 = possible, 2 = replaying.
+    pub replay: AtomicU8,
+    /// The replay button or key was pressed: start or stop a replay.
+    pub replay_pressed: AtomicBool,
+    /// How far behind live the replayed picture is, in milliseconds.
+    pub behind: AtomicU32,
     pub cancel: Cancel,
 }
 
@@ -54,6 +61,10 @@ pub struct Params {
     /// Volume of the camera audio in percent.
     pub volume: u8,
     pub t0: Instant,
+    /// When the event came: a replay from the prebuffer starts before it.
+    pub event: Instant,
+    /// What the window recorded without the prebuffer (kept when the decoder restarts).
+    pub own: Arc<Mutex<Recorder>>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -65,6 +76,17 @@ pub fn start(p: Params, ff: Arc<Ffmpeg>, wake: Wake) -> Arc<Shared> {
     {
         let (p, ff, shared, wake) = (p.clone(), ff.clone(), shared.clone(), wake.clone());
         let _ = std::thread::Builder::new().name(format!("snap-{}", p.camera)).spawn(move || snapshot(&p, &ff, &shared, &wake));
+    }
+    // Replays wait on their own thread for the button or key.
+    {
+        let (p, ff, shared, wake) = (p.clone(), ff.clone(), shared.clone(), wake.clone());
+        let _ = std::thread::Builder::new().name(format!("replay-{}", p.camera)).spawn(move || {
+            while !shared.cancel.sleep(100) {
+                if shared.replay_pressed.swap(false, Ordering::Relaxed) {
+                    replay(&p, &ff, &shared, &wake);
+                }
+            }
+        });
     }
     let s = shared.clone();
     let _ = std::thread::Builder::new().name(format!("live-{}", p.camera)).spawn(move || match p.live {
@@ -86,7 +108,14 @@ pub fn start(p: Params, ff: Arc<Ffmpeg>, wake: Wake) -> Arc<Shared> {
     shared
 }
 
+/// A picture of the live video or of Frigate; none is shown while a replay runs.
 fn store(shared: &Shared, img: Image, zoom: Zoom, live: bool, wake: &Wake) {
+    if shared.replay.load(Ordering::Relaxed) != 2 {
+        put(shared, img, zoom, live, wake);
+    }
+}
+
+fn put(shared: &Shared, img: Image, zoom: Zoom, live: bool, wake: &Wake) {
     *shared.frame.lock().unwrap() = Some((img, zoom));
     shared.live.store(live, Ordering::Relaxed);
     shared.dirty.store(true, Ordering::Relaxed);
@@ -177,6 +206,21 @@ fn kill_on_cancel(shared: &Shared, proc: Arc<Mutex<Option<Proc>>>) {
 const AUD_H264: [u8; 6] = [0, 0, 0, 1, 0x09, 0xF0];
 const AUD_HEVC: [u8; 7] = [0, 0, 0, 1, 0x46, 0x01, 0x50];
 
+fn aud(codec: Codec) -> &'static [u8] {
+    match codec {
+        Codec::H264 => &AUD_H264,
+        Codec::H265 => &AUD_HEVC,
+    }
+}
+
+/// ffmpeg's name of the video format.
+fn format(codec: Codec) -> &'static str {
+    match codec {
+        Codec::H264 => "h264",
+        Codec::H265 => "hevc",
+    }
+}
+
 /// Who shows the picture when the prebuffer and a direct stream run side by side.
 #[derive(Clone, Copy, PartialEq)]
 enum Role {
@@ -255,11 +299,11 @@ impl<'a> Feeder<'a> {
 
     fn track(&mut self, track: &VideoTrack, audio: Option<&AudioTrack>) {
         let p = self.p;
-        let format = match track.codec {
-            Codec::H264 => "h264",
-            Codec::H265 => "hevc",
-        };
-        self.aud = if track.codec == Codec::H264 { &AUD_H264 } else { &AUD_HEVC };
+        let format = format(track.codec);
+        self.aud = aud(track.codec);
+        if p.hub.is_none() {
+            p.own.lock().unwrap().track(track);
+        }
         crate::log!("{}: RTSP ready after {} ms ({format}){}", p.camera, p.t0.elapsed().as_millis(), self.via);
         // The bridge carries the prebuffer's sub stream, not the window's.
         let main = p.main && self.role != Role::Bridge;
@@ -330,14 +374,19 @@ impl<'a> Feeder<'a> {
     }
 
     /// `false` = stop (window closed, decoder gone, or the bridge is no longer needed).
-    fn video(&mut self, au: &AccessUnit) -> bool {
+    fn video(&mut self, au: Arc<AccessUnit>) -> bool {
         if !self.started && !au.key {
             return self.alive();
         }
         if !self.started {
             crate::log!("{}: key frame after {} ms{}", self.p.camera, self.p.t0.elapsed().as_millis(), self.via);
+            // Live video is kept from now on (prebuffer or the window): a replay is possible.
+            let _ = self.shared.replay.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed);
         }
         self.started = true;
+        if self.p.hub.is_none() {
+            self.p.own.lock().unwrap().push(au.clone());
+        }
         let mut m = self.measure.lock().unwrap();
         m.timing.received(au.arrived, au.late);
         m.in_ffmpeg.push_back(au.arrived);
@@ -416,7 +465,7 @@ fn direct(url: &str, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake,
         p.audio,
         |video, audio| feeder.borrow_mut().track(video, audio),
         |m| match m {
-            Media::Video(au) => feeder.borrow_mut().video(&au),
+            Media::Video(au) => feeder.borrow_mut().video(Arc::new(au)),
             Media::Audio(frame) => feeder.borrow_mut().audio(&frame),
         },
     );
@@ -440,7 +489,7 @@ fn prebuffered(hub: &Hub, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &
                 feeder.track(&video, audio.as_ref());
                 true
             }
-            Ok(Feed::Au(au)) => feeder.video(&au),
+            Ok(Feed::Au(au)) => feeder.video(au),
             Ok(Feed::Audio(frame)) => feeder.audio(&frame),
             Ok(Feed::Failed(e)) => return Err(e),
             Err(RecvTimeoutError::Timeout) => true,
@@ -451,4 +500,84 @@ fn prebuffered(hub: &Hub, p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &
         }
     }
     Ok(())
+}
+
+/// Plays the kept video again at its own pace (replay button, key r), then live video comes
+/// back: it went on decoding meanwhile, unseen. Another press stops the replay.
+fn replay(p: &Params, ff: &Ffmpeg, shared: &Arc<Shared>, wake: &Wake) {
+    // With the prebuffer from before the event, otherwise from the window's opening.
+    let material = match &p.hub {
+        Some(hub) => hub.replay_from(crate::replay::start(p.event)),
+        None => p.own.lock().unwrap().replay(),
+    };
+    let Some((track, units)) = material else {
+        crate::log!("{}: nothing to replay yet", p.camera);
+        return;
+    };
+    // The prebuffer carries the sub stream, the window's own recording its stream.
+    let main = p.main && p.hub.is_none();
+    let mut proc = match ff.video_pipe(format(track.codec), p.size, main, p.zoom) {
+        Ok(proc) => proc,
+        Err(e) => {
+            crate::log!("{}: cannot start ffmpeg for the replay: {e}", p.camera);
+            return;
+        }
+    };
+    let (Some(mut stdin), Some(out)) = (proc.0.stdin.take(), proc.0.stdout.take()) else { return };
+    let proc = Arc::new(Mutex::new(Some(proc)));
+    kill_on_cancel(shared, proc.clone());
+    crate::log!("{}: replay, {}", p.camera, crate::replay::describe(&units, Instant::now()));
+    shared.replay.store(2, Ordering::Relaxed);
+    // When the frames now inside ffmpeg were received live (how far behind the picture is).
+    let sent: Arc<Mutex<VecDeque<Instant>>> = Arc::default();
+    let decoder = {
+        let (size, zoom, shared, wake, sent) = (p.size, p.zoom, shared.clone(), wake.clone(), sent.clone());
+        std::thread::Builder::new()
+            .name(format!("replay-decode-{}", p.camera))
+            .spawn(move || {
+                read_frames(out, size, |img| {
+                    if let Some(arrived) = sent.lock().unwrap().pop_front() {
+                        shared.behind.store(arrived.elapsed().as_millis() as u32, Ordering::Relaxed);
+                    }
+                    if shared.replay.load(Ordering::Relaxed) == 2 {
+                        put(&shared, img, zoom, false, &wake);
+                    }
+                    !shared.cancel.is_set()
+                });
+            })
+            .ok()
+    };
+    let aud = aud(track.codec);
+    let mut due = Instant::now();
+    let mut prev: Option<u32> = None;
+    let mut stopped = false;
+    for au in &units {
+        if let Some(before) = prev {
+            due += crate::replay::gap(before, au.ts);
+        }
+        prev = Some(au.ts);
+        let wait = due.saturating_duration_since(Instant::now()).as_millis() as u64;
+        if shared.cancel.sleep(wait) || shared.replay_pressed.swap(false, Ordering::Relaxed) {
+            stopped = true;
+            break;
+        }
+        sent.lock().unwrap().push_back(au.arrived);
+        if stdin.write_all(&au.data).and_then(|_| stdin.write_all(aud)).is_err() {
+            break;
+        }
+    }
+    drop(stdin);
+    if stopped {
+        // At once: the frames still inside ffmpeg are not shown.
+        shared.replay.store(1, Ordering::Relaxed);
+        proc.lock().unwrap().take();
+    }
+    // At the end ffmpeg shows its last frames, then stops.
+    if let Some(d) = decoder {
+        let _ = d.join();
+    }
+    shared.replay.store(1, Ordering::Relaxed);
+    crate::log!("{}: replay {}", p.camera, if stopped { "stopped" } else { "done" });
+    shared.dirty.store(true, Ordering::Relaxed);
+    wake();
 }

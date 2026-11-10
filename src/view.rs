@@ -129,6 +129,37 @@ pub fn volume_at(slider: (i32, i32, i32, i32), y: i32) -> u8 {
     ((bottom - y) as f32 / (bottom - top).max(1) as f32 * 100.0).round().clamp(0.0, 100.0) as u8
 }
 
+/// A round button of the same size left of `rect` (left, top, right, bottom), 6 px apart at 96 dpi.
+pub fn left_of((l, t, r, b): (i32, i32, i32, i32), scale: f32) -> (i32, i32, i32, i32) {
+    let gap = (6.0 * scale).round() as i32;
+    (l - gap - (r - l), t, l - gap, b)
+}
+
+/// The replay icon: a ring open at the top with an anticlockwise arrow head.
+pub struct ReplayIcon {
+    pub radius: f32,
+    /// The ring runs clockwise from `from` (at `end`) through the bottom to `to` (radians, y down).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub from: f32,
+    pub to: f32,
+    /// The end of the ring that carries the head, and the head (tip first).
+    pub end: (f32, f32),
+    pub head: [(f32, f32); 3],
+}
+
+/// The replay icon in a round button with this centre and radius `rad`.
+pub fn replay_icon((cx, cy): (f32, f32), rad: f32) -> ReplayIcon {
+    let radius = rad * 0.45;
+    let (from, to) = ((-60f32).to_radians(), 210f32.to_radians());
+    let end = (cx + radius * from.cos(), cy + radius * from.sin());
+    // Anticlockwise on the screen (y down) is the way of decreasing angles.
+    let (tx, ty) = (from.sin(), -from.cos());
+    let (nx, ny) = (from.cos(), from.sin());
+    let h = radius * 0.6;
+    let head = [(end.0 + tx * h, end.1 + ty * h), (end.0 + nx * h * 0.6, end.1 + ny * h * 0.6), (end.0 - nx * h * 0.6, end.1 - ny * h * 0.6)];
+    ReplayIcon { radius, from, to, end, head }
+}
+
 /// Zoom of a preview window (Ctrl + mouse wheel): the part of the picture that is shown —
 /// its left and top edge and its size, as fractions of the whole picture. The part keeps
 /// the picture's aspect ratio.
@@ -180,6 +211,21 @@ impl Zoom {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_button_left_of_another() {
+        assert_eq!(left_of((100, 8, 124, 32), 1.0), (70, 8, 94, 32));
+        assert_eq!(left_of((200, 16, 248, 64), 2.0), (140, 16, 188, 64));
+    }
+
+    #[test]
+    fn the_replay_arrow_points_into_the_gap_at_the_top() {
+        let icon = replay_icon((50.0, 50.0), 20.0);
+        let (tip, end) = (icon.head[0], icon.end);
+        assert!(end.1 < 50.0 && end.0 > 50.0, "the ring ends at the top right: {end:?}");
+        assert!(tip.1 < end.1, "the tip lies above the end of the ring: {tip:?}");
+        assert!(tip.0 < end.0, "and left of it, anticlockwise: {tip:?}");
+    }
 
     #[test]
     fn zoom_keeps_the_point_under_the_mouse() {

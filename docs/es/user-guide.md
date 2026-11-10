@@ -122,6 +122,7 @@ Las ventanas de vista previa nunca toman el foco del teclado, por lo que no inte
 | **×** (esquina superior derecha) | Cierra la ventana al instante. El botón aparece al señalar la ventana con el mouse. |
 | **Altavoz** (a la izquierda de ×) | Silencia la ventana; otro clic vuelve a activar el sonido. El botón aparece al señalar una ventana que reproduce el audio de la cámara; mientras el sonido está desactivado, el altavoz tachado permanece visible. |
 | **Control de volumen** (bajo el altavoz) | Ajusta el volumen de esta ventana: arrástrelo o haga clic en él. Aparece junto con el altavoz; subir el volumen también reactiva el sonido silenciado. En Linux, el nuevo volumen se oye justo después de soltar. |
+| **Repetición** ⟲ (a la izquierda de los demás botones) | Reproduce otra vez el inicio del evento a velocidad normal, sin sonido; el texto muestra *Repetición −12 s*, es decir, cuánto va la imagen por detrás del video en vivo. Con el [búfer previo](#búfer-previo) la repetición empieza 5 s antes de que se abriera la ventana; sin él, al abrirse la ventana. Haga clic de nuevo para volver al instante al video en vivo; al terminar la repetición vuelve solo. El botón aparece al señalar una ventana con video en vivo; durante la repetición la ventana no se cierra. |
 | **Clic derecho** | Cierra la ventana. |
 | **Doble clic** | Abre esta cámara en la interfaz web de Frigate. |
 | **Pasar el puntero** | Mientras el puntero del mouse está sobre la ventana, esta no se cierra. Después de retirarlo, permanece abierta al menos 3 segundos más. |
@@ -131,6 +132,7 @@ Las ventanas de vista previa nunca toman el foco del teclado, por lo que no inte
 - Cuando pasan los segundos indicados en **Tras el último movimiento** desde que el objeto (o cualquier otro objeto coincidente de esa cámara) se movió por última vez.
 - Como muy tarde, tras los segundos indicados en **máximo**, aunque el objeto siga moviéndose.
 - Nunca mientras está fijada o mientras el puntero del mouse está sobre ella.
+- Nunca durante una repetición; después sigue abierta al menos 5 segundos más.
 
 ### Más de una cámara
 
@@ -217,7 +219,7 @@ FrigatePiP encuentra los flujos de go2rtc de cada cámara en la configuración d
 
 #### Búfer previo
 
-**Búfer previo** mantiene una conexión con el flujo sub de cada cámara, de modo que el video en vivo empieza al instante (unos 0,15 s) en lugar de esperar al siguiente fotograma clave (hasta 1 s aproximadamente, según el intervalo de fotogramas clave de la cámara). Consumo: unos 0,1–0,5 Mbit/s de tráfico de la red local por cámara, de forma continua.
+**Búfer previo** mantiene una conexión con el flujo sub de cada cámara, de modo que el video en vivo empieza al instante (unos 0,15 s) en lugar de esperar al siguiente fotograma clave (hasta 1 s aproximadamente, según el intervalo de fotogramas clave de la cámara). Consumo: unos 0,1–0,5 Mbit/s de tráfico de la red local por cámara, de forma continua. Además guarda en memoria los últimos 30 s de cada cámara (lo que ocupan 30 s de su flujo sub: unos 0,2–2 MB por cámara), para que la [repetición](#acciones-con-el-mouse) pueda empezar 5 s antes del evento.
 
 #### GPU preparada
 
@@ -427,7 +429,7 @@ En un escritorio Linux, las ventanas de vista previa funcionan como en Windows: 
 - **Inicio:** menú de aplicaciones → **FrigatePiP** (instalado con apt) o `frigate-pip` en un terminal del escritorio. Se ejecuta en segundo plano sin terminal; se ejecuta una copia por usuario. Un segundo inicio (o `frigate-pip --settings`) abre la configuración de la copia en ejecución.
 - **Con la sesión del escritorio:** `frigate-pip --autostart on` (para desactivarlo: `frigate-pip --autostart off`). Para detenerlo: `frigate-pip --quit`.
 - **Icono en la bandeja:** con el mismo menú que en Windows (consulte [El icono de la bandeja](#4-el-icono-de-la-bandeja)); su color muestra el estado: azul — conectado, gris — sin conexión, ámbar — en pausa. Aparece en KDE Plasma, Xfce, Cinnamon, MATE y Budgie, y en GNOME con la extensión AppIndicator (incluida en Ubuntu).
-- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, el control bajo él ajusta el volumen, arrastrar mueve la ventana, la rueda cambia su tamaño, Ctrl + rueda acerca la imagen alrededor del puntero, Ctrl + arrastrar mueve la imagen acercada, un clic la fija, un doble clic abre la cámara en Frigate y una ventana bajo el puntero no se cierra.
+- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, el control bajo él ajusta el volumen, ⟲ repite el inicio del evento, arrastrar mueve la ventana, la rueda cambia su tamaño, Ctrl + rueda acerca la imagen alrededor del puntero, Ctrl + arrastrar mueve la imagen acercada, un clic la fija, un doble clic abre la cámara en Frigate y una ventana bajo el puntero no se cierra.
 - **Opciones de las ventanas:** `topmost` (con `false`, las ventanas son ventanas normales que otras pueden tapar), `sound` (el sonido de notificación del escritorio) y `skip_fullscreen` (nada mientras la ventana activa está a pantalla completa) funcionan como en Windows.
 - **Configuración:** un clic en el icono (o **Configuración…** en su menú) la abre en el navegador, con las mismas opciones, descripciones y prueba de conexión que en Windows; la página solo se abre en este equipo. En el primer inicio se abre sola. Se guarda en `~/.config/frigate-pip/config.ini` (descrito más abajo).
 
@@ -441,7 +443,7 @@ En este modo, FrigatePiP no tiene ventana propia: espera detecciones en segundo 
 2. Abra tmux para su propio trabajo — `tmux` inicia una sesión nueva — y trabaje allí. Las ventanas emergentes aparecen sobre esa ventana.
 
 - Para detener FrigatePiP: `tmux kill-session -t frigate-pip`. Para usar sus teclas (pausa, mostrar una cámara): `tmux attach -t frigate-pip`.
-- La ventana emergente aparece en la **esquina** elegida (`position`) y su tamaño sigue el **ancho de la ventana** (`width`). Se cierra sola tras el tiempo habitual (`duration`, `max_duration`) o al instante con **q**, **x** o **Esc**. **m** silencia y reactiva su sonido.
+- La ventana emergente aparece en la **esquina** elegida (`position`) y su tamaño sigue el **ancho de la ventana** (`width`). Se cierra sola tras el tiempo habitual (`duration`, `max_duration`) o al instante con **q**, **x** o **Esc**. **m** silencia y reactiva su sonido. **r** repite el inicio del evento (desde que se abrió la ventana emergente).
 - tmux muestra una sola ventana emergente a la vez: una detección en otra cámara reemplaza la ventana emergente abierta (o se omite si `replace = false`).
 - Para ver la imagen con todos sus colores, tmux debe transmitir el color de 24 bits: agregue `set -as terminal-features ",xterm-256color:RGB"` a `~/.tmux.conf` (use su `$TERM` de fuera de tmux) y reinicie tmux. FrigatePiP escribe esta sugerencia en su registro cuando faltan los colores.
 
@@ -455,6 +457,7 @@ Cuando FrigatePiP se ejecuta en una ventana de terminal o en una consola:
 | **x** (o Esc) | Cerrar todas las ventanas de vista previa. |
 | **p** | Pausar / reanudar las notificaciones. |
 | **m** | Desactiva / activa el sonido (con `camera_audio = true`) en todas las ventanas, también en las que se abran después; el texto muestra entonces *sonido desactivado*. |
+| **r** | Repetir el inicio del evento en todas las ventanas (consulte [Acciones con el mouse](#acciones-con-el-mouse)); otra vez: volver al video en vivo. |
 | **1**–**9** | Mostrar la cámara 1–9 (en el orden de la configuración de Frigate). |
 
 ### Línea de comandos

@@ -122,6 +122,7 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 | **×** (prawy górny róg) | Od razu zamyka okno. Przycisk pojawia się po najechaniu myszą na okno. |
 | **Głośnik** (na lewo od ×) | Wyłącza dźwięk okna; ponowne kliknięcie włącza go z powrotem. Przycisk pojawia się po wskazaniu okna, które odtwarza dźwięk z kamery; dopóki dźwięk jest wyłączony, przekreślony głośnik pozostaje widoczny. |
 | **Suwak głośności** (pod głośnikiem) | Ustawia głośność dźwięku tego okna: przeciągnij go lub kliknij. Pojawia się razem z głośnikiem; podgłośnienie włącza też wyciszony dźwięk. W Linuksie nową głośność słychać chwilę po puszczeniu przycisku. |
+| **Powtórka** ⟲ (na lewo od pozostałych przycisków) | Odtwarza jeszcze raz początek zdarzenia z normalną prędkością, bez dźwięku; napis pokazuje *Powtórka −12 s*, czyli o ile obraz jest opóźniony względem obrazu na żywo. Z [prebuforem](#prebufor) powtórka zaczyna się 5 s przed otwarciem okna, bez niego od otwarcia okna. Kliknij ponownie, aby od razu wrócić do obrazu na żywo; po powtórce wraca on sam. Przycisk pojawia się po wskazaniu okna z obrazem na żywo; w trakcie powtórki okno się nie zamyka. |
 | **Kliknięcie prawym przyciskiem** | Zamyka okno. |
 | **Dwukrotne kliknięcie** | Otwiera tę kamerę w interfejsie webowym Frigate. |
 | **Najechanie kursorem** | Dopóki wskaźnik myszy jest nad oknem, okno się nie zamyka. Gdy odsuniesz kursor, okno pozostaje jeszcze co najmniej 3 sekundy. |
@@ -131,6 +132,7 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 - Po upływie liczby sekund ustawionej w **Czas po ostatnim ruchu**, licząc od ostatniego ruchu obiektu (lub dowolnego innego pasującego obiektu na tej kamerze).
 - Najpóźniej po upływie liczby sekund ustawionej w **najdłużej**, nawet jeśli obiekt wciąż się porusza.
 - Nigdy, gdy jest przypięte lub gdy wskaźnik myszy znajduje się nad nim.
+- Nigdy w trakcie powtórki; po niej zostaje otwarte jeszcze co najmniej 5 sekund.
 
 ### Więcej niż jedna kamera
 
@@ -217,7 +219,7 @@ FrigatePiP znajduje strumienie go2rtc każdej kamery w konfiguracji Frigate (`li
 
 #### Prebufor
 
-**Prebufor** utrzymuje połączenie z sub-strumieniem każdej kamery, dzięki czemu wideo na żywo startuje od razu (ok. 0,15 s), zamiast czekać na najbliższą klatkę kluczową (do ok. 1 s, zależnie od interwału klatek kluczowych kamery). Koszt: ok. 0,1–0,5 Mb/s ruchu w sieci lokalnej na kamerę, przez cały czas.
+**Prebufor** utrzymuje połączenie z sub-strumieniem każdej kamery, dzięki czemu wideo na żywo startuje od razu (ok. 0,15 s), zamiast czekać na najbliższą klatkę kluczową (do ok. 1 s, zależnie od interwału klatek kluczowych kamery). Koszt: ok. 0,1–0,5 Mb/s ruchu w sieci lokalnej na kamerę, przez cały czas. Trzyma też w pamięci ostatnie 30 s każdej kamery (tyle, ile zajmuje 30 s jej sub-strumienia: ok. 0,2–2 MB na kamerę), dzięki czemu [powtórka](#obsługa-myszą) może zacząć się 5 s przed zdarzeniem.
 
 #### Gotowe GPU
 
@@ -427,7 +429,7 @@ Na pulpicie Linuksa okna podglądu działają jak w Windows: okna bez ramek nad 
 - **Uruchomienie:** menu aplikacji → **FrigatePiP** (po instalacji przez apt) albo `frigate-pip` w terminalu na pulpicie. Program działa w tle, bez terminala; na użytkownika działa jedna kopia. Ponowne uruchomienie (albo `frigate-pip --settings`) otwiera ustawienia działającej kopii.
 - **Razem z sesją pulpitu:** `frigate-pip --autostart on` (wyłączenie: `frigate-pip --autostart off`). Zatrzymanie: `frigate-pip --quit`.
 - **Ikona w zasobniku:** z tym samym menu co w Windows (zob. [Ikona w zasobniku](#4-ikona-w-zasobniku)); jej kolor pokazuje stan: niebieski — połączono, szary — brak połączenia, pomarańczowy — wstrzymano. Pojawia się w KDE Plasma, Xfce, Cinnamon, MATE i Budgie, a w GNOME z rozszerzeniem AppIndicator (jest w Ubuntu).
-- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, suwak pod nim ustawia głośność, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
+- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, suwak pod nim ustawia głośność, ⟲ powtarza początek zdarzenia, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
 - **Opcje okien:** `topmost` (przy `false` okna są zwykłymi oknami, które inne mogą zasłonić), `sound` (dźwięk powiadomienia pulpitu) i `skip_fullscreen` (nic, gdy aktywne okno jest na pełnym ekranie) działają jak w Windows.
 - **Ustawienia:** kliknięcie ikony (albo **Ustawienia…** w jej menu) otwiera je w przeglądarce — te same opcje, opisy i test połączenia co w Windows; strona otwiera się tylko na tym komputerze. Przy pierwszym uruchomieniu otwiera się sama. Zapisują się w `~/.config/frigate-pip/config.ini` (opisane niżej).
 
@@ -441,7 +443,7 @@ W tym trybie FrigatePiP nie ma własnego okna: czeka na wykrycia w tle i przy ka
 2. Otwórz tmux do własnej pracy — `tmux` zaczyna nową sesję — i pracuj w nim. Okienka pojawiają się nad tym oknem.
 
 - Aby zatrzymać FrigatePiP: `tmux kill-session -t frigate-pip`. Aby używać jego klawiszy (wstrzymanie, pokazanie kamery): `tmux attach -t frigate-pip`.
-- Okienko pojawia się w wybranym **rogu ekranu** (`position`), a jego rozmiar zależy od **szerokości okna** (`width`). Zamyka się samo po zwykłym czasie (`duration`, `max_duration`) albo od razu po naciśnięciu **q**, **x** lub **Esc**. **m** wyłącza i włącza jego dźwięk.
+- Okienko pojawia się w wybranym **rogu ekranu** (`position`), a jego rozmiar zależy od **szerokości okna** (`width`). Zamyka się samo po zwykłym czasie (`duration`, `max_duration`) albo od razu po naciśnięciu **q**, **x** lub **Esc**. **m** wyłącza i włącza jego dźwięk. **r** powtarza początek zdarzenia (od chwili otwarcia okienka).
 - tmux pokazuje jedno okienko naraz: wykrycie na innej kamerze zastępuje otwarte okienko (lub jest pomijane, gdy `replace = false`).
 - Aby obraz miał pełne kolory, tmux musi przekazywać dalej 24-bitowy kolor: dodaj `set -as terminal-features ",xterm-256color:RGB"` do `~/.tmux.conf` (użyj swojej wartości `$TERM` spoza tmux) i uruchom tmux ponownie. Gdy brakuje kolorów, FrigatePiP zapisuje tę wskazówkę w logu.
 
@@ -455,6 +457,7 @@ Gdy FrigatePiP działa w terminalu lub w konsoli:
 | **x** (lub Esc) | Zamknij wszystkie okna podglądu. |
 | **p** | Wstrzymaj / wznów powiadomienia. |
 | **m** | Wyłącza / włącza dźwięk (przy `camera_audio = true`) we wszystkich oknach, także otwieranych później; podpis pokazuje wtedy *dźwięk wyłączony*. |
+| **r** | Powtórka początku zdarzenia we wszystkich oknach (zob. [Obsługa myszą](#obsługa-myszą)); ponownie: powrót do obrazu na żywo. |
 | **1**–**9** | Pokaż kamerę 1–9 (w kolejności z konfiguracji Frigate). |
 
 ### Wiersz poleceń

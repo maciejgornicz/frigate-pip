@@ -18,6 +18,7 @@ mod x11;
 use crate::config::{self, Config, Corner, IniDoc, LiveMode};
 use crate::filter::Detection;
 use crate::frigate::{self, CameraInfo, Notice};
+use crate::history::Recorder;
 use crate::hub::Hub;
 use crate::i18n::{self, t};
 use crate::util::Cancel;
@@ -29,7 +30,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,6 +85,8 @@ pub trait Output {
     }
     /// Camera audio of window `id`: 0 = none, 1 = on, 2 = muted (desktop windows show a button).
     fn set_sound(&mut self, _id: u64, _state: u8) {}
+    /// Replay of window `id`: 0 = nothing to replay, 1 = possible, 2 = replaying (desktop windows show a button).
+    fn set_replay(&mut self, _id: u64, _state: u8) {}
     /// The picture of window `id` is zoomed in (desktop windows: Ctrl + drag then moves it).
     fn set_zoomed(&mut self, _id: u64, _zoomed: bool) {}
     /// Volume of window `id` in percent (desktop windows show a slider).
@@ -131,6 +134,8 @@ pub enum Action {
     Pan(f32, f32),
     /// The volume slider was let go at this volume (percent).
     Volume(u8),
+    /// Replay button: start or stop a replay of the event start.
+    Replay,
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -675,6 +680,8 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         audio: cfg.camera_audio,
         volume: cfg.camera_volume,
         t0: Instant::now(),
+        event: Instant::now(),
+        own: Arc::default(),
     };
     let wake = tx.clone();
     let shared = video::start(
@@ -695,6 +702,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
                 crate::log!("{camera}: sound {}", if muted { "muted" } else { "on" });
                 shared.dirty.store(true, Ordering::Relaxed);
             }
+            Ok(Ev::Key(b'r' | b'R')) => shared.replay_pressed.store(true, Ordering::Relaxed),
             _ => {}
         }
         if last.is_some_and(|t| t.elapsed() < out.min_interval()) || !shared.dirty.swap(false, Ordering::Relaxed) {
@@ -702,7 +710,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         }
         let frame = shared.frame.lock().unwrap().clone();
         if let Some((frame, _)) = frame {
-            let text = with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed));
+            let text = with_replay(&shared, with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed)));
             out.draw(1, rect, frame, &text, shared.live.load(Ordering::Relaxed));
             last = Some(Instant::now());
         }
@@ -717,6 +725,16 @@ fn open_url(url: &str) {
             let _ = std::thread::Builder::new().name("xdg-open".into()).spawn(move || child.wait());
         }
         Err(e) => crate::log!("Cannot open {url}: xdg-open: {e}"),
+    }
+}
+
+/// The caption during a replay: how far behind live the picture is (also without a caption).
+fn with_replay(shared: &video::Shared, caption: String) -> String {
+    if shared.replay.load(Ordering::Relaxed) == 2 {
+        let behind = Duration::from_millis(shared.behind.load(Ordering::Relaxed) as u64);
+        crate::replay::caption(t().replay, behind, &caption)
+    } else {
+        caption
     }
 }
 
@@ -760,6 +778,9 @@ struct Win {
     user_moved: bool,
     /// Sound state last given to the output (see `Output::set_sound`).
     sound: u8,
+    /// When the event came, and what the window recorded itself (replays, also after a restart).
+    event: Instant,
+    own: Arc<Mutex<Recorder>>,
 }
 
 impl Win {
@@ -1127,6 +1148,11 @@ impl App {
                 // Like the wheel: sharp, with the new part live, once the drag ends.
                 w.resized = Some(Instant::now());
             }
+            Action::Replay => {
+                w.shared.replay_pressed.store(true, Ordering::Relaxed);
+                // A stopped replay, too, leaves a few seconds of live video before the window closes.
+                w.deadline = w.deadline.max(Instant::now() + Duration::from_secs(5));
+            }
             Action::Volume(volume) => {
                 w.shared.volume.store(volume, Ordering::Relaxed);
                 if volume > 0 {
@@ -1175,6 +1201,8 @@ impl App {
             audio: self.cfg.camera_audio,
             volume: w.shared.volume.load(Ordering::Relaxed),
             t0: Instant::now(),
+            event: w.event,
+            own: w.own.clone(),
         };
         let tx = self.tx.clone();
         let shared = video::start(
@@ -1252,6 +1280,7 @@ impl App {
         self.next_id += 1;
         let main = self.is_main(&d.camera, stream.as_deref());
         let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone(), muted: self.muted, main };
+        let own: Arc<Mutex<Recorder>> = Arc::default();
         let shared = match self.out.open_external(id, &view) {
             Some(true) => Arc::new(video::Shared::default()),
             Some(false) => {
@@ -1271,6 +1300,8 @@ impl App {
                     audio: self.cfg.camera_audio,
                     volume: self.cfg.camera_volume,
                     t0,
+                    event: t0,
+                    own: own.clone(),
                 };
                 let tx = self.tx.clone();
                 video::start(
@@ -1305,6 +1336,8 @@ impl App {
             pinned: false,
             user_moved: false,
             sound: 0,
+            event: t0,
+            own,
         };
         match replace_at {
             Some(i) => self.wins.insert(i, win),
@@ -1397,18 +1430,22 @@ impl App {
                 w.whole = None;
             }
             let frame = frame.zoomed(frame_zoom, w.zoom, w.whole.as_ref());
-            let caption = if self.cfg.overlay || caption_h > 0 {
-                let base = crate::view::state_caption(&w.caption, w.pinned, w.zoom);
-                // Desktop windows show a muted speaker instead.
-                with_sound(&base, muted && self.cfg.camera_audio && !buttons)
-            } else {
-                String::new()
-            };
+            let caption = with_replay(
+                &w.shared,
+                if self.cfg.overlay || caption_h > 0 {
+                    let base = crate::view::state_caption(&w.caption, w.pinned, w.zoom);
+                    // Desktop windows show a muted speaker instead.
+                    with_sound(&base, muted && self.cfg.camera_audio && !buttons)
+                } else {
+                    String::new()
+                },
+            );
             self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
             // Each time: a window that did not fit for a while comes back as a new one.
             self.out.set_zoomed(w.id, !w.zoom.is_full());
             self.out.set_volume(w.id, w.shared.volume.load(Ordering::Relaxed));
             self.out.set_sound(w.id, w.sound);
+            self.out.set_replay(w.id, w.shared.replay.load(Ordering::Relaxed));
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).
@@ -1428,6 +1465,12 @@ impl App {
             self.wins.remove(i).stop();
         }
         let now = Instant::now();
+        // A replay keeps its window open, and a few seconds of live video follow it.
+        for w in &mut self.wins {
+            if w.shared.replay.load(Ordering::Relaxed) == 2 {
+                w.deadline = w.deadline.max(now + Duration::from_secs(5));
+            }
+        }
         // A window under the mouse or pinned stays (desktop windows).
         let expired: Vec<usize> =
             (0..self.wins.len()).filter(|&i| now >= self.wins[i].deadline && !self.wins[i].hovered && !self.wins[i].pinned).collect();
@@ -1495,6 +1538,17 @@ impl App {
                     w.shared.dirty.store(true, Ordering::Relaxed);
                 }
                 self.show_status();
+            }
+            b'r' | b'R' => {
+                // Stops the replays that run; with none running, every window replays its event start.
+                let running = self.wins.iter().any(|w| w.shared.replay.load(Ordering::Relaxed) == 2);
+                let now = Instant::now();
+                for w in &mut self.wins {
+                    if (w.shared.replay.load(Ordering::Relaxed) == 2) == running {
+                        w.shared.replay_pressed.store(true, Ordering::Relaxed);
+                        w.deadline = w.deadline.max(now + Duration::from_secs(5));
+                    }
+                }
             }
             b'1'..=b'9' => {
                 if let Some(c) = self.cameras.get((k - b'1') as usize) {

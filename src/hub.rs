@@ -1,12 +1,15 @@
-//! Prebuffer: a persistent RTSP connection to the camera and the last GOP in memory (not decoded).
-//! Audio (when enabled) is only forwarded live, without buffering. Shared by the Windows player
-//! and the Linux ffmpeg pipeline: subscribers are plain functions.
+//! Prebuffer: a persistent RTSP connection to the camera and its last 30 s in memory (not
+//! decoded): new windows start from the last GOP, a replay from further back. Audio (when
+//! enabled) is only forwarded live, without buffering. Shared by the Windows player and the
+//! Linux ffmpeg pipeline: subscribers are plain functions.
 
 use crate::audio::AudioTrack;
+use crate::history::History;
 use crate::rtp::{AccessUnit, VideoTrack};
 use crate::rtsp::Media;
 use crate::util::Cancel;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// What a subscriber gets: the tracks, video access units, audio frames, or the end.
 pub enum Feed {
@@ -30,19 +33,21 @@ struct Inner {
     state: Mutex<State>,
 }
 
-#[derive(Default)]
 struct State {
     track: Option<(VideoTrack, Option<AudioTrack>)>,
-    gop: Vec<Arc<AccessUnit>>,
-    bytes: usize,
+    history: History,
     subs: Vec<Sink>,
 }
 
-const MAX_GOP_BYTES: usize = 24 << 20;
+/// How far back the prebuffer reaches (a replay starts 5 s before the event).
+const KEEP: Duration = Duration::from_secs(30);
+/// At most this much of it: a camera with long GOPs must still start from the prebuffer.
+const MAX_BYTES: usize = 24 << 20;
 
 impl Hub {
     pub fn start(url: String, camera: &str, audio: bool) -> Hub {
-        let inner = Arc::new(Inner { url, audio, cancel: Cancel::new(), state: Mutex::new(State::default()) });
+        let state = State { track: None, history: History::new(Some(KEEP), MAX_BYTES), subs: Vec::new() };
+        let inner = Arc::new(Inner { url, audio, cancel: Cancel::new(), state: Mutex::new(state) });
         let worker = inner.clone();
         let name = camera.to_string();
         let _ = std::thread::Builder::new().name(format!("prebuf-{camera}")).spawn(move || run(worker, name));
@@ -62,14 +67,22 @@ impl Hub {
     pub fn subscribe(&self, sink: Sink) -> bool {
         let mut st = self.inner.state.lock().unwrap();
         let Some((video, audio)) = st.track.clone() else { return false };
-        if st.gop.is_empty() || !sink(Feed::Track(video, audio)) {
+        if st.history.is_empty() || !sink(Feed::Track(video, audio)) {
             return false;
         }
-        for au in &st.gop {
+        for au in st.history.last_gop() {
             let _ = sink(Feed::Au(au.clone()));
         }
         st.subs.push(sink);
         true
+    }
+
+    /// The kept video from the key frame at or before `at`, with its track (a replay).
+    pub fn replay_from(&self, at: Instant) -> Option<(VideoTrack, Vec<Arc<AccessUnit>>)> {
+        let st = self.inner.state.lock().unwrap();
+        let (video, _) = st.track.clone()?;
+        let units = st.history.from(at);
+        (!units.is_empty()).then_some((video, units))
     }
 }
 
@@ -92,8 +105,7 @@ fn run(inner: Arc<Inner>, camera: String) {
             |video, audio| {
                 let mut st = inner.state.lock().unwrap();
                 st.track = Some((video.clone(), audio.cloned()));
-                st.gop.clear();
-                st.bytes = 0;
+                st.history.clear();
                 st.subs.retain(|s| s(Feed::Track(video.clone(), audio.cloned())));
             },
             |media| {
@@ -101,18 +113,7 @@ fn run(inner: Arc<Inner>, camera: String) {
                 match media {
                     Media::Video(au) => {
                         let au = Arc::new(au);
-                        if au.key {
-                            st.gop.clear();
-                            st.bytes = 0;
-                        }
-                        if !st.gop.is_empty() || au.key {
-                            st.bytes += au.data.len();
-                            st.gop.push(au.clone());
-                            if st.bytes > MAX_GOP_BYTES {
-                                st.gop.clear();
-                                st.bytes = 0;
-                            }
-                        }
+                        st.history.push(au.clone());
                         st.subs.retain(|s| s(Feed::Au(au.clone())));
                     }
                     Media::Audio(frame) => {
@@ -132,8 +133,7 @@ fn run(inner: Arc<Inner>, camera: String) {
         {
             let mut st = inner.state.lock().unwrap();
             st.track = None;
-            st.gop.clear();
-            st.bytes = 0;
+            st.history.clear();
             for s in st.subs.drain(..) {
                 s(Feed::Failed(err.clone()));
             }

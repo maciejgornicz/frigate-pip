@@ -4,6 +4,7 @@ use crate::audio::{AudioMsg, AudioTrack, Sound};
 use crate::client::Frigate;
 use crate::config::LiveMode;
 use crate::decoder::{Decoder, Frame};
+use crate::history::Recorder;
 use crate::hub::{Feed, Hub, Sink};
 use crate::render::{Overlay, Renderer};
 use crate::rtp::{AccessUnit, VideoTrack};
@@ -22,9 +23,10 @@ use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 pub const WM_APP_ASPECT: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 10;
 pub const WM_APP_PLAYER_DONE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 11;
 
-/// Video source: the prebuffer (always sub) or direct RTSP.
+/// Video source: the prebuffer (always sub), direct RTSP, or a replay of kept video.
 pub const SRC_PREBUF: usize = 0;
 pub const SRC_DIRECT: usize = 1;
+pub const SRC_REPLAY: usize = 2;
 
 pub enum Input {
     Jpeg(Vec<u8>),
@@ -33,6 +35,8 @@ pub enum Input {
     Au(usize, Arc<AccessUnit>),
     Audio(usize, Arc<Vec<u8>>),
     LiveFailed(usize, String),
+    /// The replay sent its last frame.
+    ReplayEnd,
 }
 
 /// State shared with the UI thread.
@@ -47,6 +51,10 @@ pub struct Shared {
     pub sound: Arc<Sound>,
     /// The part of the picture that is shown (Ctrl + mouse wheel).
     zoom: Mutex<Zoom>,
+    /// Replay: 0 = nothing to replay (no button), 1 = possible, 2 = replaying.
+    replay: AtomicU8,
+    /// The replay button was pressed; the player starts or stops the replay.
+    replay_pressed: AtomicBool,
 }
 
 impl Shared {
@@ -59,7 +67,17 @@ impl Shared {
             dirty: AtomicBool::new(false),
             sound: Arc::new(Sound { volume: volume.into(), ..Default::default() }),
             zoom: Mutex::new(Zoom::FULL),
+            replay: AtomicU8::new(0),
+            replay_pressed: AtomicBool::new(false),
         })
+    }
+
+    pub fn replay(&self) -> u8 {
+        self.replay.load(Ordering::Relaxed)
+    }
+
+    pub fn press_replay(&self) {
+        self.replay_pressed.store(true, Ordering::Relaxed);
     }
 
     pub fn set_overlay(&self, text: String) {
@@ -177,6 +195,50 @@ fn prebuf_sink(tx: Sender<Input>) -> Sink {
     })
 }
 
+/// A running replay: its thread sends kept video as source `SRC_REPLAY`.
+struct Replay {
+    cancel: Cancel,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Replay {
+    /// Ends the thread; nothing it sent afterwards is waiting (a stop is final).
+    fn stop(mut self) {
+        self.cancel.cancel();
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// Sends the kept units at their own pace as source `SRC_REPLAY`, then `ReplayEnd`.
+fn spawn_replay(track: VideoTrack, units: Vec<Arc<AccessUnit>>, tx: Sender<Input>) -> Replay {
+    let cancel = Cancel::new();
+    let c = cancel.clone();
+    let thread = std::thread::Builder::new()
+        .name("replay".into())
+        .spawn(move || {
+            if tx.send(Input::Track(SRC_REPLAY, track, None)).is_err() {
+                return;
+            }
+            let mut due = Instant::now();
+            let mut prev: Option<u32> = None;
+            for au in units {
+                if let Some(p) = prev {
+                    due += crate::replay::gap(p, au.ts);
+                }
+                prev = Some(au.ts);
+                let wait = due.saturating_duration_since(Instant::now()).as_millis() as u64;
+                if c.sleep(wait) || tx.send(Input::Au(SRC_REPLAY, au)).is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(Input::ReplayEnd);
+        })
+        .ok();
+    Replay { cancel, thread }
+}
+
 /// Finds consecutive JPEG images (SOI…EOI) in an MJPEG stream.
 fn spawn_mjpeg(api: Frigate, path: String, tx: Sender<Input>, cancel: Cancel) {
     let _ = std::thread::Builder::new().name("mjpeg".into()).spawn(move || {
@@ -276,7 +338,12 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     // Audio lives on its own thread; here we only hand it frames without waiting.
     let audio_tx = p.audio.then(|| crate::audio::spawn(cam.clone(), cancel.clone(), shared.sound.clone()));
 
-    let mut src: [Source; 2] = Default::default();
+    let mut src: [Source; 3] = Default::default();
+    // Without the prebuffer the window keeps its own video for a replay.
+    let mut own = Recorder::default();
+    let mut replay: Option<Replay> = None;
+    // How far behind live the replayed picture is (the caption says it).
+    let mut behind: Option<Duration> = None;
     let mut mjpeg_active = false;
     match p.live {
         // Without Media Foundation (Windows N) RTSP video cannot be decoded.
@@ -317,19 +384,27 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     };
     renderer_ready.store(true, Ordering::Release);
     crate::log!("{cam}: renderer ready after {} ms", p.t0.elapsed().as_millis());
-    let overlay_text = |live: bool| Overlay {
-        text: if shared.overlay_on.load(Ordering::Relaxed) { shared.overlay.lock().unwrap().clone() } else { String::new() },
-        live,
-        close: shared.close_button.load(Ordering::Relaxed),
-        sound: match (shared.sound.playing.load(Ordering::Relaxed), shared.sound.muted.load(Ordering::Relaxed)) {
-            (false, _) => 0,
-            (true, false) => 1,
-            (true, true) => 2,
-        },
-        volume: shared.sound.volume.load(Ordering::Relaxed),
-        zoom: shared.zoom(),
+    // `behind`: a replayed picture this far behind live (said in the caption, even without one).
+    let overlay_text = |live: bool, behind: Option<Duration>| {
+        let text = if shared.overlay_on.load(Ordering::Relaxed) { shared.overlay.lock().unwrap().clone() } else { String::new() };
+        Overlay {
+            text: match behind {
+                Some(b) => crate::replay::caption(crate::i18n::t().replay, b, &text),
+                None => text,
+            },
+            live,
+            close: shared.close_button.load(Ordering::Relaxed),
+            sound: match (shared.sound.playing.load(Ordering::Relaxed), shared.sound.muted.load(Ordering::Relaxed)) {
+                (false, _) => 0,
+                (true, false) => 1,
+                (true, true) => 2,
+            },
+            replay: shared.replay(),
+            volume: shared.sound.volume.load(Ordering::Relaxed),
+            zoom: shared.zoom(),
+        }
     };
-    let _ = r.redraw(&overlay_text(false));
+    let _ = r.redraw(&overlay_text(false, None));
 
     let mut force_sw = !r.video_ok;
     let mut shown: Option<usize> = None;
@@ -337,9 +412,33 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let mut snapshot_inflight = true;
     let mut last_snapshot = Instant::now();
     let mut aspect_sent: Option<(u32, u32)> = None;
-    let names = ["prebuffer", "rtsp"];
+    let names = ["prebuffer", "rtsp", "replay"];
 
     while !cancel.is_set() {
+        if shared.replay_pressed.swap(false, Ordering::Relaxed) {
+            if let Some(running) = replay.take() {
+                running.stop();
+                src[SRC_REPLAY] = Source::default();
+                behind = None;
+                shared.replay.store(1, Ordering::Relaxed);
+                shared.request_redraw();
+                crate::log!("{cam}: replay stopped");
+            } else {
+                // With the prebuffer from before the event, otherwise from the window's opening.
+                let material =
+                    if src[SRC_PREBUF].active { p.hub.as_ref().and_then(|h| h.replay_from(crate::replay::start(p.t0))) } else { own.replay() };
+                match material {
+                    Some((track, units)) => {
+                        crate::log!("{cam}: replay, {}", crate::replay::describe(&units, Instant::now()));
+                        src[SRC_REPLAY] = Source { active: true, ..Default::default() };
+                        replay = Some(spawn_replay(track, units, tx.clone()));
+                        shared.replay.store(2, Ordering::Relaxed);
+                        shared.request_redraw();
+                    }
+                    None => crate::log!("{cam}: nothing to replay yet"),
+                }
+            }
+        }
         let mut batch = Vec::new();
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(m) => batch.push(m),
@@ -350,6 +449,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             batch.push(m);
         }
         let mut new_frame: Option<(usize, Frame, Instant)> = None;
+        let mut new_replay: Option<(Frame, Instant)> = None;
         let mut new_jpeg: Option<Vec<u8>> = None;
         for m in batch {
             match m {
@@ -361,6 +461,9 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 }
                 Input::JpegFailed => snapshot_inflight = false,
                 Input::Track(s, t, a) => {
+                    if s == SRC_DIRECT && !src[SRC_PREBUF].active {
+                        own.track(&t);
+                    }
                     src[s].dec = None;
                     src[s].got_key = false;
                     src[s].track = Some(t);
@@ -369,15 +472,18 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                     }
                 }
                 Input::Audio(s, f) => {
-                    if let (Some(atx), true) = (&audio_tx, shown == Some(s)) {
+                    // A replay has no sound (audio is not kept).
+                    if let (Some(atx), true) = (&audio_tx, shown == Some(s) && replay.is_none()) {
                         let _ = atx.send(AudioMsg::Frame(s, f));
                     }
                 }
                 Input::Au(s, au) => {
-                    // After switching to the direct stream, the prebuffer is ignored.
-                    if shown.is_some_and(|c| s < c) {
+                    // After switching to the direct stream, the prebuffer is ignored; replayed
+                    // frames count only while their replay runs.
+                    if (s < SRC_REPLAY && shown.is_some_and(|c| s < c)) || (s == SRC_REPLAY && replay.is_none()) {
                         continue;
                     }
+                    let record = s == SRC_DIRECT && !src[SRC_PREBUF].active;
                     let st = &mut src[s];
                     let Some(codec) = st.track.as_ref().map(|t| t.codec) else { continue };
                     if !st.got_key && !au.key {
@@ -405,9 +511,18 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                         }
                     }
                     st.got_key = true;
-                    st.timing.received(au.arrived, au.late);
+                    if s != SRC_REPLAY {
+                        st.timing.received(au.arrived, au.late);
+                    }
+                    if record {
+                        own.push(au.clone());
+                    }
                     let d = st.dec.as_mut().unwrap();
-                    if let Err(e) = d.decode(&au.data, &mut |f| new_frame = Some((s, f, au.arrived))) {
+                    let got = &mut |f| match s {
+                        SRC_REPLAY => new_replay = Some((f, au.arrived)),
+                        _ => new_frame = Some((s, f, au.arrived)),
+                    };
+                    if let Err(e) = d.decode(&au.data, got) {
                         crate::log!("{cam}: decoding error ({}): {e}", if d.hw { "hardware" } else { "software" });
                         if d.hw {
                             force_sw = true;
@@ -420,19 +535,49 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                     crate::log!("{cam}: video ({}) unavailable: {e}", names[s]);
                     src[s].failed = true;
                 }
+                Input::ReplayEnd => {
+                    if let Some(done) = replay.take() {
+                        done.stop();
+                        src[SRC_REPLAY] = Source::default();
+                        behind = None;
+                        shared.replay.store(1, Ordering::Relaxed);
+                        shared.request_redraw();
+                        crate::log!("{cam}: replay done");
+                    }
+                }
             }
         }
 
-        let alive = src.iter().any(|s| s.active && !s.failed);
+        let alive = src[..SRC_REPLAY].iter().any(|s| s.active && !s.failed);
         if shown.is_none() && !alive && !mjpeg_active && p.live != LiveMode::Snapshot {
             crate::log!("{cam}: no RTSP video - MJPEG from Frigate instead");
             spawn_mjpeg(api.clone(), mjpeg_path.clone(), tx.clone(), cancel.clone());
             mjpeg_active = true;
         }
 
-        if let Some((s, f, arrived)) = new_frame {
+        if let Some((f, arrived)) = new_replay.filter(|_| replay.is_some()) {
+            behind = Some(arrived.elapsed());
+            match r.show_frame(f, &overlay_text(false, behind)) {
+                Ok(size) => {
+                    if aspect_sent != Some(size) {
+                        aspect_sent = Some(size);
+                        post_aspect(hwnd, size);
+                    }
+                }
+                Err(e) => {
+                    crate::log!("{cam}: cannot show the replay ({e})");
+                    if let Some(running) = replay.take() {
+                        running.stop();
+                    }
+                    src[SRC_REPLAY] = Source::default();
+                    behind = None;
+                    shared.replay.store(1, Ordering::Relaxed);
+                }
+            }
+        } else if let Some((s, f, arrived)) = new_frame.filter(|_| replay.is_none()) {
+            // Live video goes on decoding during a replay, unseen: it is back at once afterwards.
             let gpu = matches!(f, Frame::Gpu { .. });
-            match r.show_frame(f, &overlay_text(true)) {
+            match r.show_frame(f, &overlay_text(true, None)) {
                 Ok(size) => {
                     src[s].timing.shown(arrived, Instant::now());
                     if shown != Some(s) {
@@ -441,6 +586,8 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                         let what = if shown.is_none() { "video" } else { "switched to" };
                         crate::log!("{cam}: {what} {}x{} {codec} ({kind}, {}) after {} ms", size.0, size.1, names[s], p.t0.elapsed().as_millis());
                         shown = Some(s);
+                        // Live video is kept from now on (prebuffer or the window): the replay button appears.
+                        let _ = shared.replay.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed);
                         if let Some(atx) = &audio_tx {
                             let _ = atx.send(AudioMsg::Select(s));
                         }
@@ -463,7 +610,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 }
             }
         } else if let Some(j) = new_jpeg {
-            match r.show_jpeg(&j, &overlay_text(mjpeg_active)) {
+            match r.show_jpeg(&j, &overlay_text(mjpeg_active, None)) {
                 Ok(size) => {
                     if !have_image {
                         have_image = true;
@@ -477,7 +624,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 Err(e) => crate::log!("{cam}: bad JPEG: {e}"),
             }
         } else if shared.dirty.swap(false, Ordering::Relaxed) || r.check_resize().unwrap_or(false) {
-            let _ = r.redraw(&overlay_text(shown.is_some() || mjpeg_active));
+            let _ = r.redraw(&overlay_text((shown.is_some() || mjpeg_active) && replay.is_none(), behind));
         }
 
         if shown.is_none() && !mjpeg_active && !snapshot_inflight && last_snapshot.elapsed() > Duration::from_millis(400) {
@@ -485,6 +632,9 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             last_snapshot = Instant::now();
             spawn_snapshot(api.clone(), snapshot_path.clone(), tx.clone(), cancel.clone(), None);
         }
+    }
+    if let Some(running) = replay.take() {
+        running.stop();
     }
     if let Some(line) = shown.and_then(|s| src[s].timing.summary()) {
         crate::log!("{cam}: timing - {line}");

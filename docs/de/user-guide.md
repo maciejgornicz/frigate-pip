@@ -122,6 +122,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 | **×** (oben rechts) | Schließt das Fenster sofort. Die Schaltfläche erscheint, wenn Sie mit der Maus auf das Fenster zeigen. |
 | **Lautsprecher** (links neben ×) | Schaltet den Ton des Fensters aus; ein weiterer Klick schaltet ihn wieder ein. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Kameraton zeigen; solange der Ton aus ist, bleibt der durchgestrichene Lautsprecher sichtbar. |
 | **Lautstärkeregler** (unter dem Lautsprecher) | Stellt die Lautstärke dieses Fensters ein: ziehen oder anklicken. Er erscheint zusammen mit dem Lautsprecher; Lauterstellen schaltet auch stummgeschalteten Ton wieder ein. Unter Linux ist die neue Lautstärke kurz nach dem Loslassen zu hören. |
+| **Wiederholung** ⟲ (links neben den anderen Schaltflächen) | Spielt den Beginn des Ereignisses noch einmal in normaler Geschwindigkeit ab, ohne Ton; die Beschriftung zeigt *Wiederholung −12 s*, also wie weit das Bild hinter dem Livebild liegt. Mit dem [Vorpuffer](#vorpuffer) beginnt die Wiederholung 5 s, bevor sich das Fenster öffnete, ohne ihn mit dem Öffnen des Fensters. Klicken Sie erneut, um sofort zum Livevideo zurückzukehren; nach der Wiederholung kehrt es von selbst zurück. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Livevideo zeigen; während der Wiederholung bleibt das Fenster offen. |
 | **Rechtsklick** | Schließt das Fenster. |
 | **Doppelklick** | Öffnet diese Kamera in der Frigate-Weboberfläche. |
 | **Darauf zeigen** | Solange sich der Mauszeiger über dem Fenster befindet, schließt es sich nicht. Nachdem Sie die Maus wegbewegt haben, bleibt es noch mindestens 3 Sekunden geöffnet. |
@@ -131,6 +132,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 - Nach der unter **Dauer nach letzter Bewegung** eingestellten Zahl von Sekunden, nachdem sich das Objekt (oder ein anderes passendes Objekt dieser Kamera) zuletzt bewegt hat.
 - Spätestens nach der unter **höchstens** eingestellten Zahl von Sekunden, auch wenn sich das Objekt weiter bewegt.
 - Nie, solange es angeheftet ist oder sich der Mauszeiger darüber befindet.
+- Nie während einer Wiederholung; danach bleibt es noch mindestens 5 Sekunden geöffnet.
 
 ### Mehrere Kameras
 
@@ -217,7 +219,7 @@ FrigatePiP ermittelt die go2rtc-Streams jeder Kamera aus der Frigate-Konfigurati
 
 #### Vorpuffer
 
-**Vorpuffer** hält eine Verbindung zum Sub-Stream jeder Kamera, sodass das Livevideo sofort startet (ca. 0,15 s), statt auf das nächste Schlüsselbild zu warten (bis zu ca. 1 s, je nach Schlüsselbildintervall der Kamera). Kosten: ständig ca. 0,1–0,5 Mbit/s Datenverkehr im lokalen Netzwerk pro Kamera.
+**Vorpuffer** hält eine Verbindung zum Sub-Stream jeder Kamera, sodass das Livevideo sofort startet (ca. 0,15 s), statt auf das nächste Schlüsselbild zu warten (bis zu ca. 1 s, je nach Schlüsselbildintervall der Kamera). Kosten: ständig ca. 0,1–0,5 Mbit/s Datenverkehr im lokalen Netzwerk pro Kamera. Er hält außerdem die letzten 30 s jeder Kamera im Speicher (so viel wie 30 s ihres Sub-Streams: etwa 0,2–2 MB pro Kamera), damit die [Wiederholung](#mausaktionen) 5 s vor dem Ereignis beginnen kann.
 
 #### GPU bereithalten
 
@@ -427,7 +429,7 @@ Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rah
 - **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie. Ein zweiter Start (oder `frigate-pip --settings`) öffnet die Einstellungen der laufenden Kopie.
 - **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
 - **Symbol im Infobereich:** mit demselben Menü wie unter Windows (siehe [Das Tray-Symbol](#4-das-tray-symbol)); seine Farbe zeigt den Zustand: blau — verbunden, grau — nicht verbunden, orange — pausiert. Es erscheint unter KDE Plasma, Xfce, Cinnamon, MATE und Budgie sowie unter GNOME mit der Erweiterung AppIndicator (in Ubuntu enthalten).
-- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
+- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, ⟲ wiederholt den Beginn des Ereignisses, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
 - **Fensteroptionen:** `topmost` (bei `false` sind die Fenster gewöhnliche Fenster, die andere verdecken können), `sound` (der Benachrichtigungston des Desktops) und `skip_fullscreen` (nichts, solange das aktive Fenster im Vollbild ist) wirken wie unter Windows.
 - **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben).
 
@@ -441,7 +443,7 @@ In diesem Modus hat FrigatePiP kein eigenes Fenster: Es wartet im Hintergrund au
 2. Öffnen Sie tmux für Ihre eigene Arbeit — `tmux` startet eine neue Sitzung — und arbeiten Sie dort. Die Popups erscheinen über diesem Fenster.
 
 - Zum Beenden von FrigatePiP: `tmux kill-session -t frigate-pip`. Um seine Tasten zu verwenden (Pause, Kamera anzeigen): `tmux attach -t frigate-pip`.
-- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein.
+- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein. **r** wiederholt den Beginn des Ereignisses (ab dem Öffnen des Popups).
 - tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen).
 - Für die vollen Farben des Bildes muss tmux 24-Bit-Farbe weitergeben: Fügen Sie `set -as terminal-features ",xterm-256color:RGB"` zu `~/.tmux.conf` hinzu (verwenden Sie dabei Ihren `$TERM` außerhalb von tmux) und starten Sie tmux neu. FrigatePiP schreibt diesen Hinweis in sein Protokoll, wenn die Farben fehlen.
 
@@ -455,6 +457,7 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 | **x** (oder Esc) | Alle Vorschaufenster schließen. |
 | **p** | Benachrichtigungen pausieren / fortsetzen. |
 | **m** | Ton aus / ein (bei `camera_audio = true`) für alle Fenster, auch später geöffnete; die Beschriftung zeigt dann *Ton aus*. |
+| **r** | Den Beginn des Ereignisses in allen Fenstern wiederholen (siehe [Mausaktionen](#mausaktionen)); erneut: zurück zum Livevideo. |
 | **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). |
 
 ### Befehlszeile

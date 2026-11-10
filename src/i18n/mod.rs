@@ -339,6 +339,9 @@ pub struct Strings {
     pub tip_check_updates: &'static str,
     pub tip_update: &'static str,
 
+    /// Caption during a replay of the event start ("Replay −12 s").
+    pub replay: &'static str,
+
     // ---- Linux console version
     /// Keys shown in the status line.
     #[cfg_attr(windows, allow(dead_code))]
