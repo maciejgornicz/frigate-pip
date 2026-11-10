@@ -167,7 +167,7 @@ Większość zmian działa **od razu** na otwarte okna podglądu, więc widzisz 
 |---|---|
 | **Pokazuj okno dla** | Które wiadomości Frigate otwierają okno: **Każdego wykrytego obiektu (najszybciej)** — każdy obiekt śledzony przez Frigate; **Tylko alertów z Review** — tylko elementy Review o poziomie ważności *alert*; **Alertów i detekcji z Review** — wszystkie elementy Review. Elementy Review podlegają regułom alertów i detekcji (etykiety i wymagane strefy) ustawionym w sekcji `review` konfiguracji Frigate i docierają nieco później niż zdarzenia obiektów. |
 | **Kamery** | Kamery, które mogą otworzyć okno. Odznaczone kamery są pomijane. Gdy zaznaczone są wszystkie kamery, uwzględniane są także kamery dodane do Frigate później. |
-| **Obiekty** | Rodzaje obiektów (etykiety), które mogą otworzyć okno, np. osoba, samochód, pies. Lista pokazuje obiekty śledzone przez Twoje kamery. Gdy zaznaczone są wszystkie, liczy się każdy rodzaj obiektu. |
+| **Obiekty** | Rodzaje obiektów (etykiety), które mogą otworzyć okno, np. osoba, samochód, pies. Lista pokazuje obiekty śledzone przez Twoje kamery. Gdy zaznaczone są wszystkie, liczy się każdy rodzaj obiektu. Lista rozwijana nad nią wybiera, czyje obiekty widzisz: **Wszystkie kamery** albo jedną kamerę. Zaznaczenia zrobione dla kamery dają jej własną listę, używaną zamiast listy dla wszystkich kamer (w każdym trybie, także dla zdarzeń ręcznych); taka kamera jest oznaczona `*`. Gdy zaznaczenia kamery są takie same jak dla wszystkich kamer, kamera nie ma własnej listy i podąża za późniejszymi zmianami. **Jak dla wszystkich kamer** usuwa własną listę kamery. |
 | **Wymagane strefy** | Jeśli zaznaczysz strefy, okno otworzy się dopiero, gdy obiekt wejdzie do jednej z nich. Bez zaznaczenia liczy się każde miejsce w kadrze. |
 | **Pomijaj obiekty stojące w miejscu** | Obiekty oznaczone przez Frigate jako stojące (na przykład zaparkowane auto) nie otwierają okien i nie przedłużają ich pokazu. Dotyczy opcji *Każdego wykrytego obiektu*. |
 | **Minimalna pewność** | Wykrycia o mniejszej pewności są pomijane. 0% oznacza, że decydują progi ustawione we Frigate. Dotyczy opcji *Każdego wykrytego obiektu*. |
@@ -236,7 +236,7 @@ FrigatePiP znajduje strumienie go2rtc każdej kamery w konfiguracji Frigate (`li
 
 ## 7. Plik ustawień
 
-Wszystkie ustawienia są przechowywane w `%APPDATA%\FrigatePiP\config.ini` (zwykły plik tekstowy). Okno ustawień zapisuje je wszystkie; plik jest potrzebny tylko do ustawień poszczególnych kamer. **Plik ustawień (zaawansowane)…** w menu w zasobniku otwiera go w Notatniku. Zmiany są stosowane automatycznie po zapisaniu pliku. Komentarze zaczynają się od `;`. Wartości tak/nie można zapisać jako `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
+Wszystkie ustawienia są przechowywane w `%APPDATA%\FrigatePiP\config.ini` (zwykły plik tekstowy). Okno ustawień zapisuje je wszystkie; plik jest potrzebny tylko do nazwy i strumieni kamery. **Plik ustawień (zaawansowane)…** w menu w zasobniku otwiera go w Notatniku. Zmiany są stosowane automatycznie po zapisaniu pliku. Komentarze zaczynają się od `;`. Wartości tak/nie można zapisać jako `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
 
 | Sekcja | Klucz | Domyślnie | Znaczenie |
 |---|---|---|---|
@@ -275,6 +275,7 @@ Wszystkie ustawienia są przechowywane w `%APPDATA%\FrigatePiP\config.ini` (zwyk
 | | `gpu_warm` | `false` | Gotowe GPU. |
 | | `camera_audio` | `false` | Dźwięk z kamery. |
 | | `camera_volume` | `100` | Głośność nowego okna, 0–100 %. |
+| `[camera.<name>]` | `labels` | *(puste = jak w `[trigger]`)* | Obiekty dla tej kamery zamiast `labels` z `[trigger]`, np. `person, car, dog`. |
 
 ### Ustawienia poszczególnych kamer
 
@@ -287,7 +288,11 @@ name = Front door
 ; go2rtc stream names
 main = front_door
 sub = front_door_sub
+; Objects that open a window on this camera, instead of labels in [trigger]
+labels = person, car, dog, cat
 ```
+
+`labels` daje kamerze własną listę obiektów: zastępuje dla niej `labels` z `[trigger]` w każdym trybie (także dla zdarzeń ręcznych). Pusta lub brak = lista dla wszystkich kamer. To samo ustawia okno ustawień i strona ustawień w Linuksie: wybierz kamerę nad listą **Obiekty**.
 
 ## 8. Wiersz poleceń
 

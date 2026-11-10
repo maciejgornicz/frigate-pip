@@ -167,7 +167,7 @@ A maioria das alterações tem efeito **de imediato** nas janelas de pré-visual
 |---|---|
 | **Mostrar janela para** | Que mensagens do Frigate abrem uma janela: **Cada objeto detetado (mais rápido)** — cada objeto rastreado pelo Frigate; **Apenas alertas do Review** — apenas itens do Review com gravidade *alert*; **Alertas e deteções do Review** — todos os itens do Review. Os itens do Review seguem as regras de alertas e deteções (etiquetas e zonas obrigatórias) definidas na configuração `review` do Frigate e chegam um pouco mais tarde do que os eventos de objetos. |
 | **Câmaras** | Câmaras que podem abrir uma janela. As câmaras desmarcadas são ignoradas. Com todas as câmaras marcadas, as câmaras adicionadas mais tarde ao Frigate também são incluídas. |
-| **Objetos** | Tipos de objeto (etiquetas) que podem abrir uma janela, p. ex. pessoa, carro, cão. A lista mostra os objetos rastreados pelas suas câmaras. Com todos marcados, conta qualquer tipo de objeto. |
+| **Objetos** | Tipos de objeto (etiquetas) que podem abrir uma janela, p. ex. pessoa, carro, cão. A lista mostra os objetos rastreados pelas suas câmaras. Com todos marcados, conta qualquer tipo de objeto. A lista pendente por cima escolhe que objetos vê: os de **Todas as câmaras** ou os de uma câmara. O que marcar para uma câmara dá-lhe uma lista própria, usada em vez da lista de todas as câmaras (em todos os modos, também para eventos manuais); essa câmara fica marcada com `*`. Se o que está marcado para uma câmara for igual ao de todas as câmaras, ela não tem lista própria e segue as alterações posteriores. **Igual a todas as câmaras** remove a lista própria da câmara. |
 | **Zonas obrigatórias** | Se marcar zonas, a janela só abre quando o objeto entra numa delas. Sem nenhuma marcada, conta qualquer ponto da imagem. |
 | **Ignorar objetos parados** | Os objetos que o Frigate marca como parados (por exemplo um carro estacionado) não abrem janelas nem as mantêm abertas. Aplica-se a *Cada objeto detetado*. |
 | **Confiança mínima** | As deteções com confiança inferior são ignoradas. 0% significa que decidem os limiares do próprio Frigate. Aplica-se a *Cada objeto detetado*. |
@@ -236,7 +236,7 @@ O FrigatePiP encontra os streams go2rtc de cada câmara na configuração do Fri
 
 ## 7. O ficheiro de configurações
 
-Todas as configurações são guardadas em `%APPDATA%\FrigatePiP\config.ini` (um ficheiro de texto simples). A janela de configurações escreve todas elas; o ficheiro só é necessário para as configurações por câmara. **Ficheiro de configurações (avançado)…** no menu da área de notificação abre-o no Bloco de Notas. As alterações são aplicadas automaticamente quando o ficheiro é guardado. Os comentários começam com `;`. Os valores sim/não aceitam `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
+Todas as configurações são guardadas em `%APPDATA%\FrigatePiP\config.ini` (um ficheiro de texto simples). A janela de configurações escreve todas elas; o ficheiro só é necessário para o nome e os streams de uma câmara. **Ficheiro de configurações (avançado)…** no menu da área de notificação abre-o no Bloco de Notas. As alterações são aplicadas automaticamente quando o ficheiro é guardado. Os comentários começam com `;`. Os valores sim/não aceitam `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
 
 | Secção | Chave | Predefinição | Significado |
 |---|---|---|---|
@@ -275,6 +275,7 @@ Todas as configurações são guardadas em `%APPDATA%\FrigatePiP\config.ini` (um
 | | `gpu_warm` | `false` | GPU pronta. |
 | | `camera_audio` | `false` | Áudio da câmara. |
 | | `camera_volume` | `100` | Volume de uma janela nova, 0–100 %. |
+| `[camera.<name>]` | `labels` | *(vazio = como em `[trigger]`)* | Objetos para esta câmara em vez de `labels` de `[trigger]`, p. ex. `person, car, dog`. |
 
 ### Configurações por câmara
 
@@ -287,7 +288,11 @@ name = Front door
 ; go2rtc stream names
 main = front_door
 sub = front_door_sub
+; Objects that open a window on this camera, instead of labels in [trigger]
+labels = person, car, dog, cat
 ```
+
+`labels` dá à câmara uma lista de objetos própria: substitui `labels` de `[trigger]` para esta câmara em todos os modos (também para eventos manuais). Vazio ou ausente = a lista de todas as câmaras. A janela de configurações e a página de configurações no Linux também a definem: escolha a câmara acima da lista **Objetos**.
 
 ## 8. Linha de comandos
 
