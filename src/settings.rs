@@ -117,6 +117,9 @@ pub struct Settings {
     objects: Objects,
     /// The scope shown in the object list: 0 = all cameras, n = `cameras[n - 1]`.
     scope: usize,
+    /// The objects the list showed checked for that scope: only checks the user changed
+    /// change the scope's list.
+    shown: Vec<String>,
     /// Texts of the scope combo (a camera with its own list has " *").
     scope_texts: Vec<String>,
 }
@@ -304,20 +307,18 @@ impl Objects {
         labels.iter().filter(|l| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(l))).cloned().collect()
     }
 
-    /// With the checks of one scope changed; a camera list that is the same as the one for
-    /// all cameras is none.
+    /// With the checks of one scope changed by the user. Checks made for a camera that are
+    /// the same as for all cameras are no list of its own; the other cameras' lists stay as
+    /// they are (also one that the list for all cameras now equals).
     fn with_checks(&self, scope: usize, checked: &[String], labels: &[String]) -> Objects {
         let mut o = self.clone();
         match scope {
             0 => o.all = pick(labels, checked),
             n => {
                 if let Some(own) = o.own.get_mut(n - 1) {
-                    *own = checked.to_vec();
+                    *own = crate::view::own_labels(checked, &self.all, labels);
                 }
             }
-        }
-        for own in &mut o.own {
-            *own = crate::view::own_labels(own, &o.all, labels);
         }
         o
     }
@@ -409,6 +410,7 @@ impl Settings {
                 monitors: init.monitors.len(),
                 objects,
                 scope: 0,
+                shown: Vec::new(),
                 scope_texts: Vec::new(),
             };
             s.build(cfg, init.autostart, &init.monitors, &cameras);
@@ -693,6 +695,7 @@ impl Settings {
             let e = self.combo(Some(p), ID_LABELS_FOR, &[], 0, x, 112, colw);
             self.tip(&[e], t.tip_objects_for);
             let e = self.checklist(p, id, &items, x, 142, colw, 168);
+            self.shown = self.objects.checks(0, &self.labels);
             self.tip(&[l, e], tip);
             let b = self.add(Some(p), WC_BUTTONW, t.objects_same_as_all, WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_LABELS_SAME, x, 316, colw, 26);
             self.tip(&[b], t.tip_objects_same_as_all);
@@ -842,6 +845,7 @@ impl Settings {
         // The object list starts again with all cameras.
         self.objects = Objects::from_config(&draft, &self.cameras);
         self.scope = 0;
+        self.shown = self.objects.checks(0, &self.labels);
         self.scope_texts.clear();
         self.update_objects(&draft);
         let (c, l, z) = self.list_items(&draft);
@@ -908,28 +912,38 @@ impl Settings {
         names.iter().zip(self.list_checks(id, names.len())).filter(|(_, on)| *on).map(|(n, _)| n.clone()).collect()
     }
 
+    /// The object lists with the checks shown now; only checks the user changed count.
+    fn objects_now(&self) -> Objects {
+        let live = self.checked_names(ID_LABELS, &self.labels);
+        if live == self.shown {
+            self.objects.clone()
+        } else {
+            self.objects.with_checks(self.scope, &live, &self.labels)
+        }
+    }
+
     /// The object list shows another scope (all cameras or one camera).
     pub fn switch_scope(&mut self) {
         let new = self.sel(ID_LABELS_FOR);
         if new == self.scope {
             return;
         }
-        self.objects = self.objects.with_checks(self.scope, &self.checked_names(ID_LABELS, &self.labels), &self.labels);
+        self.objects = self.objects_now();
         self.scope = new;
         self.show_objects();
     }
 
     /// "Same as all cameras": the shown camera loses its own object list.
     pub fn same_as_all(&mut self) {
-        if self.scope > 0 {
-            self.objects = self.objects.with_checks(self.scope, &[], &self.labels);
+        if let Some(own) = self.objects.own.get_mut(self.scope.wrapping_sub(1)) {
+            own.clear();
             self.show_objects();
         }
     }
 
-    fn show_objects(&self) {
-        let on = self.objects.checks(self.scope, &self.labels);
-        let items: Vec<(String, bool)> = self.labels.iter().map(|l| (label_text(l), on.contains(l))).collect();
+    fn show_objects(&mut self) {
+        self.shown = self.objects.checks(self.scope, &self.labels);
+        let items: Vec<(String, bool)> = self.labels.iter().map(|l| (label_text(l), self.shown.contains(l))).collect();
         self.fill_list(ID_LABELS, &items);
     }
 
@@ -984,7 +998,7 @@ impl Settings {
         let cam_names: Vec<String> = self.cameras.iter().map(|(n, _)| n.clone()).collect();
         c.cameras = pick(&cam_names, &self.checked_names(ID_CAMS, &cam_names));
         // The object list shows one scope; the others are as they were when last shown.
-        self.objects.with_checks(self.scope, &self.checked_names(ID_LABELS, &self.labels), &self.labels).apply(&mut c, &self.cameras);
+        self.objects_now().apply(&mut c, &self.cameras);
         c.zones = self.zones.iter().zip(self.list_checks(ID_ZONES, self.zones.len())).filter(|(_, b)| *b).map(|(z, _)| z.clone()).collect();
         c.ignore_stationary = self.checked(ID_STATIONARY);
         c.min_score = self.pos(ID_MINSCORE) as f32 / 100.0;
@@ -1154,6 +1168,20 @@ mod tests {
         // Nothing checked for a camera: none either.
         assert_eq!(o.with_checks(2, &[], &labels()).own[1], names(&[]));
         assert_eq!(o.with_checks(1, &names(&["dog"]), &labels()).own[0], names(&["dog"]));
+    }
+
+    #[test]
+    fn lists_not_edited_are_kept() {
+        // Yard's list, written in the file, equals the one for all cameras: it stays when
+        // that one changes (only checks made for a camera can drop its list).
+        let c = Config::from_ini(&IniDoc::parse("[trigger]\nlabels = person, car\n[camera.yard]\nlabels = person, car\n"));
+        let o = Objects::from_config(&c, &cams());
+        assert_eq!(o.with_checks(0, &names(&["person", "car"]), &labels()).own[1], names(&["person", "car"]));
+        let o = o.with_checks(0, &names(&["person"]), &labels());
+        assert_eq!(o.own, [names(&[]), names(&["person", "car"])]);
+        // A camera's own list that the list for all cameras catches up with stays its own.
+        let o = o.with_checks(1, &names(&["dog"]), &labels()).with_checks(0, &names(&["dog"]), &labels());
+        assert_eq!(o.own[0], names(&["dog"]));
     }
 
     #[test]
