@@ -357,6 +357,10 @@ Start with **Test connection** in the settings and with **Show log** in the tray
 - The go2rtc stream must contain audio — **Test connection** shows *audio … Hz* or *no audio*.
 - Check the volume of *FrigatePiP* in the Windows volume mixer.
 
+**FrigatePiP closes by itself**
+- Every line of the log starts with the date and time. A crash of FrigatePiP leaves a last line starting with *Crash in thread*: attach it to an issue (see below).
+- If the log simply stops, without *Shutting down* and without *Crash*, something else ended the program: Windows shutting down or updating, or the closing of the program that started it (for example a terminal window).
+
 **Something else** — open an [issue on GitHub](https://github.com/maciejgornicz/frigate-pip/issues) and attach the relevant part of the log. Remove addresses and camera names you do not want to share.
 
 ---

@@ -357,6 +357,10 @@ Beginnen Sie mit **Verbindung testen** in den Einstellungen und mit **Protokoll 
 - Der go2rtc-Stream muss Audio enthalten — **Verbindung testen** zeigt *Audio … Hz* oder *kein Audio* an.
 - Prüfen Sie die Lautstärke von *FrigatePiP* im Lautstärkemixer von Windows.
 
+**FrigatePiP beendet sich von selbst**
+- Jede Zeile des Protokolls beginnt mit Datum und Uhrzeit. Ein Absturz von FrigatePiP hinterlässt eine letzte Zeile, die mit *Crash in thread* beginnt — hängen Sie sie an ein Issue an (siehe unten).
+- Endet das Protokoll einfach, ohne *Shutting down* und ohne *Crash*, hat etwas anderes das Programm beendet: das Herunterfahren oder ein Update von Windows oder das Schließen des Programms, das es gestartet hat (z. B. eines Terminalfensters).
+
 **Etwas anderes** — Erstellen Sie ein [Issue auf GitHub](https://github.com/maciejgornicz/frigate-pip/issues) und hängen Sie den relevanten Teil des Protokolls an. Entfernen Sie Adressen und Kameranamen, die Sie nicht weitergeben möchten.
 
 ---
