@@ -110,10 +110,12 @@ fn read_request(s: &mut TcpStream) -> std::io::Result<Request> {
     Ok(Request { method, target, headers, body })
 }
 
+/// `Referrer-Policy: same-origin`: other sites get no referrer (the address carries the
+/// key). Not `no-referrer`: Chromium then sends `Origin: null` with the form, refused.
 fn respond(s: &mut TcpStream, status: &str, kind: &str, extra: &str, body: &[u8]) -> std::io::Result<()> {
     let head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\
-         Referrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; \
+         Referrer-Policy: same-origin\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; \
          connect-src 'self'; form-action 'self'; frame-ancestors 'none'\r\n{extra}Connection: close\r\n\r\n",
         body.len()
     );
@@ -644,6 +646,42 @@ mod tests {
         // Saved again (e.g. another setting changed): still the same.
         let c2 = Config::from_ini(&IniDoc::parse(&doc.to_text()));
         assert_eq!(c2.mqtt_password, " ab;c #d ");
+    }
+
+    /// A raw request to the running page; the whole answer (the server then closes).
+    fn send(port: u16, request: &str) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(request.as_bytes()).unwrap();
+        let mut answer = String::new();
+        s.read_to_string(&mut answer).unwrap();
+        answer
+    }
+
+    #[test]
+    fn saving_works_in_chromium() {
+        // Chromium sends `Origin: null` with the form of a page served with
+        // `Referrer-Policy: no-referrer`, and that origin is refused. Other sites must
+        // still get no referrer: the page address carries the key.
+        let dir = std::env::temp_dir().join(format!("fpip-web-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("config.ini");
+        let web = start(path.clone(), Arc::new(Mutex::new(Info::default())), Arc::new(|_| {})).unwrap();
+        let (port, key) = web.url.strip_prefix("http://127.0.0.1:").unwrap().split_once('/').unwrap();
+        let (port, host) = (port.parse().unwrap(), format!("127.0.0.1:{port}"));
+        let page = send(port, &format!("GET /{key} HTTP/1.1\r\nHost: {host}\r\n\r\n"));
+        assert!(page.starts_with("HTTP/1.1 200 "));
+        assert!(page.contains("\r\nReferrer-Policy: same-origin\r\n"));
+        let form = "frigate.url=http%3A%2F%2F10.0.0.5%3A5000";
+        let save = |origin: &str| {
+            let head = format!("POST /{key}save HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\nContent-Length: {}", form.len());
+            send(port, &format!("{head}\r\n\r\n{form}"))
+        };
+        // Other origins (also `null`) are still refused; the page's own one saves.
+        assert!(save("null").starts_with("HTTP/1.1 403 "));
+        assert!(save("http://example.com").starts_with("HTTP/1.1 403 "));
+        assert!(save(&format!("http://{host}")).starts_with("HTTP/1.1 303 "));
+        assert_eq!(config::load(&path).unwrap().0.url, "http://10.0.0.5:5000");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
