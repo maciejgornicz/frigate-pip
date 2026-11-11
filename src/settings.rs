@@ -6,14 +6,14 @@
 use crate::config::{Config, Corner, LiveMode, Source, StreamPref, TriggerMode};
 use crate::frigate::CameraInfo;
 use crate::i18n::{self, Lang};
-use crate::view::choices;
+use crate::view::{choices, label_text, listed};
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use windows::core::{w, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::HiDpi::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, GetFocus, SetFocus};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const CLASS: PCWSTR = w!("FrigatePiP.Settings");
@@ -267,16 +267,6 @@ pub fn help_url() -> String {
     format!("https://github.com/maciejgornicz/frigate-pip/blob/main/docs/{}/user-guide.md", i18n::current().code())
 }
 
-/// An object in the list: its name in the interface language, with Frigate's in brackets.
-fn label_text(l: &str) -> String {
-    let name = i18n::label(l);
-    if name == l {
-        l.to_string()
-    } else {
-        format!("{name} ({l})")
-    }
-}
-
 /// The checked entries of a list: everything or nothing checked = everything (an empty
 /// list, which also takes in cameras and objects added to Frigate later).
 fn pick(names: &[String], checked: &[String]) -> Vec<String> {
@@ -304,7 +294,7 @@ impl Objects {
     /// The objects checked in the list for a scope: 0 = all cameras, n = the n-th camera.
     fn checks(&self, scope: usize, labels: &[String]) -> Vec<String> {
         let list = self.own.get(scope.wrapping_sub(1)).filter(|o| !o.is_empty()).unwrap_or(&self.all);
-        labels.iter().filter(|l| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(l))).cloned().collect()
+        labels.iter().filter(|l| listed(list, l)).cloned().collect()
     }
 
     /// With the checks of one scope changed by the user. Checks made for a camera that are
@@ -823,9 +813,8 @@ impl Settings {
     /// List entries (text, checked) for cameras, objects and zones according to `c`.
     #[allow(clippy::type_complexity)]
     fn list_items(&self, c: &Config) -> (Vec<(String, bool)>, Vec<(String, bool)>, Vec<(String, bool)>) {
-        let all = |list: &[String], name: &str| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(name));
-        let cams = self.cameras.iter().map(|(n, t)| (t.clone(), all(&c.cameras, n))).collect();
-        let labels = self.labels.iter().map(|l| (label_text(l), all(&c.labels, l))).collect();
+        let cams = self.cameras.iter().map(|(n, t)| (t.clone(), listed(&c.cameras, n))).collect();
+        let labels = self.labels.iter().map(|l| (label_text(l), listed(&c.labels, l))).collect();
         let zones = self.zones.iter().map(|z| (z.clone(), c.zones.iter().any(|x| x.eq_ignore_ascii_case(z)))).collect();
         (cams, labels, zones)
     }
@@ -965,8 +954,13 @@ impl Settings {
             self.scope_texts = texts;
         }
         let own = self.scope > 0 && self.cameras.get(self.scope - 1).is_some_and(|(n, _)| draft.own_labels(n).is_some());
+        let button = self.item(ID_LABELS_SAME);
         unsafe {
-            let _ = EnableWindow(self.item(ID_LABELS_SAME), own);
+            // A disabled button keeps no keyboard focus: it goes to the object list.
+            if !own && GetFocus() == button {
+                let _ = SetFocus(self.item(ID_LABELS));
+            }
+            let _ = EnableWindow(button, own);
         }
     }
 

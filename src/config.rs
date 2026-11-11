@@ -348,14 +348,18 @@ impl Config {
         self.rtsp.replace("{host}", &self.host()).replace("{stream}", stream)
     }
 
+    /// The camera's `[camera.<name>]` section; the name in any case, as in the filters.
+    pub fn camera(&self, camera: &str) -> Option<&CamOverride> {
+        self.overrides.iter().find(|(k, _)| k.eq_ignore_ascii_case(camera)).map(|(_, o)| o)
+    }
+
     /// The camera's own object list (`labels` in `[camera.<name>]`), if it has one.
     pub fn own_labels(&self, camera: &str) -> Option<&[String]> {
-        self.overrides.iter().find(|(k, o)| k.eq_ignore_ascii_case(camera) && !o.labels.is_empty()).map(|(_, o)| o.labels.as_slice())
+        self.camera(camera).map(|o| o.labels.as_slice()).filter(|l| !l.is_empty())
     }
 
     /// Objects that open a window on the camera: its own list, or the list for all cameras
     /// (empty = every object).
-    #[cfg_attr(windows, allow(dead_code))]
     pub fn labels_for(&self, camera: &str) -> &[String] {
         self.own_labels(camera).unwrap_or(&self.labels)
     }

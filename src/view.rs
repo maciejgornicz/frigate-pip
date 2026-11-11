@@ -81,6 +81,22 @@ pub fn choices(cams: &[CameraInfo], cfg: &Config) -> (Vec<(String, String)>, Vec
     (cameras, labels, zones)
 }
 
+/// `name` is in a filter list (empty = every entry), in any case.
+pub fn listed(list: &[String], name: &str) -> bool {
+    list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(name))
+}
+
+/// An object in the settings' lists: its name in the interface language, with Frigate's
+/// name after it in brackets.
+pub fn label_text(l: &str) -> String {
+    let name = i18n::label(l);
+    if name == l {
+        l.to_string()
+    } else {
+        format!("{name} ({l})")
+    }
+}
+
 /// The objects checked for one camera in the settings, as its own list: none (empty) when
 /// they are the same as for all cameras (`global`; empty = every one of `all`) or when
 /// nothing is checked.
@@ -299,6 +315,16 @@ mod tests {
 
     fn names(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn object_entries_in_the_lists() {
+        // An empty list holds every object; names in any case.
+        assert!(listed(&[], "dog") && listed(&names(&["Dog"]), "dog") && !listed(&names(&["cat"]), "dog"));
+        // A label without a translation is shown as it is; one with, with Frigate's name after it.
+        assert_eq!(label_text("doorbell"), "doorbell");
+        let dog = i18n::label("dog");
+        assert_eq!(label_text("dog"), if dog == "dog" { "dog".to_string() } else { format!("{dog} (dog)") });
     }
 
     #[test]

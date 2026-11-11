@@ -7,6 +7,7 @@ use crate::config::{self, Config, Corner, IniDoc, LiveMode, Source, StreamPref, 
 use crate::frigate::CameraInfo;
 use crate::i18n::{self, t, Lang};
 use crate::util::Cancel;
+use crate::view::{label_text, listed};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -354,20 +355,12 @@ fn opts(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
 fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
     let s = t();
     let lang = i18n::current();
-    let all = |list: &[String], name: &str| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(name));
     let (cams, labels, zones) = crate::view::choices(&info.cameras, c);
-    let cam_items: Vec<(String, String, bool)> = cams.iter().map(|(n, title)| (n.clone(), title.clone(), all(&c.cameras, n))).collect();
+    let cam_items: Vec<(String, String, bool)> = cams.iter().map(|(n, title)| (n.clone(), title.clone(), listed(&c.cameras, n))).collect();
     // Objects: one group of checkboxes for all cameras and one for every camera; the
     // select above them shows one group (a camera with its own list is marked with *).
-    let label_items = |list: &[String]| -> Vec<(String, String, bool)> {
-        labels
-            .iter()
-            .map(|l| {
-                let name = i18n::label(l);
-                (l.clone(), if name == l { l.clone() } else { format!("{name} ({l})") }, all(list, l))
-            })
-            .collect()
-    };
+    let label_items =
+        |list: &[String]| -> Vec<(String, String, bool)> { labels.iter().map(|l| (l.clone(), label_text(l), listed(list, l))).collect() };
     let mut objects = checks("trigger.labels", &label_items(&c.labels), "—");
     if !cams.is_empty() {
         let mut options = format!("<option value=\"\">{}</option>", esc(s.objects_all_cameras));
@@ -609,29 +602,46 @@ const source = document.getElementById("frigate-source");
 const mqtt = document.getElementById("mqtt");
 const show = () => {{ mqtt.style.display = source.value === "mqtt" ? "" : "none"; }};
 source.addEventListener("change", show); show();
+// rules:begin
+// The object lists' rules on plain data (the tests run them too). A camera follows the list
+// for all cameras until the user checks something else for it: then it has a list of its
+// own (*), kept as it is until checks equal to those for all cameras or "Same as all
+// cameras" give it up. Nothing checked for all cameras = every object.
+const rules = {{
+  everyone: (checked, all) => (checked.length ? checked : all),
+  own: (checked, every) => checked.length > 0 && (checked.length !== every.length || checked.some((x) => !every.includes(x))),
+  // A camera {{ checked, all, follow }} after a change by "camera" (the user's checks for
+  // it), "same" (its "Same as all cameras" button) or "all" (the list for all cameras).
+  after: (cam, every, by) => {{
+    if (by === "camera") return Object.assign({{}}, cam, {{ follow: !rules.own(cam.checked, every) }});
+    if (by === "same" || cam.follow) return Object.assign({{}}, cam, {{ checked: every.filter((x) => cam.all.includes(x)), follow: true }});
+    return cam;
+  }},
+}};
+// rules:end
 const scope = document.getElementById("labels-for");
 if (scope) {{
-  // One group of objects at a time. A camera follows the list for all cameras (its hidden
-  // "follow" field is 1) until the user checks something else for it: then it has a list
-  // of its own (*), kept as it is until checks equal to those for all cameras or "Same as
-  // all cameras" give it up. Nothing checked for all cameras = every object.
+  // One group of objects at a time; a camera's hidden "follow" field holds its state.
   const groups = [...document.querySelectorAll("[data-for]")];
   const group = (v) => groups.find((g) => g.dataset.for === v);
   const boxes = (g) => [...g.querySelectorAll("input[type=checkbox]")];
   const flag = (g) => g.querySelector("input.follow");
   const checked = (g) => boxes(g).filter((b) => b.checked).map((b) => b.value);
-  const everyone = () => {{ const c = checked(group("")); return c.length ? c : boxes(group("")).map((b) => b.value); }};
-  const own = (g) => {{ const c = checked(g), e = everyone(); return c.length > 0 && (c.length !== e.length || c.some((x) => !e.includes(x))); }};
+  const every = () => rules.everyone(checked(group("")), boxes(group("")).map((b) => b.value));
+  const change = (g, by) => {{
+    const c = rules.after({{ checked: checked(g), all: boxes(g).map((b) => b.value), follow: flag(g).value === "1" }}, every(), by);
+    boxes(g).forEach((b) => {{ b.checked = c.checked.includes(b.value); }});
+    flag(g).value = c.follow ? "1" : "0";
+  }};
   const mark = () => {{ for (const o of scope.options) if (o.value) o.textContent = o.dataset.title + (flag(group(o.value)).value === "0" ? " *" : ""); }};
   const pick = () => groups.forEach((g) => {{ g.style.display = g.dataset.for === scope.value ? "" : "none"; }});
-  const follow = (g) => {{ const e = everyone(); boxes(g).forEach((b) => {{ b.checked = e.includes(b.value); }}); flag(g).value = "1"; }};
   for (const g of groups) {{
     if (!g.dataset.for) {{
-      g.addEventListener("change", () => groups.forEach((x) => {{ if (x.dataset.for && flag(x).value === "1") follow(x); }}));
+      g.addEventListener("change", () => groups.forEach((x) => {{ if (x.dataset.for) change(x, "all"); }}));
       continue;
     }}
-    g.addEventListener("change", () => {{ flag(g).value = own(g) ? "0" : "1"; }});
-    g.querySelector("button.same").addEventListener("click", () => {{ follow(g); mark(); }});
+    g.addEventListener("change", () => change(g, "camera"));
+    g.querySelector("button.same").addEventListener("click", () => {{ change(g, "same"); mark(); }});
   }}
   scope.addEventListener("change", pick);
   form.addEventListener("change", mark);
@@ -769,6 +779,39 @@ mod tests {
         // Cameras without a list of their own follow changes made for all cameras (in the page).
         assert!(html.contains("<input type=\"hidden\" class=\"follow\" name=\"camera.front.follow\" value=\"1\">"));
         assert!(html.contains("<input type=\"hidden\" class=\"follow\" name=\"camera.garden.follow\" value=\"0\">"));
+    }
+
+    /// The page's object-list rules (plain functions in its script), run by node; skipped
+    /// with a note when node is not installed.
+    #[test]
+    fn page_object_rules() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse(""));
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None);
+        let rules = html.split("// rules:begin").nth(1).and_then(|r| r.split("// rules:end").next()).expect("rules in the page");
+        let checks = r#"
+const assert = require("assert");
+const eq = (a, b) => assert.deepStrictEqual(a, b);
+// Nothing checked for all cameras = every object.
+eq(rules.everyone([], ["p", "c"]), ["p", "c"]);
+eq(rules.everyone(["p"], ["p", "c"]), ["p"]);
+// A list of its own: something checked, not the same as for all cameras.
+eq([rules.own([], ["p"]), rules.own(["c", "p"], ["p", "c"]), rules.own(["p"], ["p", "c"]), rules.own(["p", "c", "d"], ["p", "c"])], [false, false, true, true]);
+const cam = (checked, follow) => ({ checked, all: ["p", "c", "d"], follow });
+// A change for all cameras: a following camera takes it (only its own entries), one with a list keeps it.
+eq(rules.after(cam(["p"], true), ["p", "c", "x"], "all"), cam(["p", "c"], true));
+eq(rules.after(cam(["p", "c"], false), ["p"], "all"), cam(["p", "c"], false));
+// The user's checks for a camera: the same as for all cameras (or none) = following.
+eq(rules.after(cam(["c", "p"], false), ["p", "c"], "camera").follow, true);
+eq(rules.after(cam([], false), ["p", "c"], "camera").follow, true);
+eq(rules.after(cam(["p", "d"], true), ["p", "c"], "camera").follow, false);
+// "Same as all cameras".
+eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
+"#;
+        match std::process::Command::new("node").arg("-e").arg(format!("{rules}\n{checks}")).output() {
+            Ok(out) => assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)),
+            Err(e) => eprintln!("node is not available ({e}): the page's object rules were not run"),
+        }
     }
 
     #[test]

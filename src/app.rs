@@ -1114,17 +1114,17 @@ impl App {
                     self.preview_on();
                 }
             }
-            settings::ID_LABELS_FOR | settings::ID_LABELS_SAME => {
-                if (id == settings::ID_LABELS_FOR && code == CBN_SELCHANGE) || (id == settings::ID_LABELS_SAME && code == BN_CLICKED) {
-                    if let Some(s) = self.settings.as_mut() {
-                        if id == settings::ID_LABELS_FOR {
-                            s.switch_scope();
-                        } else {
-                            s.same_as_all();
-                        }
-                    }
-                    self.settings_changed();
+            settings::ID_LABELS_FOR if code == CBN_SELCHANGE => {
+                if let Some(s) = self.settings.as_mut() {
+                    s.switch_scope();
                 }
+                self.settings_changed();
+            }
+            settings::ID_LABELS_SAME if code == BN_CLICKED => {
+                if let Some(s) = self.settings.as_mut() {
+                    s.same_as_all();
+                }
+                self.settings_changed();
             }
             _ if code == EN_CHANGE || code == CBN_SELCHANGE || code == BN_CLICKED => self.settings_changed(),
             _ => {}

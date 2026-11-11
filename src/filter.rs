@@ -24,14 +24,8 @@ pub enum Verdict {
 }
 
 pub struct EventFilter {
-    mode: TriggerMode,
-    cameras: Vec<String>,
-    labels: Vec<String>,
-    /// Cameras with their own object list (`labels` in `[camera.<name>]`), used instead of `labels`.
-    camera_labels: Vec<(String, Vec<String>)>,
-    zones: Vec<String>,
-    ignore_stationary: bool,
-    min_score: f32,
+    /// The filters: mode, cameras, objects (also per camera), zones, stationary, confidence.
+    cfg: Config,
     shown: VecDeque<String>,
     /// Ids met on the `events` topic and review items already seen. A review item that is
     /// neither — Frigate starts it with an "update" — is a manual event (Frigate's API, e.g.
@@ -90,19 +84,7 @@ fn base_label(l: &str) -> &str {
 
 impl EventFilter {
     pub fn new(cfg: &Config) -> Self {
-        EventFilter {
-            mode: cfg.mode,
-            cameras: cfg.cameras.clone(),
-            labels: cfg.labels.clone(),
-            camera_labels: cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty()).map(|(cam, o)| (cam.clone(), o.labels.clone())).collect(),
-            zones: cfg.zones.clone(),
-            ignore_stationary: cfg.ignore_stationary,
-            min_score: cfg.min_score,
-            shown: VecDeque::new(),
-            seen: Recent::default(),
-            manual: Recent::default(),
-            since: unix_now(),
-        }
+        EventFilter { cfg: cfg.clone(), shown: VecDeque::new(), seen: Recent::default(), manual: Recent::default(), since: unix_now() }
     }
 
     /// The connection's start by Frigate's clock (its HTTP `Date`), so that review items are
@@ -113,7 +95,7 @@ impl EventFilter {
 
     /// `events` mode also reads review items, for manual events.
     pub fn wants(&self, topic: &str) -> bool {
-        match self.mode {
+        match self.cfg.mode {
             TriggerMode::Events => topic == "events" || topic == "reviews",
             TriggerMode::Alerts | TriggerMode::Reviews => topic == "reviews",
         }
@@ -123,7 +105,7 @@ impl EventFilter {
         if !self.wants(topic) {
             return Verdict::Ignore;
         }
-        match (self.mode, topic) {
+        match (self.cfg.mode, topic) {
             (TriggerMode::Events, "events") => self.on_event(payload),
             (TriggerMode::Events, _) => self.on_manual_review(payload),
             _ => self.on_review(payload),
@@ -152,16 +134,11 @@ impl EventFilter {
     }
 
     fn camera_ok(&self, cam: &str) -> bool {
-        self.cameras.is_empty() || any_in(std::iter::once(cam), &self.cameras)
-    }
-
-    /// Objects that may open a window on the camera (empty = all).
-    fn labels(&self, cam: &str) -> &[String] {
-        self.camera_labels.iter().find(|(c, _)| c.eq_ignore_ascii_case(cam)).map_or(&self.labels, |(_, l)| l)
+        self.cfg.cameras.is_empty() || any_in(std::iter::once(cam), &self.cfg.cameras)
     }
 
     fn label_ok(&self, cam: &str, labels: impl Iterator<Item = impl AsRef<str>>) -> bool {
-        let wanted = self.labels(cam);
+        let wanted = self.cfg.labels_for(cam);
         wanted.is_empty() || any_in(labels, wanted)
     }
 
@@ -176,17 +153,17 @@ impl EventFilter {
         if !self.label_ok(cam, std::iter::once(label)) {
             return false;
         }
-        if !self.zones.is_empty() {
+        if !self.cfg.zones.is_empty() {
             let zones = o.get("entered_zones").strs().chain(o.get("current_zones").strs());
-            if !any_in(zones, &self.zones) {
+            if !any_in(zones, &self.cfg.zones) {
                 return false;
             }
         }
-        if self.ignore_stationary && o.get("stationary").bool() == Some(true) {
+        if self.cfg.ignore_stationary && o.get("stationary").bool() == Some(true) {
             return false;
         }
         let score = o.get("top_score").f64().unwrap_or(0.0).max(o.get("score").f64().unwrap_or(0.0)) as f32;
-        score >= self.min_score
+        score >= self.cfg.min_score
     }
 
     fn on_event(&mut self, p: &Json) -> Verdict {
@@ -220,14 +197,14 @@ impl EventFilter {
         if !self.camera_ok(cam) {
             return false;
         }
-        if self.mode == TriggerMode::Alerts && r.get("severity").str() != Some("alert") {
+        if self.cfg.mode == TriggerMode::Alerts && r.get("severity").str() != Some("alert") {
             return false;
         }
         let data = r.get("data");
         if !self.label_ok(cam, data.get("objects").strs().map(base_label)) {
             return false;
         }
-        self.zones.is_empty() || any_in(data.get("zones").strs(), &self.zones)
+        self.cfg.zones.is_empty() || any_in(data.get("zones").strs(), &self.cfg.zones)
     }
 
     fn on_review(&mut self, p: &Json) -> Verdict {
