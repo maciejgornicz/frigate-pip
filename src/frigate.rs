@@ -44,7 +44,7 @@ pub fn camera_infos(j: &Json, cfg: &Config) -> Vec<CameraInfo> {
         if cam.get("enabled").bool() == Some(false) {
             continue;
         }
-        let ov = cfg.overrides.get(name).cloned().unwrap_or_default();
+        let ov = cfg.camera(name).cloned().unwrap_or_default();
         let title =
             ov.name.clone().or_else(|| cam.get("friendly_name").str().filter(|s| !s.is_empty()).map(str::to_string)).unwrap_or_else(|| name.clone());
         let detect = cam.get("detect");
@@ -473,6 +473,10 @@ mod tests {
         assert_eq!(cams[2].title, "Ogród");
         assert_eq!(cams[2].main.as_deref(), Some("c_hd"));
         assert_eq!(cams[2].sub.as_deref(), Some("c_sub"));
+        // A section name in other case works for every key, as `labels` does.
+        let cfg = Config::from_ini(&IniDoc::parse("[camera.C]\nname = Ogród\nlabels = dog\n"));
+        let cams = camera_infos(&j, &cfg);
+        assert_eq!((cams[2].title.as_str(), cfg.labels_for("c")), ("Ogród", &["dog".to_string()][..]));
     }
 
     /// The whole connection test against a real Frigate, e.g. port 8971 with a login:

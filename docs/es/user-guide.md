@@ -167,7 +167,7 @@ La mayoría de los cambios se aplican **de inmediato** a las ventanas de vista p
 |---|---|
 | **Mostrar ventana para** | Qué mensajes de Frigate abren una ventana: **Cada objeto detectado (lo más rápido)** — cada objeto rastreado por Frigate; **Solo alertas de Review** — solo los elementos de Review con gravedad *alert*; **Alertas y detecciones de Review** — todos los elementos de Review. Los elementos de Review siguen las reglas de alertas y detecciones (etiquetas y zonas requeridas) definidas en la configuración `review` de Frigate y llegan un poco más tarde que los eventos de objetos. |
 | **Cámaras** | Cámaras que pueden abrir una ventana. Las cámaras no marcadas se ignoran. Con todas las cámaras marcadas, también se incluyen las que se agreguen a Frigate más adelante. |
-| **Objetos** | Tipos de objeto (etiquetas) que pueden abrir una ventana, p. ej., persona, automóvil, perro. La lista muestra los objetos que rastrean sus cámaras. Con todos marcados, cuenta cualquier tipo de objeto. |
+| **Objetos** | Tipos de objeto (etiquetas) que pueden abrir una ventana, p. ej., persona, automóvil, perro. La lista muestra los objetos que rastrean sus cámaras. Con todos marcados, cuenta cualquier tipo de objeto. La lista desplegable de encima elige qué objetos ve: los de **Todas las cámaras** o los de una cámara. Lo que marque para una cámara le da su propia lista, que se usa en lugar de la de todas las cámaras (en todos los modos, también para los eventos manuales); esa cámara aparece marcada con `*`. Si marca para una cámara los mismos objetos que para todas las cámaras, no tiene lista propia y sigue los cambios posteriores; una lista propia no cambia cuando cambia la de todas las cámaras. **Igual que todas las cámaras** quita la lista propia de la cámara. |
 | **Zonas requeridas** | Si marca zonas, la ventana solo se abre cuando el objeto entra en una de ellas. Si no hay ninguna marcada, cuenta cualquier punto de la imagen. |
 | **Ignorar objetos que no se mueven** | Los objetos que Frigate marca como inmóviles (por ejemplo, un vehículo estacionado) no abren ventanas ni las mantienen abiertas. Se aplica a *Cada objeto detectado*. |
 | **Confianza mínima** | Las detecciones con una confianza menor se ignoran. 0% significa que deciden los umbrales propios de Frigate. Se aplica a *Cada objeto detectado*. |
@@ -236,7 +236,7 @@ FrigatePiP encuentra los flujos de go2rtc de cada cámara en la configuración d
 
 ## 7. El archivo de configuración
 
-Toda la configuración se guarda en `%APPDATA%\FrigatePiP\config.ini` (un archivo de texto sin formato). La ventana de configuración escribe todos los valores; el archivo solo es necesario para la configuración por cámara. **Archivo de configuración (avanzado)…** en el menú de la bandeja lo abre en el Bloc de notas. Los cambios se aplican automáticamente al guardar el archivo. Los comentarios empiezan con `;`. Los valores de sí/no aceptan `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
+Toda la configuración se guarda en `%APPDATA%\FrigatePiP\config.ini` (un archivo de texto sin formato). La ventana de configuración escribe todos los valores; el archivo solo es necesario para el nombre y los flujos de una cámara. **Archivo de configuración (avanzado)…** en el menú de la bandeja lo abre en el Bloc de notas. Los cambios se aplican automáticamente al guardar el archivo. Los comentarios empiezan con `;`. Los valores de sí/no aceptan `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
 
 | Sección | Clave | Predeterminado | Significado |
 |---|---|---|---|
@@ -275,6 +275,7 @@ Toda la configuración se guarda en `%APPDATA%\FrigatePiP\config.ini` (un archiv
 | | `gpu_warm` | `false` | GPU preparada. |
 | | `camera_audio` | `false` | Audio de la cámara. |
 | | `camera_volume` | `100` | Volumen de una ventana nueva, 0–100 %. |
+| `[camera.<name>]` | `labels` | *(vacío = como en `[trigger]`)* | Objetos para esta cámara en lugar de `labels` de `[trigger]`, p. ej., `person, car, dog`. |
 
 ### Configuración por cámara
 
@@ -287,7 +288,11 @@ name = Front door
 ; Nombres de los flujos de go2rtc
 main = front_door
 sub = front_door_sub
+; Objetos que abren una ventana en esta cámara, en lugar de labels de [trigger]
+labels = person, car, dog, cat
 ```
+
+`labels` da a la cámara su propia lista de objetos: sustituye `labels` de `[trigger]` para esta cámara en todos los modos (también para los eventos manuales). Vacío o ausente = la lista de todas las cámaras. La ventana de configuración y la página de configuración de Linux también la ajustan: elija la cámara encima de la lista **Objetos**.
 
 ## 8. Línea de comandos
 

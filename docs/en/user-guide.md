@@ -167,7 +167,7 @@ Most changes take effect **immediately** on open preview windows, so you can see
 |---|---|
 | **Show a window for** | Which Frigate messages open a window: **Every detected object (fastest)** — every object tracked by Frigate; **Review alerts only** — only Review items with *alert* severity; **Review alerts and detections** — all Review items. Review items follow the alert and detection rules (labels and required zones) set in Frigate's `review` configuration and arrive slightly later than object events. |
 | **Cameras** | Cameras that may open a window. Unchecked cameras are ignored. With all cameras checked, cameras added to Frigate later are included too. |
-| **Objects** | Object types (labels) that may open a window, e.g. person, car, dog. The list shows the objects tracked by your cameras. With all checked, every object type counts. |
+| **Objects** | Object types (labels) that may open a window, e.g. person, car, dog. The list shows the objects tracked by your cameras. With all checked, every object type counts. The list above it chooses whose objects you see: **All cameras**, or one camera. Checks made for a camera give it its own list, used instead of the one for all cameras (in every mode, also for manual events); such a camera is marked with `*`. If you check the same objects for a camera as for all cameras, it has no list of its own and follows later changes; a camera's own list stays as it is when the list for all cameras changes. **Same as all cameras** removes the camera's own list. |
 | **Required zones** | If you check zones, a window opens only when the object enters one of them. With nothing checked, any place in the picture counts. |
 | **Ignore objects that are not moving** | Objects that Frigate marks as stationary (for example a parked car) do not open windows and do not keep them open. Applies to *Every detected object*. |
 | **Minimum confidence** | Detections with a lower confidence are ignored. 0% means Frigate's own thresholds decide. Applies to *Every detected object*. |
@@ -236,7 +236,7 @@ FrigatePiP finds each camera's go2rtc streams in the Frigate configuration (`liv
 
 ## 7. The settings file
 
-All settings are stored in `%APPDATA%\FrigatePiP\config.ini` (a plain text file). The settings window writes all of them; you only need the file for per-camera settings. **Settings file (advanced)…** in the tray menu opens it in Notepad. Changes are applied automatically when the file is saved. Comments start with `;`. Yes/no values accept `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
+All settings are stored in `%APPDATA%\FrigatePiP\config.ini` (a plain text file). The settings window writes all of them; you only need the file for a camera's name and streams. **Settings file (advanced)…** in the tray menu opens it in Notepad. Changes are applied automatically when the file is saved. Comments start with `;`. Yes/no values accept `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
 
 | Section | Key | Default | Meaning |
 |---|---|---|---|
@@ -275,6 +275,7 @@ All settings are stored in `%APPDATA%\FrigatePiP\config.ini` (a plain text file)
 | | `gpu_warm` | `false` | Ready GPU. |
 | | `camera_audio` | `false` | Camera audio. |
 | | `camera_volume` | `100` | Volume of a new window, 0–100 %. |
+| `[camera.<name>]` | `labels` | *(empty = as in `[trigger]`)* | Objects for this camera, instead of `labels` in `[trigger]`, e.g. `person, car, dog`. |
 
 ### Per-camera settings
 
@@ -287,7 +288,11 @@ name = Front door
 ; go2rtc stream names
 main = front_door
 sub = front_door_sub
+; Objects that open a window on this camera, instead of labels in [trigger]
+labels = person, car, dog, cat
 ```
+
+`labels` gives the camera its own object list: it replaces `labels` in `[trigger]` for this camera, in every mode (also for manual events). Empty or missing = the list for all cameras. The settings window and the Linux settings page set it too: pick the camera above the **Objects** list.
 
 ## 8. Command line
 

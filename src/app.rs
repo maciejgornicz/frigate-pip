@@ -234,8 +234,11 @@ struct Placement {
 }
 
 fn listener_key(c: &Config) -> String {
+    let mut camera_labels: Vec<(String, &Vec<String>)> =
+        c.overrides.iter().filter(|(_, o)| !o.labels.is_empty()).map(|(cam, o)| (cam.to_ascii_lowercase(), &o.labels)).collect();
+    camera_labels.sort();
     format!(
-        "{}|{:?}|{}|{}|{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}|{}",
+        "{}|{:?}|{}|{}|{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}",
         c.url,
         c.source,
         c.mqtt_host,
@@ -246,6 +249,7 @@ fn listener_key(c: &Config) -> String {
         c.mode,
         c.cameras,
         c.labels,
+        camera_labels,
         c.zones,
         c.ignore_stationary,
         c.min_score
@@ -1110,6 +1114,18 @@ impl App {
                     self.preview_on();
                 }
             }
+            settings::ID_LABELS_FOR if code == CBN_SELCHANGE => {
+                if let Some(s) = self.settings.as_mut() {
+                    s.switch_scope();
+                }
+                self.settings_changed();
+            }
+            settings::ID_LABELS_SAME if code == BN_CLICKED => {
+                if let Some(s) = self.settings.as_mut() {
+                    s.same_as_all();
+                }
+                self.settings_changed();
+            }
             _ if code == EN_CHANGE || code == CBN_SELCHANGE || code == BN_CLICKED => self.settings_changed(),
             _ => {}
         }
@@ -1117,9 +1133,10 @@ impl App {
 
     /// A control changed: the draft applies to open windows at once (without saving).
     fn settings_changed(&mut self) {
-        let Some(s) = &self.settings else { return };
+        let Some(s) = self.settings.as_mut() else { return };
         s.update_enabled();
         let (draft, _) = s.read(&self.cfg);
+        s.update_objects(&draft);
         if &draft == self.vcfg() {
             return;
         }
@@ -1843,6 +1860,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn camera_object_lists_restart_the_listener() {
+        let a = Config::from_ini(&IniDoc::parse("[camera.gate]\nlabels = person\n[camera.yard]\nlabels = dog\n"));
+        let mut b = a.clone();
+        assert_eq!(listener_key(&a), listener_key(&b));
+        b.set_own_labels("gate", vec!["car".into()]);
+        assert_ne!(listener_key(&a), listener_key(&b));
+        // A camera's name or streams do not restart it.
+        let mut c = a.clone();
+        c.overrides.get_mut("gate").unwrap().name = Some("Gate".into());
+        assert_eq!(listener_key(&a), listener_key(&c));
     }
 
     #[test]

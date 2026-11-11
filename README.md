@@ -23,7 +23,7 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Fast:** the window appears ~5 ms after Frigate's message, Frigate's snapshot is shown ~35 ms later, and smooth live video follows (well under a second; almost instantly with the optional prebuffer).
 - **Live video from go2rtc (RTSP)** with hardware decoding of H.264 and H.265 (Media Foundation + Direct3D 11), up to 4K, or MJPEG / snapshots when RTSP is not available.
 - **Camera audio** (AAC, G.711) on a separate thread, so it never delays the picture.
-- **Filters:** cameras, objects, required zones, minimum confidence, stationary objects; every object, or Frigate *Review* alerts / detections only.
+- **Filters:** cameras, objects (also a separate list per camera), required zones, minimum confidence, stationary objects; every object, or Frigate *Review* alerts / detections only.
 - **Manual events** created through Frigate's API (e.g. by a Home Assistant automation when the doorbell rings) open a window too.
 - **Windows the way you like them:** monitor, corner, size, timing, how many at once, replace the oldest or skip, always on top, caption, notification sound, quiet during full-screen games and presentations.
 - **Mouse control:** drag to move, click to pin, wheel to resize, Ctrl + wheel to zoom in where the mouse points, Ctrl + drag to move the zoomed picture, speaker button to mute, slider for the volume, ⟲ to replay the start of the event, × or right-click to close, double-click to open the camera in Frigate.
