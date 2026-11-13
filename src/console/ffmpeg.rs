@@ -180,6 +180,54 @@ impl Ffmpeg {
         c.stdin(Stdio::piped()).stdout(Stdio::null());
         c.spawn().map(Proc)
     }
+
+    /// Audio player with the wind filter: this ffmpeg only decodes, the samples go through
+    /// the filter on a thread and then to a second ffmpeg that plays them. Fed through
+    /// stdin like `audio_pipe`; when the returned process ends, so do the thread and the player.
+    pub fn audio_pipe_filtered(&self, input: &[String], (rate, channels): (u32, u16), volume: u8, camera: &str) -> std::io::Result<Proc> {
+        let (rate, channels) = (rate.max(1), channels.max(1));
+        let pcm = ["-f".to_string(), "s16le".into(), "-ar".into(), rate.to_string(), "-ac".into(), channels.to_string()];
+        let mut c = self.command();
+        c.args(["-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0"]);
+        c.args(input);
+        c.args(["-i", "pipe:0", "-vn"]);
+        c.args(&pcm);
+        c.args(["-flush_packets", "1", "pipe:1"]);
+        c.stdin(Stdio::piped()).stdout(Stdio::piped());
+        let mut decoder = c.spawn().map(Proc)?;
+        let mut player = self.audio_pipe(&pcm, volume)?;
+        if let (Some(mut samples), Some(mut out)) = (decoder.0.stdout.take(), player.0.stdin.take()) {
+            let _ = std::thread::Builder::new().name(format!("wind-{camera}")).spawn(move || {
+                use std::io::Write;
+                let _player = player;
+                let mut filter = crate::wind::WindFilter::new(rate, channels);
+                let frame = channels as usize * 2;
+                let mut bytes = vec![0u8; 4096];
+                let mut have = 0;
+                let mut pcm: Vec<i16> = Vec::new();
+                loop {
+                    match samples.read(&mut bytes[have..]) {
+                        Ok(n) if n > 0 => have += n,
+                        _ => return,
+                    }
+                    // Whole frames only; the rest waits for the next read.
+                    let whole = have - have % frame;
+                    pcm.clear();
+                    pcm.extend(bytes[..whole].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])));
+                    filter.process(&mut pcm);
+                    for (b, s) in bytes[..whole].chunks_exact_mut(2).zip(&pcm) {
+                        b.copy_from_slice(&s.to_le_bytes());
+                    }
+                    if out.write_all(&bytes[..whole]).is_err() {
+                        return;
+                    }
+                    bytes.copy_within(whole..have, 0);
+                    have -= whole;
+                }
+            });
+        }
+        Ok(decoder)
+    }
 }
 
 /// The video filter: only the part `zoom` of the picture (cut at the stream's resolution),

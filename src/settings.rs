@@ -64,6 +64,7 @@ pub const ID_PREBUF: i32 = 404;
 pub const ID_GPU: i32 = 405;
 pub const ID_VOLUME: i32 = 406;
 pub const ID_VOLUME_LBL: i32 = 407;
+pub const ID_WIND: i32 = 408;
 pub const ID_PREV_CAM: i32 = 500;
 pub const ID_PREVIEW: i32 = 501;
 pub const ID_APPLY: i32 = 502;
@@ -678,14 +679,15 @@ impl Settings {
         let e = self.edit(p, ID_AUTOW, &c.auto_main_width.to_string(), cx, 116, 70, ES_NUMBER as u32);
         self.label(p, t.auto_main_hint, cx + 76, 116, RIGHT - cx - 76);
         self.tip(&[l, e], t.tip_auto_main_width);
+        // The volume slider of the camera audio comes right under its check box, at 184.
         let checks = [
-            (ID_AUDIO, t.camera_audio, c.camera_audio, t.tip_camera_audio),
-            (ID_PREBUF, t.prebuffer, c.prebuffer, t.tip_prebuffer),
-            (ID_GPU, t.gpu_warm, c.gpu_warm, t.tip_gpu_warm),
+            (ID_AUDIO, t.camera_audio, c.camera_audio, t.tip_camera_audio, 154),
+            (ID_WIND, t.wind_filter, c.wind_filter, t.tip_wind_filter, 214),
+            (ID_PREBUF, t.prebuffer, c.prebuffer, t.tip_prebuffer, 246),
+            (ID_GPU, t.gpu_warm, c.gpu_warm, t.tip_gpu_warm, 272),
         ];
-        for (i, (id, text, on, tip)) in checks.into_iter().enumerate() {
-            // The volume slider of the camera audio comes right under its check box.
-            let e = self.check(Some(p), id, text, on, lx, 154 + 26 * i as i32 + if i > 0 { 38 } else { 0 }, full);
+        for (id, text, on, tip, y) in checks {
+            let e = self.check(Some(p), id, text, on, lx, y, full);
             self.tip(&[e], tip);
         }
         let l = self.label(p, t.camera_volume, lx, 184, lw);
@@ -872,6 +874,7 @@ impl Settings {
         c.auto_main_width = num(ID_AUTOW, 800).clamp(160, 7680) as i32;
         c.camera_audio = self.checked(ID_AUDIO);
         c.camera_volume = self.pos(ID_VOLUME) as u8;
+        c.wind_filter = self.checked(ID_WIND);
         c.prebuffer = self.checked(ID_PREBUF);
         c.gpu_warm = self.checked(ID_GPU);
         (c, self.checked(ID_AUTOSTART))

@@ -215,7 +215,7 @@ FrigatePiP znajduje strumienie go2rtc każdej kamery w konfiguracji Frigate (`li
 
 #### Dźwięk z kamery
 
-**Dźwięk z kamery** odtwarza dźwięk kamery (AAC lub G.711 ze strumienia RTSP) w każdym otwartym oknie. Działa osobno, więc nigdy nie opóźnia okna ani wideo. Głośność możesz ustawić w Mikserze głośności Windows (*FrigatePiP*). Wymaga opcji **RTSP z go2rtc**. Aby wyciszyć jedno okno, kliknij przycisk głośnika w jego prawym górnym rogu (zob. [Obsługa myszą](#obsługa-myszą)). **Głośność** określa, jak głośno startuje nowe okno (0–100 %, `camera_volume`), np. żeby przyciszyć szum wiatru; każde okno ma też własny suwak.
+**Dźwięk z kamery** odtwarza dźwięk kamery (AAC lub G.711 ze strumienia RTSP) w każdym otwartym oknie. Działa osobno, więc nigdy nie opóźnia okna ani wideo. Głośność możesz ustawić w Mikserze głośności Windows (*FrigatePiP*). Wymaga opcji **RTSP z go2rtc**. Aby wyciszyć jedno okno, kliknij przycisk głośnika w jego prawym górnym rogu (zob. [Obsługa myszą](#obsługa-myszą)). **Głośność** określa, jak głośno startuje nowe okno (0–100 %, `camera_volume`), np. żeby przyciszyć szum wiatru; każde okno ma też własny suwak. **Filtr wiatru** (`wind_filter`) wycina dudnienie wiatru wiejącego w mikrofon kamery i zostawia głosy na ich głośności: przy spokojnym powietrzu usuwa tylko to, co leży poniżej 80 Hz, w czasie podmuchu wszystko do 500 Hz, więc głos brzmi wtedy przez chwilę cieniej. Nie naprawi mikrofonu, który wiatr przesterowuje — tu pomaga kawałek gąbki na otworze mikrofonu.
 
 #### Prebufor
 
@@ -275,6 +275,7 @@ Wszystkie ustawienia są przechowywane w `%APPDATA%\FrigatePiP\config.ini` (zwyk
 | | `gpu_warm` | `false` | Gotowe GPU. |
 | | `camera_audio` | `false` | Dźwięk z kamery. |
 | | `camera_volume` | `100` | Głośność nowego okna, 0–100 %. |
+| | `wind_filter` | `false` | Filtr wiatru: wycina dudnienie wiatru z dźwięku kamery. |
 
 ### Ustawienia poszczególnych kamer
 
@@ -482,7 +483,7 @@ Gdy FrigatePiP działa w terminalu lub w konsoli:
 
 ### Ustawienia
 
-Wersja dla Linuksa używa tego samego pliku `config.ini` (w `~/.config/frigate-pip/` lub `$XDG_CONFIG_HOME/frigate-pip/`) co wersja dla Windows — zob. [Plik ustawień](#7-plik-ustawień). Zmiany są stosowane w ciągu dwóch sekund od zapisania pliku. Używane są następujące ustawienia: wszystko w `[app]` (język), `[frigate]`, `[mqtt]`, `[trigger]`, a w `[display]`: `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen`; w `[video]`: `live`, `stream`, `auto_main_width`, `prebuffer` (nie dla okienek tmux), `camera_audio`; oraz sekcje `[camera.<name>]`. Ustawienia dostępne tylko w Windows (`gpu_warm`, `check_updates`) są pomijane. `frigate-pip --list` pokazuje nazwy Twoich kamer, obiektów i stref do filtrów w `[trigger]`.
+Wersja dla Linuksa używa tego samego pliku `config.ini` (w `~/.config/frigate-pip/` lub `$XDG_CONFIG_HOME/frigate-pip/`) co wersja dla Windows — zob. [Plik ustawień](#7-plik-ustawień). Zmiany są stosowane w ciągu dwóch sekund od zapisania pliku. Używane są następujące ustawienia: wszystko w `[app]` (język), `[frigate]`, `[mqtt]`, `[trigger]`, a w `[display]`: `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen`; w `[video]`: `live`, `stream`, `auto_main_width`, `prebuffer` (nie dla okienek tmux), `camera_audio`, `wind_filter`; oraz sekcje `[camera.<name>]`. Ustawienia dostępne tylko w Windows (`gpu_warm`, `check_updates`) są pomijane. `frigate-pip --list` pokazuje nazwy Twoich kamer, obiektów i stref do filtrów w `[trigger]`.
 
 Dodatkowe ustawienia w sekcji `[console]`:
 

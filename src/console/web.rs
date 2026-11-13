@@ -240,7 +240,7 @@ fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> O
             }
         })
     };
-    for f in FIELDS.iter().chain(["video.prebuffer", "video.camera_audio"].iter()) {
+    for f in FIELDS.iter().chain(["video.prebuffer", "video.camera_audio", "video.wind_filter"].iter()) {
         if let (Some(v), Some((section, key))) = (last(f), f.split_once('.')) {
             // Quoted when needed: "abc #def" must not lose its end as a comment.
             doc.set(section, key, &config::ini_value(&v));
@@ -496,6 +496,7 @@ fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
     video += &row("video.prebuffer", "", checkbox("video.prebuffer", c.prebuffer, s.prebuffer), s.tip_prebuffer);
     video += &row("video.camera_audio", "", checkbox("video.camera_audio", c.camera_audio, s.camera_audio), s.tip_camera_audio);
     video += &row("video.camera_volume", s.camera_volume, number("video.camera_volume", c.camera_volume, 0, 100, "%"), s.tip_camera_volume);
+    video += &row("video.wind_filter", "", checkbox("video.wind_filter", c.wind_filter, s.wind_filter), s.tip_wind_filter);
 
     let saved = match saved {
         Some(Ok(())) => format!("<p class=\"saved\">{}</p>", esc(s.linux_settings_saved)),

@@ -22,6 +22,7 @@ mod rtsp;
 mod timing;
 mod tls;
 mod view;
+mod wind;
 mod ws;
 
 // Windows: tray application with preview windows.

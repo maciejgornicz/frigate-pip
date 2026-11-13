@@ -215,7 +215,7 @@ FrigatePiP ermittelt die go2rtc-Streams jeder Kamera aus der Frigate-Konfigurati
 
 #### Kameraton
 
-**Kameraton** gibt den Ton der Kamera (AAC oder G.711 aus dem RTSP-Stream) in jedem geöffneten Fenster wieder. Er läuft separat und verzögert daher nie das Fenster oder das Video. Die Lautstärke lässt sich im Lautstärkemixer von Windows einstellen (*FrigatePiP*). Erfordert **RTSP von go2rtc**. Um ein einzelnes Fenster stummzuschalten, klicken Sie auf die Lautsprecher-Schaltfläche oben rechts im Fenster (siehe [Mausaktionen](#mausaktionen)). **Lautstärke** legt fest, wie laut ein neues Fenster startet (0–100 %, `camera_volume`), zum Beispiel gegen Windgeräusche; jedes Fenster hat außerdem einen eigenen Regler.
+**Kameraton** gibt den Ton der Kamera (AAC oder G.711 aus dem RTSP-Stream) in jedem geöffneten Fenster wieder. Er läuft separat und verzögert daher nie das Fenster oder das Video. Die Lautstärke lässt sich im Lautstärkemixer von Windows einstellen (*FrigatePiP*). Erfordert **RTSP von go2rtc**. Um ein einzelnes Fenster stummzuschalten, klicken Sie auf die Lautsprecher-Schaltfläche oben rechts im Fenster (siehe [Mausaktionen](#mausaktionen)). **Lautstärke** legt fest, wie laut ein neues Fenster startet (0–100 %, `camera_volume`), zum Beispiel gegen Windgeräusche; jedes Fenster hat außerdem einen eigenen Regler. **Windfilter** (`wind_filter`) entfernt das Dröhnen von Wind am Kameramikrofon und lässt Stimmen in ihrer Lautstärke: bei ruhiger Luft wird nur entfernt, was unter 80 Hz liegt, während einer Böe alles bis 500 Hz, sodass eine Stimme in diesem Moment dünner klingt. Ein Mikrofon, das der Wind übersteuert, kann er nicht reparieren — dort hilft ein Stück Schaumstoff über der Mikrofonöffnung.
 
 #### Vorpuffer
 
@@ -275,6 +275,7 @@ Alle Einstellungen werden in `%APPDATA%\FrigatePiP\config.ini` gespeichert (eine
 | | `gpu_warm` | `false` | GPU bereithalten. |
 | | `camera_audio` | `false` | Kameraton. |
 | | `camera_volume` | `100` | Lautstärke eines neuen Fensters, 0–100 %. |
+| | `wind_filter` | `false` | Windfilter: entfernt das Dröhnen von Wind aus dem Kameraton. |
 
 ### Einstellungen pro Kamera
 
@@ -482,7 +483,7 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 
 ### Einstellungen
 
-Die Linux-Version verwendet dieselbe `config.ini` (in `~/.config/frigate-pip/` oder `$XDG_CONFIG_HOME/frigate-pip/`) wie die Windows-Version — siehe [Die Einstellungsdatei](#7-die-einstellungsdatei). Änderungen werden innerhalb von zwei Sekunden nach dem Speichern der Datei übernommen. Folgende Einstellungen werden verwendet: alles in `[app]` (Sprache), `[frigate]`, `[mqtt]`, `[trigger]`, in `[display]`: `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen`; in `[video]`: `live`, `stream`, `auto_main_width`, `prebuffer` (nicht für tmux-Popups), `camera_audio`; sowie die Abschnitte `[camera.<name>]`. Die nur unter Windows verfügbaren Einstellungen (`gpu_warm`, `check_updates`) werden ignoriert. `frigate-pip --list` zeigt die Namen Ihrer Kameras, Objekte und Zonen für die Filter in `[trigger]`.
+Die Linux-Version verwendet dieselbe `config.ini` (in `~/.config/frigate-pip/` oder `$XDG_CONFIG_HOME/frigate-pip/`) wie die Windows-Version — siehe [Die Einstellungsdatei](#7-die-einstellungsdatei). Änderungen werden innerhalb von zwei Sekunden nach dem Speichern der Datei übernommen. Folgende Einstellungen werden verwendet: alles in `[app]` (Sprache), `[frigate]`, `[mqtt]`, `[trigger]`, in `[display]`: `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen`; in `[video]`: `live`, `stream`, `auto_main_width`, `prebuffer` (nicht für tmux-Popups), `camera_audio`, `wind_filter`; sowie die Abschnitte `[camera.<name>]`. Die nur unter Windows verfügbaren Einstellungen (`gpu_warm`, `check_updates`) werden ignoriert. `frigate-pip --list` zeigt die Namen Ihrer Kameras, Objekte und Zonen für die Filter in `[trigger]`.
 
 Zusätzliche Einstellungen im Abschnitt `[console]`:
 
