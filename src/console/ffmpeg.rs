@@ -197,10 +197,24 @@ impl Ffmpeg {
         let mut decoder = c.spawn().map(Proc)?;
         let mut player = self.audio_pipe(&pcm, volume)?;
         if let (Some(mut samples), Some(mut out)) = (decoder.0.stdout.take(), player.0.stdin.take()) {
+            let camera = camera.to_string();
             let _ = std::thread::Builder::new().name(format!("wind-{camera}")).spawn(move || {
                 use std::io::Write;
                 let _player = player;
                 let mut filter = crate::wind::WindFilter::new(rate, channels);
+                // What the filter did, written down when the sound ends (as on Windows).
+                let report = |f: &crate::wind::WindFilter| {
+                    if let Some(w) = f.work() {
+                        crate::log!(
+                            "{camera}: wind filter - {:.0} dB to {:.0} dB, turned down by up to {:.0} dB, cutoff {:.0}-{:.0} Hz",
+                            w.before_db,
+                            w.after_db,
+                            w.down_db,
+                            w.lo_hz,
+                            w.hi_hz
+                        );
+                    }
+                };
                 let frame = channels as usize * 2;
                 let mut bytes = vec![0u8; 4096];
                 let mut have = 0;
@@ -208,7 +222,7 @@ impl Ffmpeg {
                 loop {
                     match samples.read(&mut bytes[have..]) {
                         Ok(n) if n > 0 => have += n,
-                        _ => return,
+                        _ => return report(&filter),
                     }
                     // Whole frames only; the rest waits for the next read.
                     let whole = have - have % frame;
@@ -219,7 +233,7 @@ impl Ffmpeg {
                         b.copy_from_slice(&s.to_le_bytes());
                     }
                     if out.write_all(&bytes[..whole]).is_err() {
-                        return;
+                        return report(&filter);
                     }
                     bytes.copy_within(whole..have, 0);
                     have -= whole;

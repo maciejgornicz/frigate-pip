@@ -614,6 +614,16 @@ mod playback {
                         secs(o.stats.skipped)
                     );
                 }
+                if let Some(w) = wind.as_ref().and_then(|w| w.work()) {
+                    crate::log!(
+                        "{camera}: wind filter - {:.0} dB to {:.0} dB, turned down by up to {:.0} dB, cutoff {:.0}-{:.0} Hz",
+                        w.before_db,
+                        w.after_db,
+                        w.down_db,
+                        w.lo_hz,
+                        w.hi_hz
+                    );
+                }
             }
             CoUninitialize();
         });

@@ -23,14 +23,13 @@ use std::f32::consts::PI;
 /// Cutoff in calm air and in full wind.
 const CALM_HZ: f32 = 80.0;
 const WIND_HZ: f32 = 500.0;
-/// How much the sound is turned down in full wind that is loud enough to hurt.
-const DUCK_DB: f32 = 18.0;
-/// Turned down only by what the high-pass could not deal with: nothing below `QUIET` is
-/// touched, the full amount waits for `LOUD` (mean square, full scale = 1; about −40 and
-/// −20 dB). Where the wind only rumbles, the filter alone quiets it and the volume is left
-/// alone; the microphone the wind blows into straight on is the one that needs both.
-const QUIET: f32 = 1e-4;
-const LOUD: f32 = 1e-2;
+/// Wind the filter could not deal with is turned down to about here (mean square, full
+/// scale = 1; about −40 dB): quiet enough to sit under a conversation instead of covering
+/// it. Wind already quieter than this is left alone — where the wind only rumbles, the
+/// filter does the whole job and the volume is never touched.
+const TARGET: f32 = 1e-4;
+/// Never turn it down by more than this, however loud the wind is.
+const MAX_DUCK_DB: f32 = 35.0;
 /// Above this much of full scale the output is bent instead of cut off: a high-pass filter
 /// overshoots on sound that already reaches the rails, and cutting that off screeches.
 const SOFT: f32 = 0.7;
@@ -51,6 +50,18 @@ const RELEASE_S: f32 = 0.8;
 const STEP: usize = 16;
 /// Q of the two sections of a 4th-order Butterworth filter.
 const Q: [f32; 2] = [0.541_196_1, 1.306_563];
+
+/// What the filter did with a window's sound, for the log.
+pub struct Work {
+    /// The most it turned the sound down by, in decibels.
+    pub down_db: f32,
+    /// Where its cutoff went, in hertz.
+    pub lo_hz: f32,
+    pub hi_hz: f32,
+    /// Level of the camera sound before and after, in decibels.
+    pub before_db: f32,
+    pub after_db: f32,
+}
 
 /// State-variable filter (trapezoidal): stays stable while its cutoff moves.
 #[derive(Clone, Copy, Default)]
@@ -101,6 +112,13 @@ pub struct WindFilter {
     all: f32,
     /// Smoothed energy of what comes out of the high-pass, before the volume.
     left_over: f32,
+    /// What the filter has done so far, for the log (see `Work`).
+    down_db: f32,
+    seen: u64,
+    in_sum: f64,
+    out_sum: f64,
+    lo_hz: f32,
+    hi_hz: f32,
     /// How much wind there is, 0–1.
     wind: f32,
     /// What the sound is turned down by now, 0–1 (1 = not at all).
@@ -131,6 +149,12 @@ impl WindFilter {
             low: 0.0,
             all: 0.0,
             left_over: 0.0,
+            down_db: 0.0,
+            seen: 0,
+            in_sum: 0.0,
+            out_sum: 0.0,
+            lo_hz: f32::MAX,
+            hi_hz: 0.0,
             wind: 0.0,
             gain: 1.0,
             until_step: 0,
@@ -160,7 +184,21 @@ impl WindFilter {
 
     fn set_cutoff(&mut self) {
         let hz = self.cutoff();
+        self.lo_hz = self.lo_hz.min(hz);
+        self.hi_hz = self.hi_hz.max(hz);
         self.coef = [Coef::new(hz, Q[0], self.rate), Coef::new(hz, Q[1], self.rate)];
+    }
+
+    /// What the filter did with the sound it was given — `None` before any of it.
+    pub fn work(&self) -> Option<Work> {
+        let db = |sum: f64| 10.0 * (sum / self.seen as f64).max(1e-12).log10();
+        (self.seen > 0).then(|| Work {
+            down_db: self.down_db,
+            lo_hz: self.lo_hz,
+            hi_hz: self.hi_hz,
+            before_db: db(self.in_sum) as f32,
+            after_db: db(self.out_sum) as f32,
+        })
     }
 
     /// Follows the wind: called every `STEP` samples.
@@ -170,8 +208,11 @@ impl WindFilter {
         let k = if target > self.wind { self.attack_k } else { self.release_k };
         self.wind += (target - self.wind) * k;
         // Both must hold to turn the sound down: it is wind, and the filter left it loud.
-        let loud = ((self.left_over.max(QUIET) / QUIET).log10() / (LOUD / QUIET).log10()).clamp(0.0, 1.0);
-        self.gain = 10f32.powf(-DUCK_DB * self.wind * loud / 20.0);
+        // How far above `TARGET` what is left sits, is how far down it goes.
+        let over_db = 10.0 * (self.left_over.max(1e-12) / TARGET).log10();
+        let down_db = over_db.clamp(0.0, MAX_DUCK_DB) * self.wind;
+        self.gain = 10f32.powf(-down_db / 20.0);
+        self.down_db = self.down_db.max(down_db);
         self.set_cutoff();
     }
 
@@ -207,6 +248,10 @@ impl WindFilter {
             }
             let out = sum / (self.channels as f32 * 32768.0);
             self.left_over += (out * out - self.left_over) * self.energy_k;
+            let quieted = out * self.gain;
+            self.seen += 1;
+            self.in_sum += (mono * mono) as f64;
+            self.out_sum += (quieted * quieted) as f64;
         }
     }
 }
@@ -428,7 +473,8 @@ mod tests {
         println!("{path}: {rate} Hz, {channels} ch, {:.1} s", pcm.len() as f32 / (rate * channels as u32) as f32);
         println!("  level  {:.1} dB -> {:.1} dB", 20.0 * was.log10(), 20.0 * rms(&pcm).log10());
         println!("  samples at the rails  {was_clipped} -> {}", clipped(&pcm));
-        println!("  cutoff  {lo:.0}-{hi:.0} Hz, turned down by up to {:.1} dB", DUCK_DB);
+        let w = f.work().expect("the filter saw nothing");
+        println!("  cutoff  {lo:.0}-{hi:.0} Hz, turned down by up to {:.1} dB", w.down_db);
         let mut out = raw[..data.as_ptr() as usize - raw.as_ptr() as usize].to_vec();
         out.extend(pcm.iter().flat_map(|s| s.to_le_bytes()));
         let path = path.replace(".wav", ".filtered.wav");
