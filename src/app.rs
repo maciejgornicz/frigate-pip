@@ -1045,6 +1045,7 @@ impl App {
             hub,
             live: v.live,
             audio: v.camera_audio,
+            wind_filter: v.wind_filter,
             t0,
         };
         let _ = std::thread::Builder::new().name(format!("pip-{camera}")).spawn(move || player::run(params, shared));
@@ -1166,7 +1167,7 @@ impl App {
             }
         }
         self.layout();
-        let video = |c: &Config| (c.live, c.stream, c.auto_main_width, c.camera_audio);
+        let video = |c: &Config| (c.live, c.stream, c.auto_main_width, c.camera_audio, c.wind_filter);
         if video(&v) != video(old) && self.popups.iter().any(|p| p.preview && !p.closing) {
             self.preview_on();
         }

@@ -122,6 +122,8 @@ pub struct Params {
     pub live: LiveMode,
     /// Play audio from the camera.
     pub audio: bool,
+    /// Cut the wind out of the camera audio.
+    pub wind_filter: bool,
     pub t0: Instant,
 }
 
@@ -336,7 +338,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let quick = QuickPaint { hwnd: p.hwnd, renderer_ready: renderer_ready.clone(), camera: cam.clone(), t0: p.t0 };
     spawn_snapshot(api.clone(), snapshot_path.clone(), tx.clone(), cancel.clone(), Some(quick));
     // Audio lives on its own thread; here we only hand it frames without waiting.
-    let audio_tx = p.audio.then(|| crate::audio::spawn(cam.clone(), cancel.clone(), shared.sound.clone()));
+    let audio_tx = p.audio.then(|| crate::audio::spawn(cam.clone(), cancel.clone(), shared.sound.clone(), p.wind_filter));
 
     let mut src: [Source; 3] = Default::default();
     // Without the prebuffer the window keeps its own video for a replay.

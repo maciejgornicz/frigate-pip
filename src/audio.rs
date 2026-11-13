@@ -229,6 +229,7 @@ pub use playback::*;
 mod playback {
     use super::*;
     use crate::util::Cancel;
+    use crate::wind::WindFilter;
     use std::mem::ManuallyDrop;
     use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -517,7 +518,8 @@ mod playback {
     }
 
     /// Starts the audio playback thread; it ends on cancellation or when the channel closes.
-    pub fn spawn(camera: String, cancel: Cancel, sound: Arc<Sound>) -> Sender<AudioMsg> {
+    /// `wind_filter` = cut the wind out of the sound (see `wind`).
+    pub fn spawn(camera: String, cancel: Cancel, sound: Arc<Sound>, wind_filter: bool) -> Sender<AudioMsg> {
         let (tx, rx) = mpsc::channel::<AudioMsg>();
         let _ = std::thread::Builder::new().name(format!("audio-{camera}")).spawn(move || unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -526,6 +528,7 @@ mod playback {
                 let mut out: Option<AudioOut> = None;
                 let mut selected: Option<usize> = None;
                 let mut pcm: Vec<i16> = Vec::with_capacity(4096);
+                let mut wind: Option<WindFilter> = None;
                 let mut failed = false;
                 let mut first = true;
                 let (mut recv, mut silent) = (0u32, 0u32);
@@ -571,6 +574,15 @@ mod playback {
                                 out = open_out(&camera, d);
                             }
                             let Some(o) = out.as_mut() else { continue };
+                            if wind_filter {
+                                // A new filter when the format changes (another source, or the decoder's choice).
+                                if wind.as_ref().is_none_or(|w| w.format() != (d.rate, d.channels)) {
+                                    wind = Some(WindFilter::new(d.rate, d.channels));
+                                }
+                                if let Some(w) = wind.as_mut() {
+                                    w.process(&mut pcm);
+                                }
+                            }
                             if sound.muted.load(Ordering::Relaxed) {
                                 pcm.fill(0);
                             }
@@ -600,6 +612,16 @@ mod playback {
                         "{camera}: audio - frames {recv} (without samples: {silent}), played {:.1} s, skipped {:.1} s",
                         secs(o.stats.written),
                         secs(o.stats.skipped)
+                    );
+                }
+                if let Some(w) = wind.as_ref().and_then(|w| w.work()) {
+                    crate::log!(
+                        "{camera}: wind filter - {:.0} dB to {:.0} dB, turned down by up to {:.0} dB, cutoff {:.0}-{:.0} Hz",
+                        w.before_db,
+                        w.after_db,
+                        w.down_db,
+                        w.lo_hz,
+                        w.hi_hz
                     );
                 }
             }

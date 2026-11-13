@@ -60,6 +60,8 @@ pub struct Params {
     pub audio: bool,
     /// Volume of the camera audio in percent.
     pub volume: u8,
+    /// Cut the wind out of the camera audio.
+    pub wind_filter: bool,
     pub t0: Instant,
     /// When the event came: a replay from the prebuffer starts before it.
     pub event: Instant,
@@ -255,6 +257,8 @@ struct Feeder<'a> {
     audio: Option<(Proc, std::process::ChildStdin)>,
     /// Input format options of the audio player and the volume it plays at.
     audio_input: Vec<String>,
+    /// Sample rate and channels of the camera audio.
+    audio_format: (u32, u16),
     played_volume: u8,
     /// AAC: AudioSpecificConfig for the ADTS headers.
     asc: Option<Vec<u8>>,
@@ -284,6 +288,7 @@ impl<'a> Feeder<'a> {
             video: None,
             audio: None,
             audio_input: Vec::new(),
+            audio_format: (0, 0),
             played_volume: 100,
             asc: None,
             aud: &[],
@@ -351,6 +356,7 @@ impl<'a> Feeder<'a> {
                 AudioCodec::Pcmu => vec!["-f".into(), "mulaw".into(), "-ar".into(), a.rate.to_string(), "-ac".into(), a.channels.to_string()],
                 AudioCodec::Pcma => vec!["-f".into(), "alaw".into(), "-ar".into(), a.rate.to_string(), "-ac".into(), a.channels.to_string()],
             };
+            self.audio_format = (a.rate, a.channels);
             self.start_audio();
             if self.audio.is_some() {
                 crate::log!("{}: audio {} Hz", p.camera, a.rate);
@@ -363,7 +369,12 @@ impl<'a> Feeder<'a> {
     fn start_audio(&mut self) {
         self.audio = None;
         self.played_volume = self.shared.volume.load(Ordering::Relaxed);
-        match self.ff.audio_pipe(&self.audio_input, self.played_volume) {
+        let started = if self.p.wind_filter {
+            self.ff.audio_pipe_filtered(&self.audio_input, self.audio_format, self.played_volume, &self.p.camera)
+        } else {
+            self.ff.audio_pipe(&self.audio_input, self.played_volume)
+        };
+        match started {
             Ok(mut proc) => {
                 if let Some(stdin) = proc.0.stdin.take() {
                     self.audio = Some((proc, stdin));

@@ -215,7 +215,7 @@ FrigatePiP trouve les flux go2rtc de chaque caméra dans la configuration de Fri
 
 #### Son de la caméra
 
-L’option **Son de la caméra** joue le son de la caméra (AAC ou G.711 issu du flux RTSP) dans chaque fenêtre ouverte. Il est traité séparément et ne retarde donc jamais la fenêtre ni la vidéo. Le volume se règle dans le Mélangeur de volume de Windows (*FrigatePiP*). Cette option nécessite **RTSP depuis go2rtc**. Pour couper le son d’une seule fenêtre, cliquez sur le bouton haut-parleur dans son coin supérieur droit (voir [Actions de la souris](#actions-de-la-souris)). **Volume** définit le niveau de départ d’une nouvelle fenêtre (0–100 %, `camera_volume`), par exemple pour atténuer le bruit du vent ; chaque fenêtre a aussi son propre curseur.
+L’option **Son de la caméra** joue le son de la caméra (AAC ou G.711 issu du flux RTSP) dans chaque fenêtre ouverte. Il est traité séparément et ne retarde donc jamais la fenêtre ni la vidéo. Le volume se règle dans le Mélangeur de volume de Windows (*FrigatePiP*). Cette option nécessite **RTSP depuis go2rtc**. Pour couper le son d’une seule fenêtre, cliquez sur le bouton haut-parleur dans son coin supérieur droit (voir [Actions de la souris](#actions-de-la-souris)). **Volume** définit le niveau de départ d’une nouvelle fenêtre (0–100 %, `camera_volume`), par exemple pour atténuer le bruit du vent ; chaque fenêtre a aussi son propre curseur. **Filtre anti-vent** (`wind_filter`) apaise le vent qui souffle dans le micro de la caméra. Deux choses se produisent, car une seule ne suffit pas. Le grondement est supprimé : par temps calme, seul ce qui se trouve sous 80 Hz, pendant une rafale tout jusqu’à 500 Hz, la voix paraît donc plus mince à ce moment-là. Là où le vent souffle de face dans le micro, il le pousse au-delà de ce qu’il supporte et le bruit couvre alors toute la bande : filtrer seul le laisse presque aussi fort. Aussi, quand le vent rugit encore après le filtre, le son est en plus baissé — autant qu’il faut pour que le vent reste sous une conversation, au plus de 35 dB — et revient une fois la rafale passée. Une scène silencieuse reste intacte, de même qu’une voix par temps calme ; une voix prise dans une rafale s’éteint avec le vent, qui la couvrirait de toute façon. Le remède sûr est à la caméra : baissez la sensibilité de son micro et posez un morceau de mousse sur son ouverture.
 
 #### Préchargement
 
@@ -275,6 +275,7 @@ Tous les paramètres sont stockés dans `%APPDATA%\FrigatePiP\config.ini` (un fi
 | | `gpu_warm` | `false` | GPU prêt. |
 | | `camera_audio` | `false` | Son de la caméra. |
 | | `camera_volume` | `100` | Volume d’une nouvelle fenêtre, 0–100 %. |
+| | `wind_filter` | `false` | Filtre anti-vent : apaise le vent qui souffle dans le micro de la caméra. |
 | `[camera.<name>]` | `labels` | *(vide = comme dans `[trigger]`)* | Objets pour cette caméra à la place de `labels` de `[trigger]`, p. ex. `person, car, dog`. |
 
 ### Paramètres par caméra
@@ -487,7 +488,7 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 
 ### Paramètres
 
-La version Linux utilise le même `config.ini` (dans `~/.config/frigate-pip/` ou `$XDG_CONFIG_HOME/frigate-pip/`) que la version Windows — voir [Fichier de paramètres](#7-fichier-de-paramètres). Les modifications sont appliquées dans les deux secondes qui suivent l’enregistrement du fichier. Les paramètres suivants sont utilisés : tout ce qui se trouve dans `[app]` (langue), `[frigate]`, `[mqtt]` et `[trigger]`, ainsi que, dans `[display]` : `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen` ; dans `[video]` : `live`, `stream`, `auto_main_width`, `prebuffer` (pas pour les popups tmux), `camera_audio` ; et les sections `[camera.<name>]`. Les paramètres propres à Windows (`gpu_warm`, `check_updates`) sont ignorés. `frigate-pip --list` affiche les noms de vos caméras, objets et zones pour les filtres de `[trigger]`.
+La version Linux utilise le même `config.ini` (dans `~/.config/frigate-pip/` ou `$XDG_CONFIG_HOME/frigate-pip/`) que la version Windows — voir [Fichier de paramètres](#7-fichier-de-paramètres). Les modifications sont appliquées dans les deux secondes qui suivent l’enregistrement du fichier. Les paramètres suivants sont utilisés : tout ce qui se trouve dans `[app]` (langue), `[frigate]`, `[mqtt]` et `[trigger]`, ainsi que, dans `[display]` : `monitor`, `position`, `margin`, `width`, `duration`, `max_duration`, `overlay`, `max_popups`, `replace`, `topmost`, `sound`, `skip_fullscreen` ; dans `[video]` : `live`, `stream`, `auto_main_width`, `prebuffer` (pas pour les popups tmux), `camera_audio`, `wind_filter` ; et les sections `[camera.<name>]`. Les paramètres propres à Windows (`gpu_warm`, `check_updates`) sont ignorés. `frigate-pip --list` affiche les noms de vos caméras, objets et zones pour les filtres de `[trigger]`.
 
 Paramètres supplémentaires de la section `[console]` :
 
