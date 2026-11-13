@@ -60,18 +60,55 @@ pub fn choose_stream(cfg: &Config, info: Option<&CameraInfo>, camera: &str, phys
 /// plus those from the settings (so nothing is lost while Frigate is unreachable).
 pub fn choices(cams: &[CameraInfo], cfg: &Config) -> (Vec<(String, String)>, Vec<String>, Vec<String>) {
     let mut cameras: Vec<(String, String)> = cams.iter().map(|c| (c.name.clone(), c.title.clone())).collect();
-    for c in &cfg.cameras {
-        if !cameras.iter().any(|(n, _)| n.eq_ignore_ascii_case(c)) {
-            cameras.push((c.clone(), c.clone()));
+    // Cameras named in the settings: in the camera filter, and those with an object list.
+    let mut listed: Vec<(&String, &crate::config::CamOverride)> = cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty()).collect();
+    listed.sort_by_key(|(n, _)| n.to_ascii_lowercase());
+    let named = cfg.cameras.iter().map(|c| (c.clone(), c.clone()));
+    for (c, title) in named.chain(listed.into_iter().map(|(n, o)| (n.clone(), o.name.clone().unwrap_or_else(|| n.clone())))) {
+        if !cameras.iter().any(|(n, _)| n.eq_ignore_ascii_case(&c)) {
+            cameras.push((c, title));
         }
     }
     let mut known: Vec<String> = cams.iter().flat_map(|c| c.labels.iter().cloned()).collect();
     if known.is_empty() {
         known = vec!["person".into(), "car".into()];
     }
-    let labels = union(known.iter(), &cfg.labels);
+    let mut own: Vec<&String> = cfg.overrides.values().flat_map(|o| o.labels.iter()).collect();
+    own.sort();
+    let wanted: Vec<String> = cfg.labels.iter().chain(own).cloned().collect();
+    let labels = union(known.iter(), &wanted);
     let zones = union(cams.iter().flat_map(|c| c.zones.iter()), &cfg.zones);
     (cameras, labels, zones)
+}
+
+/// `name` is in a filter list (empty = every entry), in any case.
+pub fn listed(list: &[String], name: &str) -> bool {
+    list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(name))
+}
+
+/// An object in the settings' lists: its name in the interface language, with Frigate's
+/// name after it in brackets.
+pub fn label_text(l: &str) -> String {
+    let name = i18n::label(l);
+    if name == l {
+        l.to_string()
+    } else {
+        format!("{name} ({l})")
+    }
+}
+
+/// The objects checked for one camera in the settings, as its own list: none (empty) when
+/// they are the same as for all cameras (`global`; empty = every one of `all`) or when
+/// nothing is checked.
+pub fn own_labels(picked: &[String], global: &[String], all: &[String]) -> Vec<String> {
+    let global = if global.is_empty() { all } else { global };
+    let has = |list: &[String], x: &String| list.iter().any(|y| y.eq_ignore_ascii_case(x));
+    let same = picked.iter().all(|p| has(global, p)) && global.iter().all(|g| has(picked, g));
+    if picked.is_empty() || same {
+        Vec::new()
+    } else {
+        picked.to_vec()
+    }
 }
 
 fn union<'a>(base: impl Iterator<Item = &'a String>, extra: &'a [String]) -> Vec<String> {
@@ -274,6 +311,66 @@ mod tests {
         // Never past the picture.
         assert_eq!(z.panned(9.0, -9.0), Zoom { x: 0.0, y: 0.5, size: 0.5 });
         assert_eq!(Zoom::FULL.panned(0.5, -0.5), Zoom::FULL);
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn object_entries_in_the_lists() {
+        // An empty list holds every object; names in any case.
+        assert!(listed(&[], "dog") && listed(&names(&["Dog"]), "dog") && !listed(&names(&["cat"]), "dog"));
+        // A label without a translation is shown as it is; one with, with Frigate's name after it.
+        assert_eq!(label_text("doorbell"), "doorbell");
+        let dog = i18n::label("dog");
+        assert_eq!(label_text("dog"), if dog == "dog" { "dog".to_string() } else { format!("{dog} (dog)") });
+    }
+
+    #[test]
+    fn camera_list_equal_to_the_global_one_is_no_list() {
+        let all = names(&["person", "car", "dog", "cat"]);
+        let global = names(&["person", "car"]);
+        assert!(own_labels(&names(&["car", "Person"]), &global, &all).is_empty());
+        assert_eq!(own_labels(&names(&["person", "dog"]), &global, &all), names(&["person", "dog"]));
+        // Nothing checked: as for all cameras.
+        assert!(own_labels(&[], &global, &all).is_empty());
+        // Every object for all cameras (an empty list): only all checked is the same.
+        assert!(own_labels(&all, &[], &all).is_empty());
+        assert_eq!(own_labels(&names(&["dog"]), &[], &all), names(&["dog"]));
+        // Every object for one camera while the others have a list: a list of them all.
+        assert_eq!(own_labels(&all, &global, &all), all);
+    }
+
+    #[test]
+    fn choices_offer_the_objects_of_camera_lists() {
+        let cfg = Config::from_ini(&crate::config::IniDoc::parse("[trigger]\nlabels = car\n[camera.yard]\nlabels = dog, person\n"));
+        let cams = [CameraInfo {
+            name: "gate".into(),
+            title: "Gate".into(),
+            main: None,
+            sub: None,
+            aspect: 1.78,
+            labels: names(&["person"]),
+            zones: vec![],
+        }];
+        let (_, labels, _) = choices(&cams, &cfg);
+        assert_eq!(labels, names(&["person", "car", "dog"]));
+    }
+
+    #[test]
+    fn choices_offer_cameras_with_object_lists_while_frigate_is_away() {
+        let cfg = Config::from_ini(&crate::config::IniDoc::parse(
+            "[trigger]\ncameras = drive\n[camera.yard]\nname = Yard\nlabels = dog\n[camera.Gate]\nlabels = car\n[camera.pool]\nname = Pool\n",
+        ));
+        // No camera list from Frigate: the cameras named in the settings are offered.
+        let (cameras, _, _) = choices(&[], &cfg);
+        let pair = |n: &str, t: &str| (n.to_string(), t.to_string());
+        assert_eq!(cameras, [pair("drive", "drive"), pair("Gate", "Gate"), pair("yard", "Yard")]);
+        // Known to Frigate already (any case): not twice.
+        let gate = CameraInfo { name: "gate".into(), title: "Gate".into(), main: None, sub: None, aspect: 1.78, labels: vec![], zones: vec![] };
+        let (cameras, _, _) = choices(&[gate], &cfg);
+        assert_eq!(cameras, [pair("gate", "Gate"), pair("drive", "drive"), pair("yard", "Yard")]);
     }
 
     #[test]

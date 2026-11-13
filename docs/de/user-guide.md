@@ -167,7 +167,7 @@ Die meisten Änderungen wirken sich **sofort** auf geöffnete Vorschaufenster au
 |---|---|
 | **Fenster anzeigen für** | Welche Frigate-Meldungen ein Fenster öffnen: **Jedes erkannte Objekt (am schnellsten)** — jedes von Frigate verfolgte Objekt; **Nur Review-Alarme** — nur Review-Einträge mit dem Schweregrad *alert*; **Review-Alarme und -Erkennungen** — alle Review-Einträge. Review-Einträge folgen den in der `review`-Konfiguration von Frigate festgelegten Regeln für Alarme und Erkennungen (Labels und erforderliche Zonen) und treffen etwas später ein als Objektereignisse. |
 | **Kameras** | Kameras, die ein Fenster öffnen dürfen. Nicht ausgewählte Kameras werden ignoriert. Sind alle Kameras ausgewählt, werden auch später zu Frigate hinzugefügte Kameras berücksichtigt. |
-| **Objekte** | Objekttypen (Labels), die ein Fenster öffnen dürfen, z. B. Person, Auto, Hund. Die Liste zeigt die von Ihren Kameras verfolgten Objekte. Sind alle ausgewählt, zählt jeder Objekttyp. |
+| **Objekte** | Objekttypen (Labels), die ein Fenster öffnen dürfen, z. B. Person, Auto, Hund. Die Liste zeigt die von Ihren Kameras verfolgten Objekte. Sind alle ausgewählt, zählt jeder Objekttyp. Die Auswahlliste darüber legt fest, wessen Objekte Sie sehen: **Alle Kameras** oder eine Kamera. Auswahlen für eine Kamera geben ihr eine eigene Liste, die statt der Liste für alle Kameras gilt (in jedem Modus, auch für manuelle Ereignisse); eine solche Kamera ist mit `*` markiert. Wählen Sie für eine Kamera dieselben Objekte wie für alle Kameras, hat sie keine eigene Liste und folgt späteren Änderungen; eine eigene Liste bleibt unverändert, wenn sich die Liste für alle Kameras ändert. **Wie für alle Kameras** entfernt die eigene Liste der Kamera. |
 | **Erforderliche Zonen** | Wenn Sie Zonen auswählen, öffnet sich ein Fenster nur, wenn das Objekt eine davon betritt. Ist keine ausgewählt, zählt jede Stelle im Bild. |
 | **Unbewegte Objekte ignorieren** | Objekte, die Frigate als stationär markiert (z. B. ein geparktes Auto), öffnen keine Fenster und halten sie nicht offen. Gilt für *Jedes erkannte Objekt*. |
 | **Min. Erkennungssicherheit** | Erkennungen mit geringerer Sicherheit werden ignoriert. 0 % bedeutet, dass die Schwellenwerte von Frigate entscheiden. Gilt für *Jedes erkannte Objekt*. |
@@ -236,7 +236,7 @@ FrigatePiP ermittelt die go2rtc-Streams jeder Kamera aus der Frigate-Konfigurati
 
 ## 7. Die Einstellungsdatei
 
-Alle Einstellungen werden in `%APPDATA%\FrigatePiP\config.ini` gespeichert (eine reine Textdatei). Das Einstellungsfenster schreibt sie alle; die Datei benötigen Sie nur für Einstellungen pro Kamera. **Einstellungsdatei (erweitert)…** im Tray-Menü öffnet sie im Editor. Änderungen werden beim Speichern der Datei automatisch übernommen. Kommentare beginnen mit `;`. Ja/Nein-Werte akzeptieren `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
+Alle Einstellungen werden in `%APPDATA%\FrigatePiP\config.ini` gespeichert (eine reine Textdatei). Das Einstellungsfenster schreibt sie alle; die Datei benötigen Sie nur für den Namen und die Streams einer Kamera. **Einstellungsdatei (erweitert)…** im Tray-Menü öffnet sie im Editor. Änderungen werden beim Speichern der Datei automatisch übernommen. Kommentare beginnen mit `;`. Ja/Nein-Werte akzeptieren `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`.
 
 | Abschnitt | Schlüssel | Standard | Bedeutung |
 |---|---|---|---|
@@ -276,6 +276,7 @@ Alle Einstellungen werden in `%APPDATA%\FrigatePiP\config.ini` gespeichert (eine
 | | `camera_audio` | `false` | Kameraton. |
 | | `camera_volume` | `100` | Lautstärke eines neuen Fensters, 0–100 %. |
 | | `wind_filter` | `false` | Windfilter: entfernt das Dröhnen von Wind aus dem Kameraton. |
+| `[camera.<name>]` | `labels` | *(leer = wie in `[trigger]`)* | Objekte für diese Kamera statt `labels` aus `[trigger]`, z. B. `person, car, dog`. |
 
 ### Einstellungen pro Kamera
 
@@ -288,7 +289,11 @@ name = Front door
 ; go2rtc stream names
 main = front_door
 sub = front_door_sub
+; Objects that open a window on this camera, instead of labels in [trigger]
+labels = person, car, dog, cat
 ```
+
+`labels` gibt der Kamera eine eigene Objektliste: Sie ersetzt für diese Kamera `labels` aus `[trigger]`, in jedem Modus (auch für manuelle Ereignisse). Leer oder fehlend = die Liste für alle Kameras. Das Einstellungsfenster und die Einstellungsseite unter Linux setzen sie ebenfalls: Wählen Sie die Kamera über der Liste **Objekte**.
 
 ## 8. Befehlszeile
 

@@ -7,6 +7,7 @@ use crate::config::{self, Config, Corner, IniDoc, LiveMode, Source, StreamPref, 
 use crate::frigate::CameraInfo;
 use crate::i18n::{self, t, Lang};
 use crate::util::Cancel;
+use crate::view::{label_text, listed};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -110,10 +111,12 @@ fn read_request(s: &mut TcpStream) -> std::io::Result<Request> {
     Ok(Request { method, target, headers, body })
 }
 
+/// `Referrer-Policy: same-origin`: other sites get no referrer (the address carries the
+/// key). Not `no-referrer`: Chromium then sends `Origin: null` with the form, refused.
 fn respond(s: &mut TcpStream, status: &str, kind: &str, extra: &str, body: &[u8]) -> std::io::Result<()> {
     let head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\
-         Referrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; \
+         Referrer-Policy: same-origin\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; \
          connect-src 'self'; form-action 'self'; frame-ancestors 'none'\r\n{extra}Connection: close\r\n\r\n",
         body.len()
     );
@@ -252,9 +255,11 @@ fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> O
     }
     let before = Config::from_ini(doc);
     let (cams, labels, _) = crate::view::choices(known, &before);
-    for (name, all) in
-        [("trigger.cameras", Some(cams.iter().map(|c| c.0.clone()).collect::<Vec<_>>())), ("trigger.labels", Some(labels)), ("trigger.zones", None)]
-    {
+    for (name, all) in [
+        ("trigger.cameras", Some(cams.iter().map(|c| c.0.clone()).collect::<Vec<_>>())),
+        ("trigger.labels", Some(labels.clone())),
+        ("trigger.zones", None),
+    ] {
         if !form.iter().any(|(k, _)| k == name) {
             continue;
         }
@@ -265,7 +270,22 @@ fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> O
         doc.set(section, key, &value);
     }
     // Normalized values (numbers, keys) as the program reads them.
-    let cfg = Config::from_ini(doc);
+    let mut cfg = Config::from_ini(doc);
+    // A camera's objects. A camera that follows the list for all cameras (follow = 1, the
+    // page keeps it up to date) gets its own list only when its checks differ from that
+    // one; a list of its own (follow = 0) stays as checked, also when equal to it.
+    for (cam, _) in &cams {
+        let name = format!("camera.{cam}.labels");
+        if form.iter().any(|(k, _)| *k == name) {
+            let picked: Vec<String> = form.iter().filter(|(k, v)| *k == name && !v.is_empty()).map(|(_, v)| v.clone()).collect();
+            let own = if last(&format!("camera.{cam}.follow")).as_deref() == Some("0") {
+                picked
+            } else {
+                crate::view::own_labels(&picked, &cfg.labels, &labels)
+            };
+            cfg.set_own_labels(cam, own);
+        }
+    }
     config::write_all(&cfg, doc);
     last("autostart").map(|v| v == "true")
 }
@@ -308,8 +328,10 @@ fn checkbox(name: &str, checked: bool, label: &str) -> String {
     )
 }
 
-/// A list of checkboxes (the empty hidden value marks the list as sent).
+/// A list of checkboxes (the empty hidden value marks the list as sent). The name may hold
+/// a camera name, so it is escaped too.
 fn checks(name: &str, items: &[(String, String, bool)], empty: &str) -> String {
+    let (id, name) = (esc(&id(name)), esc(name));
     if items.is_empty() {
         return format!("<input type=\"hidden\" name=\"{name}\" value=\"\"><p class=\"tip\">{}</p>", esc(empty));
     }
@@ -324,7 +346,7 @@ fn checks(name: &str, items: &[(String, String, bool)], empty: &str) -> String {
             )
         })
         .collect();
-    format!("<input type=\"hidden\" name=\"{name}\" value=\"\"><div class=\"checks\" id=\"{}\">{boxes}</div>", id(name))
+    format!("<input type=\"hidden\" name=\"{name}\" value=\"\"><div class=\"checks\" id=\"{id}\">{boxes}</div>")
 }
 
 fn opts(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
@@ -335,16 +357,33 @@ fn opts(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
 fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
     let s = t();
     let lang = i18n::current();
-    let all = |list: &[String], name: &str| list.is_empty() || list.iter().any(|x| x.eq_ignore_ascii_case(name));
     let (cams, labels, zones) = crate::view::choices(&info.cameras, c);
-    let cam_items: Vec<(String, String, bool)> = cams.iter().map(|(n, title)| (n.clone(), title.clone(), all(&c.cameras, n))).collect();
-    let label_items: Vec<(String, String, bool)> = labels
-        .iter()
-        .map(|l| {
-            let name = i18n::label(l);
-            (l.clone(), if name == l { l.clone() } else { format!("{name} ({l})") }, all(&c.labels, l))
-        })
-        .collect();
+    let cam_items: Vec<(String, String, bool)> = cams.iter().map(|(n, title)| (n.clone(), title.clone(), listed(&c.cameras, n))).collect();
+    // Objects: one group of checkboxes for all cameras and one for every camera; the
+    // select above them shows one group (a camera with its own list is marked with *).
+    let label_items =
+        |list: &[String]| -> Vec<(String, String, bool)> { labels.iter().map(|l| (l.clone(), label_text(l), listed(list, l))).collect() };
+    let mut objects = checks("trigger.labels", &label_items(&c.labels), "—");
+    if !cams.is_empty() {
+        let mut options = format!("<option value=\"\">{}</option>", esc(s.objects_all_cameras));
+        let mut groups = format!("<div data-for=\"\">{objects}</div>");
+        for (n, title) in &cams {
+            let own = c.own_labels(n).is_some();
+            let mark = if own { " *" } else { "" };
+            options += &format!("<option value=\"{}\" data-title=\"{}\">{}{mark}</option>", esc(n), esc(title), esc(title));
+            // follow = 1: no list of its own, the checks follow those for all cameras.
+            groups += &format!(
+                "<div data-for=\"{}\"><input type=\"hidden\" class=\"follow\" name=\"{}\" value=\"{}\">{}<button type=\"button\" class=\"same\" title=\"{}\">{}</button></div>",
+                esc(n),
+                esc(&format!("camera.{n}.follow")),
+                if own { 0 } else { 1 },
+                checks(&format!("camera.{n}.labels"), &label_items(c.labels_for(n)), "—"),
+                esc(s.tip_objects_same_as_all),
+                esc(s.objects_same_as_all)
+            );
+        }
+        objects = format!("<select id=\"labels-for\" title=\"{}\">{options}</select>{groups}", esc(s.tip_objects_for));
+    }
     let zone_items: Vec<(String, String, bool)> =
         zones.iter().map(|z| (z.clone(), z.clone(), c.zones.iter().any(|x| x.eq_ignore_ascii_case(z)))).collect();
     let mut languages = vec![("auto".to_string(), s.linux_language_auto.to_string())];
@@ -445,7 +484,7 @@ fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
         s.tip_mode,
     );
     detection += &row("trigger.cameras", s.cameras, checks("trigger.cameras", &cam_items, s.menu_no_cameras), s.tip_cameras);
-    detection += &row("trigger.labels", s.objects, checks("trigger.labels", &label_items, "—"), s.tip_objects);
+    detection += &row("trigger.labels", s.objects, objects, s.tip_objects);
     detection += &row("trigger.zones", s.zones, checks("trigger.zones", &zone_items, "—"), s.tip_zones);
     detection += &format!("<p class=\"note\">{}</p>\n", esc(s.detection_note));
     detection += &row(
@@ -533,6 +572,8 @@ input.num {{ width: 96px; }}
 #mqtt-host {{ max-width: 240px; }} #mqtt-user, #mqtt-password, #frigate-user, #frigate-password {{ max-width: 200px; }}
 label.check {{ display: inline-flex; align-items: center; gap: 6px; margin: 2px 16px 2px 0; font-weight: normal; }}
 .checks {{ display: flex; flex-wrap: wrap; }}
+#labels-for {{ max-width: 260px; margin-bottom: 6px; }}
+button.same {{ margin-top: 6px; }}
 button {{ cursor: pointer; }}
 button.primary {{ background: var(--accent); border-color: var(--accent); color: #fff; padding: 8px 20px; font-weight: 600; }}
 pre {{ white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 8px 0 0; font-size: 13px; }}
@@ -564,6 +605,51 @@ const source = document.getElementById("frigate-source");
 const mqtt = document.getElementById("mqtt");
 const show = () => {{ mqtt.style.display = source.value === "mqtt" ? "" : "none"; }};
 source.addEventListener("change", show); show();
+// rules:begin
+// The object lists' rules on plain data (the tests run them too). A camera follows the list
+// for all cameras until the user checks something else for it: then it has a list of its
+// own (*), kept as it is until checks equal to those for all cameras or "Same as all
+// cameras" give it up. Nothing checked for all cameras = every object.
+const rules = {{
+  everyone: (checked, all) => (checked.length ? checked : all),
+  own: (checked, every) => checked.length > 0 && (checked.length !== every.length || checked.some((x) => !every.includes(x))),
+  // A camera {{ checked, all, follow }} after a change by "camera" (the user's checks for
+  // it), "same" (its "Same as all cameras" button) or "all" (the list for all cameras).
+  after: (cam, every, by) => {{
+    if (by === "camera") return Object.assign({{}}, cam, {{ follow: !rules.own(cam.checked, every) }});
+    if (by === "same" || cam.follow) return Object.assign({{}}, cam, {{ checked: every.filter((x) => cam.all.includes(x)), follow: true }});
+    return cam;
+  }},
+}};
+// rules:end
+const scope = document.getElementById("labels-for");
+if (scope) {{
+  // One group of objects at a time; a camera's hidden "follow" field holds its state.
+  const groups = [...document.querySelectorAll("[data-for]")];
+  const group = (v) => groups.find((g) => g.dataset.for === v);
+  const boxes = (g) => [...g.querySelectorAll("input[type=checkbox]")];
+  const flag = (g) => g.querySelector("input.follow");
+  const checked = (g) => boxes(g).filter((b) => b.checked).map((b) => b.value);
+  const every = () => rules.everyone(checked(group("")), boxes(group("")).map((b) => b.value));
+  const change = (g, by) => {{
+    const c = rules.after({{ checked: checked(g), all: boxes(g).map((b) => b.value), follow: flag(g).value === "1" }}, every(), by);
+    boxes(g).forEach((b) => {{ b.checked = c.checked.includes(b.value); }});
+    flag(g).value = c.follow ? "1" : "0";
+  }};
+  const mark = () => {{ for (const o of scope.options) if (o.value) o.textContent = o.dataset.title + (flag(group(o.value)).value === "0" ? " *" : ""); }};
+  const pick = () => groups.forEach((g) => {{ g.style.display = g.dataset.for === scope.value ? "" : "none"; }});
+  for (const g of groups) {{
+    if (!g.dataset.for) {{
+      g.addEventListener("change", () => groups.forEach((x) => {{ if (x.dataset.for) change(x, "all"); }}));
+      continue;
+    }}
+    g.addEventListener("change", () => change(g, "camera"));
+    g.querySelector("button.same").addEventListener("click", () => {{ change(g, "same"); mark(); }});
+  }}
+  scope.addEventListener("change", pick);
+  form.addEventListener("change", mark);
+  pick();
+}}
 document.getElementById("test").addEventListener("click", async () => {{
   const out = document.getElementById("out");
   out.textContent = "…";
@@ -636,6 +722,111 @@ mod tests {
     }
 
     #[test]
+    fn saving_camera_object_lists() {
+        let mut doc = IniDoc::parse(&format!("{}\n[camera.yard]\nlabels = cat\n", config::DEFAULT_INI));
+        let known = [cam("front", &["person", "car"]), cam("garden", &["person", "dog"]), cam("yard", &["cat"])];
+        // For all cameras: person. Front: the same (so no list of its own); garden: its own.
+        let form = parse_form(
+            "trigger.labels=&trigger.labels=person\
+             &camera.front.labels=&camera.front.labels=person\
+             &camera.garden.labels=&camera.garden.labels=person&camera.garden.labels=dog",
+        );
+        apply(&form, &mut doc, &known);
+        let c = Config::from_ini(&doc);
+        assert_eq!(c.labels, vec!["person".to_string()]);
+        assert_eq!(c.own_labels("front"), None);
+        assert_eq!(c.own_labels("garden"), Some(&["person".to_string(), "dog".to_string()][..]));
+        // A camera whose list was not sent keeps it.
+        assert_eq!(c.own_labels("yard"), Some(&["cat".to_string()][..]));
+        assert_eq!(doc.get("camera.front", "labels"), None);
+        // Back to the list for all cameras: the key stays empty.
+        let form = parse_form("trigger.labels=&trigger.labels=person&camera.garden.labels=&camera.garden.labels=person&camera.garden.follow=1");
+        apply(&form, &mut doc, &known);
+        assert_eq!(doc.get("camera.garden", "labels").as_deref(), Some(""));
+        assert_eq!(Config::from_ini(&doc).labels_for("garden"), ["person"]);
+    }
+
+    #[test]
+    fn saving_keeps_lists_that_were_not_edited() {
+        // Yard's list equals the one for all cameras but is its own (follow=0, as the page
+        // sends it for a list nobody changed): saving other settings keeps it.
+        let mut doc = IniDoc::parse(&format!("{}\n[camera.yard]\nlabels = person\n", config::DEFAULT_INI));
+        let known = [cam("front", &["person", "car"]), cam("yard", &["person", "cat"])];
+        let form = parse_form(
+            "trigger.labels=&trigger.labels=person\
+             &camera.yard.labels=&camera.yard.labels=person&camera.yard.follow=0\
+             &camera.front.labels=&camera.front.labels=person&camera.front.labels=car&camera.front.follow=1",
+        );
+        apply(&form, &mut doc, &known);
+        let c = Config::from_ini(&doc);
+        assert_eq!(c.own_labels("yard"), Some(&["person".to_string()][..]));
+        // A following camera whose checks were changed gets its own list.
+        assert_eq!(c.own_labels("front"), Some(&["person".to_string(), "car".to_string()][..]));
+    }
+
+    #[test]
+    fn page_shows_camera_object_lists() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse("[trigger]\nlabels = person\n[camera.garden]\nlabels = dog\n"));
+        let info = Info { cameras: vec![cam("front", &["person", "car"]), cam("garden", &["person", "dog"])], ..Default::default() };
+        let html = page(&c, &info, None);
+        assert!(html.contains("<option value=\"\">All cameras</option>"), "{html}");
+        assert!(html.contains("<option value=\"front\" data-title=\"front\">front</option>"));
+        assert!(html.contains("<option value=\"garden\" data-title=\"garden\">garden *</option>"));
+        // Each camera's group: its own list, or the one for all cameras.
+        assert!(html.contains("name=\"camera.garden.labels\" value=\"dog\" checked"));
+        assert!(html.contains("name=\"camera.garden.labels\" value=\"person\">"));
+        assert!(html.contains("name=\"camera.front.labels\" value=\"person\" checked"));
+        assert!(html.contains("name=\"camera.front.labels\" value=\"car\">"));
+        assert!(html.contains("Same as all cameras"));
+        // Cameras without a list of their own follow changes made for all cameras (in the page).
+        assert!(html.contains("<input type=\"hidden\" class=\"follow\" name=\"camera.front.follow\" value=\"1\">"));
+        assert!(html.contains("<input type=\"hidden\" class=\"follow\" name=\"camera.garden.follow\" value=\"0\">"));
+    }
+
+    /// The page's object-list rules (plain functions in its script), run by node; skipped
+    /// with a note when node is not installed.
+    #[test]
+    fn page_object_rules() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse(""));
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None);
+        let rules = html.split("// rules:begin").nth(1).and_then(|r| r.split("// rules:end").next()).expect("rules in the page");
+        let checks = r#"
+const assert = require("assert");
+const eq = (a, b) => assert.deepStrictEqual(a, b);
+// Nothing checked for all cameras = every object.
+eq(rules.everyone([], ["p", "c"]), ["p", "c"]);
+eq(rules.everyone(["p"], ["p", "c"]), ["p"]);
+// A list of its own: something checked, not the same as for all cameras.
+eq([rules.own([], ["p"]), rules.own(["c", "p"], ["p", "c"]), rules.own(["p"], ["p", "c"]), rules.own(["p", "c", "d"], ["p", "c"])], [false, false, true, true]);
+const cam = (checked, follow) => ({ checked, all: ["p", "c", "d"], follow });
+// A change for all cameras: a following camera takes it (only its own entries), one with a list keeps it.
+eq(rules.after(cam(["p"], true), ["p", "c", "x"], "all"), cam(["p", "c"], true));
+eq(rules.after(cam(["p", "c"], false), ["p"], "all"), cam(["p", "c"], false));
+// The user's checks for a camera: the same as for all cameras (or none) = following.
+eq(rules.after(cam(["c", "p"], false), ["p", "c"], "camera").follow, true);
+eq(rules.after(cam([], false), ["p", "c"], "camera").follow, true);
+eq(rules.after(cam(["p", "d"], true), ["p", "c"], "camera").follow, false);
+// "Same as all cameras".
+eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
+"#;
+        match std::process::Command::new("node").arg("-e").arg(format!("{rules}\n{checks}")).output() {
+            Ok(out) => assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)),
+            Err(e) => eprintln!("node is not available ({e}): the page's object rules were not run"),
+        }
+    }
+
+    #[test]
+    fn camera_names_are_escaped_in_object_lists() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse("[trigger]\ncameras = front, x\"<y\n"));
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None);
+        assert!(html.contains("name=\"camera.x&quot;&lt;y.labels\""), "{html}");
+        assert!(!html.contains("x\"<y"));
+    }
+
+    #[test]
     fn credentials_are_kept_exactly() {
         let mut doc = IniDoc::parse(config::DEFAULT_INI);
         let form = parse_form("mqtt.user=+me+&mqtt.password=+ab%3Bc+%23d+&frigate.url=+http%3A%2F%2Fx%3A5000+");
@@ -645,6 +836,42 @@ mod tests {
         // Saved again (e.g. another setting changed): still the same.
         let c2 = Config::from_ini(&IniDoc::parse(&doc.to_text()));
         assert_eq!(c2.mqtt_password, " ab;c #d ");
+    }
+
+    /// A raw request to the running page; the whole answer (the server then closes).
+    fn send(port: u16, request: &str) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(request.as_bytes()).unwrap();
+        let mut answer = String::new();
+        s.read_to_string(&mut answer).unwrap();
+        answer
+    }
+
+    #[test]
+    fn saving_works_in_chromium() {
+        // Chromium sends `Origin: null` with the form of a page served with
+        // `Referrer-Policy: no-referrer`, and that origin is refused. Other sites must
+        // still get no referrer: the page address carries the key.
+        let dir = std::env::temp_dir().join(format!("fpip-web-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("config.ini");
+        let web = start(path.clone(), Arc::new(Mutex::new(Info::default())), Arc::new(|_| {})).unwrap();
+        let (port, key) = web.url.strip_prefix("http://127.0.0.1:").unwrap().split_once('/').unwrap();
+        let (port, host) = (port.parse().unwrap(), format!("127.0.0.1:{port}"));
+        let page = send(port, &format!("GET /{key} HTTP/1.1\r\nHost: {host}\r\n\r\n"));
+        assert!(page.starts_with("HTTP/1.1 200 "));
+        assert!(page.contains("\r\nReferrer-Policy: same-origin\r\n"));
+        let form = "frigate.url=http%3A%2F%2F10.0.0.5%3A5000";
+        let save = |origin: &str| {
+            let head = format!("POST /{key}save HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\nContent-Length: {}", form.len());
+            send(port, &format!("{head}\r\n\r\n{form}"))
+        };
+        // Other origins (also `null`) are still refused; the page's own one saves.
+        assert!(save("null").starts_with("HTTP/1.1 403 "));
+        assert!(save("http://example.com").starts_with("HTTP/1.1 403 "));
+        assert!(save(&format!("http://{host}")).starts_with("HTTP/1.1 303 "));
+        assert_eq!(config::load(&path).unwrap().0.url, "http://10.0.0.5:5000");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
