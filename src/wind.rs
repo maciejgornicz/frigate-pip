@@ -11,12 +11,15 @@
 //! microphone at its limit makes noise over the whole range — measured on a real camera, a
 //! gust put as much energy between 300 and 1000 Hz as below 300 Hz, and a quarter of it
 //! above 500 Hz. Filtering cannot bring back a wave that was already flattened, so while
-//! the wind blows the filter also **turns the sound down**, by up to 18 dB, and lets go of
-//! it as the gust passes. A voice is left alone in the calm, where it can be heard at all;
-//! in a gust it is quieted along with the wind, where the wind would drown it anyway.
+//! the wind blows the filter also **turns the sound down** — to about −40 dB, which is
+//! quiet enough to sit under a conversation — and lets go of it as the gust passes. A voice
+//! is left alone in the calm, where it can be heard at all; in a gust it is quieted along
+//! with the wind, where the wind would drown it anyway.
 //!
 //! Wind is recognised by the share of the sound's energy that lies below 70 Hz, where a
-//! voice has next to nothing.
+//! voice has next to nothing — and by there being enough of it to hear. A microphone's own
+//! offset, or a trace of mains hum, is wind by share alone, and acting on it would sweep
+//! the cutoff up through every quiet stretch and gut the first words of whoever spoke next.
 
 use std::f32::consts::PI;
 
@@ -35,6 +38,12 @@ const MAX_DUCK_DB: f32 = 35.0;
 const SOFT: f32 = 0.7;
 /// The detector looks at the energy below this frequency (steeply: 24 dB per octave)…
 const DETECT_HZ: f32 = 70.0;
+/// …of what is left after this one, which keeps a microphone's own offset and whatever
+/// sits below hearing from counting as wind at all, however large they are.
+const BLOCK_HZ: f32 = 20.0;
+/// There must be this much of it (mean square, full scale = 1) before any of it counts as
+/// wind, from a tenth of this (nothing yet) to this (wind for certain; about −40 dB).
+const ENOUGH: f32 = 1e-4;
 /// …and takes a share of the whole from `SHARE_NONE` (no wind) to `SHARE_FULL` (full wind).
 /// A low male voice leaves a few percent of its energy there, wind most of its own, so
 /// wind is still recognised while somebody speaks as loudly as it blows.
@@ -61,6 +70,26 @@ pub struct Work {
     /// Level of the camera sound before and after, in decibels.
     pub before_db: f32,
     pub after_db: f32,
+}
+
+/// Below this, a value is treated as nothing. Smoothing towards zero never quite arrives:
+/// the step rounds away while the value is subnormal, so it would park there, and every
+/// multiply by a subnormal costs tens of cycles for as long as the window is open.
+const NOTHING: f32 = 1e-20;
+
+fn flush(x: f32) -> f32 {
+    if x.abs() < NOTHING {
+        0.0
+    } else {
+        x
+    }
+}
+
+/// One channel's wind detector: the offset blocker, then the two low-pass sections.
+#[derive(Clone, Copy, Default)]
+struct Detect {
+    block: Svf,
+    low: [Svf; 2],
 }
 
 /// State-variable filter (trapezoidal): stays stable while its cutoff moves.
@@ -93,8 +122,8 @@ impl Svf {
         let v3 = x - self.ic2;
         let v1 = c.a1 * self.ic1 + c.a2 * v3;
         let v2 = self.ic2 + c.a2 * self.ic1 + c.a3 * v3;
-        self.ic1 = 2.0 * v1 - self.ic1;
-        self.ic2 = 2.0 * v2 - self.ic2;
+        self.ic1 = flush(2.0 * v1 - self.ic1);
+        self.ic2 = flush(2.0 * v2 - self.ic2);
         (v2, x - c.k * v1 - v2)
     }
 }
@@ -102,11 +131,21 @@ impl Svf {
 pub struct WindFilter {
     rate: f32,
     channels: usize,
+    /// The format as the caller gave it, which is what `format()` answers with.
+    given: (u32, u16),
     /// Two filter sections per channel.
     stages: Vec<[Svf; 2]>,
     coef: [Coef; 2],
-    detector: [Svf; 2],
-    detector_coef: [Coef; 2],
+    /// A detector per channel, so two channels against each other cannot cancel out.
+    detect: Vec<Detect>,
+    block_coef: Coef,
+    detect_coef: [Coef; 2],
+    /// Which channel of the frame comes next: a piece need not end on a frame boundary.
+    phase: usize,
+    /// The frame being gathered: its channels' energies, in and out of the high-pass.
+    frame_low: f32,
+    frame_all: f32,
+    frame_out: f32,
     /// Smoothed energy below `DETECT_HZ` and of the whole sound.
     low: f32,
     all: f32,
@@ -121,9 +160,11 @@ pub struct WindFilter {
     hi_hz: f32,
     /// How much wind there is, 0–1.
     wind: f32,
-    /// What the sound is turned down by now, 0–1 (1 = not at all).
+    /// What the sound is turned down by now, 0–1 (1 = not at all), and where it is heading:
+    /// it walks there over the block instead of stepping, which would click.
     gain: f32,
-    /// Samples until the cutoff is recomputed.
+    gain_to: f32,
+    /// Frames until the cutoff is recomputed.
     until_step: usize,
     energy_k: f32,
     attack_k: f32,
@@ -137,15 +178,22 @@ fn smoothing(seconds: f32, steps_per_second: f32) -> f32 {
 
 impl WindFilter {
     pub fn new(rate: u32, channels: u16) -> WindFilter {
+        let given = (rate, channels);
         let rate = rate.max(1) as f32;
         let channels = channels.max(1) as usize;
         let mut f = WindFilter {
             rate,
             channels,
+            given,
             stages: vec![[Svf::default(); 2]; channels],
             coef: [Coef::default(); 2],
-            detector: [Svf::default(); 2],
-            detector_coef: [Coef::new(DETECT_HZ, Q[0], rate), Coef::new(DETECT_HZ, Q[1], rate)],
+            detect: vec![Detect::default(); channels],
+            block_coef: Coef::new(BLOCK_HZ, std::f32::consts::FRAC_1_SQRT_2, rate),
+            detect_coef: [Coef::new(DETECT_HZ, Q[0], rate), Coef::new(DETECT_HZ, Q[1], rate)],
+            phase: 0,
+            frame_low: 0.0,
+            frame_all: 0.0,
+            frame_out: 0.0,
             low: 0.0,
             all: 0.0,
             left_over: 0.0,
@@ -157,6 +205,7 @@ impl WindFilter {
             hi_hz: 0.0,
             wind: 0.0,
             gain: 1.0,
+            gain_to: 1.0,
             until_step: 0,
             energy_k: smoothing(ENERGY_S, rate),
             attack_k: smoothing(ATTACK_S, rate / STEP as f32),
@@ -166,9 +215,10 @@ impl WindFilter {
         f
     }
 
-    /// The format this filter was made for.
+    /// The format this filter was made for, as it was given — not as it was clamped, so a
+    /// caller comparing against its own format always finds its own values back.
     pub fn format(&self) -> (u32, u16) {
-        (self.rate as u32, self.channels as u16)
+        self.given
     }
 
     /// The cutoff the filter is at now, in Hz.
@@ -201,17 +251,22 @@ impl WindFilter {
         })
     }
 
-    /// Follows the wind: called every `STEP` samples.
+    /// Follows the wind: called every `STEP` frames.
     fn step(&mut self) {
         let share = if self.all > FLOOR { self.low / self.all } else { 0.0 };
-        let target = ((share - SHARE_NONE) / (SHARE_FULL - SHARE_NONE)).clamp(0.0, 1.0);
+        let by_share = ((share - SHARE_NONE) / (SHARE_FULL - SHARE_NONE)).clamp(0.0, 1.0);
+        // There must also be enough of it to hear. Without this, a microphone's own offset
+        // or a trace of hum is wind by share alone — and the cutoff would then sit at the
+        // top through every quiet stretch, waiting to gut the next voice.
+        let enough = ((self.low / (ENOUGH / 10.0)).max(1.0).log10() / 10f32.log10()).clamp(0.0, 1.0);
+        let target = by_share * enough;
         let k = if target > self.wind { self.attack_k } else { self.release_k };
         self.wind += (target - self.wind) * k;
         // Both must hold to turn the sound down: it is wind, and the filter left it loud.
         // How far above `TARGET` what is left sits, is how far down it goes.
         let over_db = 10.0 * (self.left_over.max(1e-12) / TARGET).log10();
         let down_db = over_db.clamp(0.0, MAX_DUCK_DB) * self.wind;
-        self.gain = 10f32.powf(-down_db / 20.0);
+        self.gain_to = 10f32.powf(-down_db / 20.0);
         self.down_db = self.down_db.max(down_db);
         self.set_cutoff();
     }
@@ -228,30 +283,48 @@ impl WindFilter {
     /// Filters interleaved 16-bit samples in place: the high-pass, then the volume the
     /// wind calls for.
     pub fn process(&mut self, pcm: &mut [i16]) {
-        for frame in pcm.chunks_exact_mut(self.channels) {
-            if self.until_step == 0 {
-                self.until_step = STEP;
-                self.step();
+        // Sample by sample, keeping its place in the frame: a piece handed to the filter
+        // need not hold whole frames, and starting over at each piece would shift the
+        // channels against their own filters for the rest of the stream.
+        for s in pcm.iter_mut() {
+            let channel = self.phase;
+            if channel == 0 {
+                if self.until_step == 0 {
+                    self.until_step = STEP;
+                    self.step();
+                }
+                self.until_step -= 1;
+                // The volume walks to where `step` put it, over the block.
+                self.gain += (self.gain_to - self.gain) / STEP as f32;
+                (self.frame_low, self.frame_all, self.frame_out) = (0.0, 0.0, 0.0);
             }
-            self.until_step -= 1;
-            let mono = frame.iter().map(|s| *s as f32).sum::<f32>() / (self.channels as f32 * 32768.0);
-            let (low, _) = self.detector[0].tick(&self.detector_coef[0], mono);
-            let (low, _) = self.detector[1].tick(&self.detector_coef[1], low);
-            self.low += (low * low - self.low) * self.energy_k;
-            self.all += (mono * mono - self.all) * self.energy_k;
-            let mut sum = 0.0;
-            for (s, stage) in frame.iter_mut().zip(self.stages.iter_mut()) {
-                let (_, x) = stage[0].tick(&self.coef[0], *s as f32);
-                let (_, x) = stage[1].tick(&self.coef[1], x);
-                sum += x;
-                *s = Self::soft(x * self.gain);
+            // What this channel brings to the judgement, with its own offset left out.
+            let d = &mut self.detect[channel];
+            let (_, heard) = d.block.tick(&self.block_coef, *s as f32 / 32768.0);
+            let (low, _) = d.low[0].tick(&self.detect_coef[0], heard);
+            let (low, _) = d.low[1].tick(&self.detect_coef[1], low);
+            self.frame_low += low * low;
+            self.frame_all += heard * heard;
+            let stage = &mut self.stages[channel];
+            let (_, x) = stage[0].tick(&self.coef[0], *s as f32);
+            let (_, x) = stage[1].tick(&self.coef[1], x);
+            let left = x / 32768.0;
+            self.frame_out += left * left;
+            *s = Self::soft(x * self.gain);
+            self.phase += 1;
+            if self.phase == self.channels {
+                self.phase = 0;
+                // Energies as the mean of the channels' own, never as the square of their
+                // sum: two channels against each other would cancel and hide the wind.
+                let n = self.channels as f32;
+                let (heard, low, left) = (self.frame_all / n, self.frame_low / n, self.frame_out / n);
+                self.low = flush(self.low + (low - self.low) * self.energy_k);
+                self.all = flush(self.all + (heard - self.all) * self.energy_k);
+                self.left_over = flush(self.left_over + (left - self.left_over) * self.energy_k);
+                self.seen += 1;
+                self.in_sum += heard as f64;
+                self.out_sum += (left * self.gain * self.gain) as f64;
             }
-            let out = sum / (self.channels as f32 * 32768.0);
-            self.left_over += (out * out - self.left_over) * self.energy_k;
-            let quieted = out * self.gain;
-            self.seen += 1;
-            self.in_sum += (mono * mono) as f64;
-            self.out_sum += (quieted * quieted) as f64;
         }
     }
 }
@@ -362,10 +435,54 @@ mod tests {
         // Far-off wind under a conversation is not what hurts: the rumble goes, the volume
         // stays, so a quiet scene is not made quieter still.
         let (out, f) = filtered(&wind(0.02, 3.0, RATE), RATE);
-        assert!(f.cutoff() > 400.0, "cutoff {}", f.cutoff());
+        // It does not take the full sweep either: this little rumble is gone at a cutoff
+        // close to the calm one, and sweeping up for it would only cost the next voice.
+        assert!((100.0..300.0).contains(&f.cutoff()), "cutoff {}", f.cutoff());
         assert!(f.turned_down_db() < 1.0, "turned down {} dB", f.turned_down_db());
         // The rumble itself is gone all the same.
         assert!(rms(&out, 1.0, RATE) < rms(&pcm(&wind(0.02, 3.0, RATE)), 1.0, RATE) / 3.0);
+    }
+
+    /// A microphone's own offset, or a trace of mains hum, is nearly all below 70 Hz and so
+    /// is wind by share alone — but there is nothing audible in it to cut. The filter used
+    /// to sweep its cutoff up for it and then gut the first words of whoever spoke next.
+    #[test]
+    fn an_offset_or_a_trace_of_hum_is_not_wind() {
+        for (what, signal) in [
+            ("an offset of 40 counts", vec![40.0 / 32768.0; RATE as usize * 2]),
+            ("an offset of 200 counts", vec![200.0 / 32768.0; RATE as usize * 2]),
+            ("mains hum at -48 dB", tone(50.0, 0.004, 2.0, RATE)),
+        ] {
+            let (_, f) = filtered(&signal, RATE);
+            assert!(f.cutoff() < 90.0, "{what}: cutoff {}", f.cutoff());
+        }
+    }
+
+    #[test]
+    fn a_voice_after_a_quiet_stretch_is_whole_from_its_first_word() {
+        // Two seconds of a microphone's offset, then a low voice.
+        let mut signal = vec![40.0 / 32768.0; RATE as usize * 2];
+        signal.extend(tone(110.0, 0.2, 2.0, RATE));
+        let mut f = WindFilter::new(RATE, 1);
+        let mut p = pcm(&signal);
+        f.process(&mut p);
+        // The first fifth of a second of it, not three seconds later.
+        let l = level(&p[2 * RATE as usize..2 * RATE as usize + RATE as usize / 5], 110.0, 0.2, RATE);
+        assert!(l > 0.15, "the voice starts at {l}");
+    }
+
+    #[test]
+    fn an_odd_piece_does_not_shift_the_channels() {
+        // A stereo stream cut at an odd boundary: the left channel must stay on the left,
+        // and no sample may slip past the filter unfiltered.
+        let voice = pcm(&tone(1000.0, 0.5, 1.0, 48000));
+        let mut both: Vec<i16> = voice.iter().map(|l| [*l, 0]).flat_map(|p| p.into_iter()).collect();
+        let mut f = WindFilter::new(48000, 2);
+        let (first, rest) = both.split_at_mut(9);
+        f.process(first);
+        f.process(rest);
+        let right: Vec<i16> = both.iter().skip(1).step_by(2).copied().collect();
+        assert!(right.iter().all(|s| *s == 0), "the silent channel took {} samples", right.iter().filter(|s| **s != 0).count());
     }
 
     #[test]
@@ -477,7 +594,8 @@ mod tests {
         println!("  cutoff  {lo:.0}-{hi:.0} Hz, turned down by up to {:.1} dB", w.down_db);
         let mut out = raw[..data.as_ptr() as usize - raw.as_ptr() as usize].to_vec();
         out.extend(pcm.iter().flat_map(|s| s.to_le_bytes()));
-        let path = path.replace(".wav", ".filtered.wav");
+        // Only the last ".wav": a folder named for it must not be renamed too.
+        let path = path.rsplit_once(".wav").map_or_else(|| format!("{path}.filtered.wav"), |(head, tail)| format!("{head}.filtered.wav{tail}"));
         std::fs::write(&path, out).expect("cannot write the result");
         println!("  written  {path}");
     }

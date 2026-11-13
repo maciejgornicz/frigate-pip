@@ -222,6 +222,8 @@ impl Ffmpeg {
                 loop {
                     match samples.read(&mut bytes[have..]) {
                         Ok(n) if n > 0 => have += n,
+                        // A signal during the read is not the end of the sound.
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                         _ => return report(&filter),
                     }
                     // Whole frames only; the rest waits for the next read.
