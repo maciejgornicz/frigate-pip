@@ -142,7 +142,7 @@ pub static STRINGS: Strings = Strings {
     tip_auto_main_width: "En modo automático se usa el flujo main cuando la ventana tiene más píxeles de ancho que este valor.",
     tip_camera_audio: "Reproduce el sonido de la cámara en la ventana de vista previa. Funciona por separado y no retrasa la imagen.",
     tip_camera_volume: "Volumen del sonido de la cámara en una ventana nueva, de 0 a 100 %. En una ventana abierta, use el control deslizante bajo el botón del altavoz.",
-    tip_wind_filter: "Elimina del sonido de la cámara el retumbar del viento en el micrófono; las voces conservan su volumen. Durante una ráfaga se corta también la parte grave de la voz, que suena más fina por un momento.",
+    tip_wind_filter: "Acalla el viento que sopla en el micrófono de la cámara: quita el retumbar y, si aun así el viento sigue rugiendo, baja el sonido mientras dura la ráfaga. Con aire en calma y en escenas silenciosas el volumen no cambia.",
     tip_prebuffer: "Mantiene una conexión con el flujo sub de cada cámara para que el video en vivo empiece al instante, sin esperar al siguiente fotograma clave. Consume ancho de banda de red de forma continua.",
     tip_gpu_warm: "Mantiene listo el dispositivo gráfico para que el video empiece unos 130 ms antes. Consume aprox. el 1% de un núcleo de CPU en reposo.",
     tip_preview_camera: "Cámara utilizada para la vista previa en vivo de la configuración.",

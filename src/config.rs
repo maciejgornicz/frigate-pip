@@ -625,8 +625,10 @@ gpu_warm = false
 camera_audio = false
 ; Volume of the camera audio in a new window, 0-100 (each window has its own slider)
 camera_volume = 100
-; Wind filter: cuts the rumble of wind blowing into the camera's microphone and leaves
-; voices at their volume. In a gust the low part of a voice is cut together with the wind.
+; Wind filter: quiets wind blowing into the camera's microphone. It cuts the rumble, and
+; where the wind still roars after that (air hitting the microphone head-on drives it past
+; what it can take, and that noise covers the whole range), it also turns the sound down
+; while the gust lasts. Quiet scenes and voices in calm air keep their volume.
 wind_filter = false
 
 [console]

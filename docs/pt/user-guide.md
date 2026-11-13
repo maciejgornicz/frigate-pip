@@ -215,7 +215,7 @@ O FrigatePiP encontra os streams go2rtc de cada câmara na configuração do Fri
 
 #### Áudio da câmara
 
-**Áudio da câmara** reproduz o som da câmara (AAC ou G.711 do stream RTSP) em cada janela aberta. Funciona em separado, por isso nunca atrasa a janela nem o vídeo. O volume pode ser ajustado no Misturador de volume do Windows (*FrigatePiP*). Requer **RTSP do go2rtc**. Para silenciar uma única janela, clique no botão do altifalante no canto superior direito (ver [Ações do rato](#ações-do-rato)). **Volume** define o volume com que uma janela nova começa (0–100 %, `camera_volume`), por exemplo para baixar o ruído do vento; cada janela tem também o seu próprio controlo. **Filtro de vento** (`wind_filter`) remove o ruído grave do vento no microfone da câmara e deixa as vozes no seu volume: com o ar calmo só é retirado o que está abaixo de 80 Hz, durante uma rajada tudo até 500 Hz, pelo que a voz soa mais fina nesse momento. Não consegue reparar um microfone que o vento satura — aí ajuda um pedaço de espuma sobre a abertura do microfone.
+**Áudio da câmara** reproduz o som da câmara (AAC ou G.711 do stream RTSP) em cada janela aberta. Funciona em separado, por isso nunca atrasa a janela nem o vídeo. O volume pode ser ajustado no Misturador de volume do Windows (*FrigatePiP*). Requer **RTSP do go2rtc**. Para silenciar uma única janela, clique no botão do altifalante no canto superior direito (ver [Ações do rato](#ações-do-rato)). **Volume** define o volume com que uma janela nova começa (0–100 %, `camera_volume`), por exemplo para baixar o ruído do vento; cada janela tem também o seu próprio controlo. **Filtro de vento** (`wind_filter`) silencia o vento que sopra no microfone da câmara. Acontecem duas coisas, porque uma só não chega. O ruído grave é removido: com o ar calmo apenas o que está abaixo de 80 Hz, durante uma rajada tudo até 500 Hz, pelo que a voz soa mais fina nesse momento. Onde o vento sopra de frente para o microfone, leva-o para além do que aguenta e o ruído cobre então toda a banda — filtrar por si só deixa-o quase tão alto. Por isso, quando depois do filtro o vento continua a rugir, o som é ainda baixado, até 18 dB, e volta quando a rajada passa. Uma cena silenciosa fica intacta, tal como uma voz com ar calmo; uma voz numa rajada cala-se com o vento, que de qualquer modo a abafaria. O remédio seguro está na câmara: baixe a sensibilidade do microfone e ponha um pedaço de espuma sobre a sua abertura.
 
 #### Pré-buffer
 
@@ -275,7 +275,7 @@ Todas as configurações são guardadas em `%APPDATA%\FrigatePiP\config.ini` (um
 | | `gpu_warm` | `false` | GPU pronta. |
 | | `camera_audio` | `false` | Áudio da câmara. |
 | | `camera_volume` | `100` | Volume de uma janela nova, 0–100 %. |
-| | `wind_filter` | `false` | Filtro de vento: remove o ruído grave do vento do áudio da câmara. |
+| | `wind_filter` | `false` | Filtro de vento: silencia o vento que sopra no microfone da câmara. |
 | `[camera.<name>]` | `labels` | *(vazio = como em `[trigger]`)* | Objetos para esta câmara em vez de `labels` de `[trigger]`, p. ex. `person, car, dog`. |
 
 ### Configurações por câmara

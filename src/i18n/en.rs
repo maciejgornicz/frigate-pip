@@ -142,7 +142,7 @@ pub static STRINGS: Strings = Strings {
     tip_auto_main_width: "In automatic mode the main stream is used when the window is wider than this many pixels.",
     tip_camera_audio: "Plays the camera sound in the preview window. It runs separately and does not delay the picture.",
     tip_camera_volume: "Volume of the camera sound in a new window, from 0 to 100%. In an open window, use the slider under its speaker button.",
-    tip_wind_filter: "Cuts the rumble of wind blowing into the camera's microphone out of the camera sound; voices keep their volume. In a gust the low part of a voice is cut with the wind, so it sounds thinner for a moment.",
+    tip_wind_filter: "Quiets wind blowing into the camera's microphone: it cuts the rumble, and where the wind still roars after that, turns the sound down while the gust lasts. Calm air and quiet scenes keep their volume.",
     tip_prebuffer: "Keeps a connection to the sub stream of every camera so the live video starts at once instead of waiting for the next key frame. Uses network bandwidth all the time.",
     tip_gpu_warm: "Keeps the graphics device ready so the video starts about 130 ms sooner. Costs about 1% of one CPU core while idle.",
     tip_preview_camera: "Camera used for the live preview of the settings.",

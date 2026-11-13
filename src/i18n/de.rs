@@ -142,7 +142,7 @@ pub static STRINGS: Strings = Strings {
     tip_auto_main_width: "Im Automatikmodus wird der Main-Stream verwendet, wenn das Fenster breiter als diese Pixelzahl ist.",
     tip_camera_audio: "Gibt den Kameraton im Vorschaufenster wieder. Er läuft separat und verzögert das Bild nicht.",
     tip_camera_volume: "Lautstärke des Kameratons in einem neuen Fenster, von 0 bis 100 %. In einem offenen Fenster dient dazu der Regler unter der Lautsprecher-Schaltfläche.",
-    tip_wind_filter: "Entfernt das Dröhnen von Wind am Kameramikrofon aus dem Kameraton; Stimmen behalten ihre Lautstärke. Während einer Böe wird der tiefe Anteil einer Stimme mit dem Wind entfernt, sie klingt dann kurz dünner.",
+    tip_wind_filter: "Macht Wind am Kameramikrofon leise: Das Dröhnen wird entfernt, und wo der Wind danach noch tost, wird der Ton für die Dauer der Böe leiser gestellt. Bei ruhiger Luft und in leisen Szenen bleibt die Lautstärke.",
     tip_prebuffer: "Hält eine Verbindung zum Sub-Stream jeder Kamera, sodass das Livevideo sofort startet, statt auf das nächste Schlüsselbild zu warten. Belegt dauerhaft Netzwerkbandbreite.",
     tip_gpu_warm: "Hält das Grafikgerät bereit, sodass das Video ca. 130 ms früher startet. Kostet im Leerlauf ca. 1 % eines CPU-Kerns.",
     tip_preview_camera: "Kamera für die Live-Vorschau der Einstellungen.",

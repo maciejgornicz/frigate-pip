@@ -142,7 +142,7 @@ pub static STRINGS: Strings = Strings {
     tip_auto_main_width: "En mode automatique, le flux main est utilisé lorsque la fenêtre est plus large que ce nombre de pixels.",
     tip_camera_audio: "Joue le son de la caméra dans la fenêtre d’aperçu. Il est traité séparément et ne retarde pas l’image.",
     tip_camera_volume: "Volume du son de la caméra dans une nouvelle fenêtre, de 0 à 100 %. Dans une fenêtre ouverte, utilisez le curseur sous le bouton du haut-parleur.",
-    tip_wind_filter: "Supprime du son de la caméra le grondement du vent dans le micro ; les voix gardent leur volume. Pendant une rafale, la partie grave de la voix est coupée avec le vent : elle paraît plus mince un instant.",
+    tip_wind_filter: "Apaise le vent qui souffle dans le micro de la caméra : il supprime le grondement et, si le vent rugit encore, baisse le son le temps de la rafale. Par temps calme et dans les scènes silencieuses, le volume ne change pas.",
     tip_prebuffer: "Maintient une connexion au flux sub de chaque caméra afin que la vidéo en direct démarre immédiatement, sans attendre la prochaine image clé. Consomme de la bande passante en permanence.",
     tip_gpu_warm: "Maintient le périphérique graphique prêt pour que la vidéo démarre environ 130 ms plus tôt. Consomme environ 1 % d’un cœur CPU au repos.",
     tip_preview_camera: "Caméra utilisée pour l’aperçu en direct des paramètres.",

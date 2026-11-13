@@ -142,7 +142,7 @@ pub static STRINGS: Strings = Strings {
     tip_auto_main_width: "No modo automático, o stream main é usado quando a janela é mais larga do que este número de pixels.",
     tip_camera_audio: "Reproduz o som da câmara na janela de pré-visualização. Funciona em separado e não atrasa a imagem.",
     tip_camera_volume: "Volume do som da câmara numa janela nova, de 0 a 100%. Numa janela aberta, use o controlo de deslize por baixo do botão do altifalante.",
-    tip_wind_filter: "Remove do som da câmara o ruído grave do vento no microfone; as vozes mantêm o volume. Durante uma rajada, a parte grave da voz é cortada com o vento e soa mais fina por um momento.",
+    tip_wind_filter: "Silencia o vento que sopra no microfone da câmara: remove o ruído grave e, se mesmo assim o vento continuar a rugir, baixa o som enquanto durar a rajada. Com ar calmo e em cenas silenciosas o volume não muda.",
     tip_prebuffer: "Mantém uma conexão ao stream sub de cada câmara para que o vídeo ao vivo comece de imediato, sem esperar pelo próximo quadro-chave. Consome largura de banda da rede continuamente.",
     tip_gpu_warm: "Mantém o dispositivo gráfico pronto para que o vídeo comece cerca de 130 ms mais cedo. Consome cerca de 1% de um núcleo de CPU em repouso.",
     tip_preview_camera: "Câmara usada na pré-visualização ao vivo das configurações.",
