@@ -556,7 +556,7 @@ fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
 * {{ box-sizing: border-box; }}
 body {{ margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif; }}
 main {{ max-width: 860px; margin: 0 auto; padding: 24px 16px 96px; }}
-header {{ display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }}
+header {{ display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }}
 h1 {{ font-size: 22px; margin: 0 0 16px; }}
 h2 {{ font-size: 17px; margin: 0 0 12px; }}
 a {{ color: var(--accent); }}
@@ -905,5 +905,28 @@ eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
         assert!(html.contains("id=\"autostart\" name=\"autostart\" value=\"true\" checked"));
         let failed = page(&c, &info, Some(Err("/x/config.ini: <denied>".into())));
         assert!(failed.contains("class=\"error\">Not saved: /x/config.ini: &lt;denied&gt;</p>"));
+    }
+
+    /// The header carries the way out to the user guide and to the sponsors page, in the
+    /// language of the page. `FRIGATEPIP_PAGE_OUT=page.html` also writes it out, to look at.
+    #[test]
+    fn page_header_links_out() {
+        // English, like its neighbours: the language is one setting for the whole program,
+        // and these tests run side by side, so a test that changes it breaks another.
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse(config::DEFAULT_INI));
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None);
+        assert!(html.contains("user-guide.md"), "no link to the user guide");
+        let link = format!("<a href=\"{}\" target=\"_blank\" rel=\"noreferrer\">Support FrigatePiP</a>", crate::util::SPONSOR_URL);
+        assert!(html.contains(&link), "no link to the sponsors page");
+        // Both sit in the header, in one row of their own.
+        let header = html.split("<header>").nth(1).and_then(|h| h.split("</header>").next()).unwrap_or_default();
+        assert_eq!(header.matches("<a href=").count(), 2, "header links: {header}");
+        assert!(header.contains("class=\"links\""));
+        assert!(html.contains(".links { display: flex;"));
+        if let Ok(path) = std::env::var("FRIGATEPIP_PAGE_OUT") {
+            std::fs::write(&path, &html).expect("cannot write the page");
+            println!("written {path}");
+        }
     }
 }

@@ -69,12 +69,12 @@ pub const ID_GPU: i32 = 405;
 pub const ID_VOLUME: i32 = 406;
 pub const ID_VOLUME_LBL: i32 = 407;
 pub const ID_WIND: i32 = 408;
-pub const ID_SUPPORT: i32 = 409;
 pub const ID_PREV_CAM: i32 = 500;
 pub const ID_PREVIEW: i32 = 501;
 pub const ID_APPLY: i32 = 502;
 pub const ID_TAB: i32 = 503;
 pub const ID_HELP: i32 = 504;
+pub const ID_SUPPORT: i32 = 505;
 
 const TBM_GETPOS: u32 = WM_USER;
 const SS_NOPREFIX: u32 = 0x80;

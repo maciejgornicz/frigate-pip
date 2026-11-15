@@ -289,9 +289,15 @@ const M_CLOSE_ALL: i32 = 6;
 const M_OPEN_FRIGATE: i32 = 8;
 const M_HELP: i32 = 9;
 const M_LOG: i32 = 10;
-const M_SUPPORT: i32 = 12;
 const M_CONFIG: i32 = 11;
 const M_EXIT: i32 = 13;
+const M_SUPPORT: i32 = 14;
+/// The separators carry ids of their own: every item in the menu needs one, and two items
+/// sharing an id are one item to the panel that shows them.
+const M_SEP_STATUS: i32 = 2;
+const M_SEP_WINDOWS: i32 = 7;
+const M_SEP_EXIT: i32 = 12;
+const M_SEP_PAUSE: i32 = 54;
 const M_PAUSE_15: i32 = 51;
 const M_PAUSE_60: i32 = 52;
 const M_PAUSE_FOREVER: i32 = 53;
@@ -948,23 +954,23 @@ impl App {
             Item::check(M_PAUSE_FOREVER, s.menu_pause_forever, self.pause == Pause::Forever),
         ];
         if paused {
-            pause.push(Item::separator(54));
+            pause.push(Item::separator(M_SEP_PAUSE));
             pause.push(Item::action(M_RESUME, s.menu_resume));
         }
         vec![
             Item::disabled(M_STATUS, &self.status_line()),
-            Item::separator(2),
+            Item::separator(M_SEP_STATUS),
             Item::action(M_SETTINGS, s.menu_settings),
             Item::submenu(M_CAMERAS, s.menu_show_camera, cams),
             Item::submenu(M_PAUSE, if paused { s.menu_paused } else { s.menu_pause }, pause),
             Item::action(M_CLOSE_ALL, s.menu_close_all),
-            Item::separator(7),
+            Item::separator(M_SEP_WINDOWS),
             Item::action(M_OPEN_FRIGATE, s.menu_open_frigate),
             Item::action(M_HELP, s.menu_help),
             Item::action(M_SUPPORT, s.menu_support),
             Item::action(M_LOG, s.menu_log),
             Item::action(M_CONFIG, s.menu_config_file),
-            Item::separator(12),
+            Item::separator(M_SEP_EXIT),
             Item::action(M_EXIT, s.menu_exit),
         ]
     }
@@ -1720,5 +1726,42 @@ mod tests {
         assert_eq!(arg(&args, "--output").as_deref(), Some("terminal"));
         assert_eq!(arg(&args, "--graphics").as_deref(), Some("sixel"));
         assert_eq!(arg(&args, "--test"), None);
+    }
+
+    /// Every item of the tray menu, separators included, needs an id of its own: the panel
+    /// that shows the menu asks for an item's properties by id, and the first item with
+    /// that id is what it is given.
+    #[test]
+    fn every_menu_item_has_its_own_id() {
+        let named = [
+            ("status", M_STATUS),
+            ("settings", M_SETTINGS),
+            ("cameras", M_CAMERAS),
+            ("pause", M_PAUSE),
+            ("close all", M_CLOSE_ALL),
+            ("open Frigate", M_OPEN_FRIGATE),
+            ("help", M_HELP),
+            ("log", M_LOG),
+            ("config", M_CONFIG),
+            ("exit", M_EXIT),
+            ("support", M_SUPPORT),
+            ("separator above settings", M_SEP_STATUS),
+            ("separator above Frigate", M_SEP_WINDOWS),
+            ("separator above exit", M_SEP_EXIT),
+            ("separator above resume", M_SEP_PAUSE),
+            ("pause 15", M_PAUSE_15),
+            ("pause 60", M_PAUSE_60),
+            ("pause forever", M_PAUSE_FOREVER),
+            ("resume", M_RESUME),
+            ("no cameras", M_NO_CAMERAS),
+        ];
+        for (i, (what, id)) in named.iter().enumerate() {
+            assert_ne!(*id, 0, "{what}: 0 is the root of the menu");
+            if let Some((other, _)) = named.iter().take(i).find(|(_, seen)| seen == id) {
+                panic!("{what} and {other} are both {id}");
+            }
+            // The cameras take a hundred ids from `M_CAMERA` for themselves.
+            assert!(!(M_CAMERA..M_CAMERA + 100).contains(id), "{what} ({id}) is inside the cameras' range");
+        }
     }
 }
