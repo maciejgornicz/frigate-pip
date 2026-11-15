@@ -59,6 +59,7 @@ const CMD_HELP: u32 = 1803;
 const CMD_UPDATE: u32 = 1805;
 const CMD_EDIT: u32 = 1802;
 const CMD_LOG: u32 = 1804;
+const CMD_SUPPORT: u32 = 1806;
 const CMD_EXIT: u32 = 1999;
 
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
@@ -1094,6 +1095,7 @@ impl App {
             x if x == IDCANCEL.0 => self.close_settings(),
             settings::ID_APPLY => self.apply_settings(),
             settings::ID_HELP => open_url(&settings::help_url()),
+            settings::ID_SUPPORT => open_url(crate::util::SPONSOR_URL),
             settings::ID_UPDATE => {
                 if self.update.is_some() {
                     self.run_update();
@@ -1790,6 +1792,7 @@ impl App {
             sep(m);
             item(m, CMD_OPEN_FRIGATE, t.menu_open_frigate, false);
             item(m, CMD_HELP, t.menu_help, false);
+            item(m, CMD_SUPPORT, t.menu_support, false);
             item(m, CMD_LOG, t.menu_log, false);
             item(m, CMD_EDIT, t.menu_config_file, false);
             sep(m);
@@ -1814,6 +1817,7 @@ impl App {
             CMD_CLOSE_ALL => self.close_all(),
             CMD_OPEN_FRIGATE => open_url(&self.cfg.url),
             CMD_EDIT => open_in_notepad(&self.path),
+            CMD_SUPPORT => open_url(crate::util::SPONSOR_URL),
             CMD_LOG => open_in_notepad(&crate::util::log_path()),
             CMD_HELP => open_url(&settings::help_url()),
             CMD_UPDATE => self.run_update(),

@@ -217,6 +217,9 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
 /// Line ending of the files FrigatePiP writes (log, settings): CRLF for Notepad on Windows.
 pub const NEWLINE: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
+/// Where "Support FrigatePiP" leads, in the tray menu and in the settings.
+pub const SPONSOR_URL: &str = "https://github.com/sponsors/maciejgornicz";
+
 pub fn log_line(msg: &str) {
     let line = format!("{} {}{NEWLINE}", log_stamp(&LocalTime::now()), msg);
     if LOG_STDERR.load(Ordering::Relaxed) {
