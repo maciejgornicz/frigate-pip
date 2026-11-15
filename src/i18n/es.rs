@@ -20,6 +20,7 @@ pub static STRINGS: Strings = Strings {
     menu_close_all: "Cerrar ventanas de vista previa",
     menu_open_frigate: "Abrir Frigate",
     menu_help: "Ayuda",
+    menu_support: "Apoyar FrigatePiP",
     menu_log: "Mostrar registro",
     menu_config_file: "Archivo de configuración (avanzado)…",
     menu_exit: "Salir",
@@ -148,6 +149,7 @@ pub static STRINGS: Strings = Strings {
     tip_preview_camera: "Cámara utilizada para la vista previa en vivo de la configuración.",
     tip_preview_live: "Abre una ventana de vista previa real que refleja sus cambios al instante, antes de guardarlos.",
     tip_help: "Abre la guía del usuario.",
+    tip_support: "Abre la página de GitHub Sponsors en el navegador. FrigatePiP es gratuito y todas sus funciones seguirán siéndolo; patrocinar mantiene el trabajo en marcha.",
 
     test_frigate_ok: "✔ Frigate {0} — {1} ms",
     test_frigate_fail: "✖ Frigate en {0}: {1}",

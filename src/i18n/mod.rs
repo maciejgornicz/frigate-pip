@@ -153,6 +153,7 @@ pub struct Strings {
     pub menu_close_all: &'static str,
     pub menu_open_frigate: &'static str,
     pub menu_help: &'static str,
+    pub menu_support: &'static str,
     pub menu_log: &'static str,
     pub menu_config_file: &'static str,
     pub menu_exit: &'static str,
@@ -285,6 +286,7 @@ pub struct Strings {
     pub tip_preview_camera: &'static str,
     pub tip_preview_live: &'static str,
     pub tip_help: &'static str,
+    pub tip_support: &'static str,
 
     // ---- connection test
     /// {0} = version, {1} = ms

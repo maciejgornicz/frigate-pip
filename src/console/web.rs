@@ -560,6 +560,7 @@ header {{ display: flex; align-items: baseline; justify-content: space-between; 
 h1 {{ font-size: 22px; margin: 0 0 16px; }}
 h2 {{ font-size: 17px; margin: 0 0 12px; }}
 a {{ color: var(--accent); }}
+.links {{ display: flex; gap: 16px; white-space: nowrap; }}
 section {{ background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }}
 .row {{ display: grid; grid-template-columns: 220px 1fr; gap: 6px 16px; padding: 8px 0; border-top: 1px solid var(--line); }}
 .row:first-of-type {{ border-top: 0; }}
@@ -585,7 +586,7 @@ pre {{ white-space: pre-wrap; background: var(--bg); border: 1px solid var(--lin
 </head>
 <body>
 <main>
-<header><h1>{title}</h1><a href="{help}" target="_blank" rel="noreferrer">{help_text}</a></header>
+<header><h1>{title}</h1><span class="links"><a href="{help}" target="_blank" rel="noreferrer">{help_text}</a><a href="{sponsor}" target="_blank" rel="noreferrer">{support_text}</a></span></header>
 {saved}
 <form method="post" action="save" id="form">
 <section><h2>{tab_connection}</h2>
@@ -665,6 +666,8 @@ document.getElementById("test").addEventListener("click", async () => {{
         code = lang.code(),
         title = esc(s.settings_title),
         help_text = esc(s.help),
+        sponsor = crate::util::SPONSOR_URL,
+        support_text = esc(s.menu_support),
         tab_connection = esc(s.tab_connection),
         tab_detection = esc(s.tab_detection),
         tab_window = esc(s.tab_window),

@@ -289,6 +289,7 @@ const M_CLOSE_ALL: i32 = 6;
 const M_OPEN_FRIGATE: i32 = 8;
 const M_HELP: i32 = 9;
 const M_LOG: i32 = 10;
+const M_SUPPORT: i32 = 12;
 const M_CONFIG: i32 = 11;
 const M_EXIT: i32 = 13;
 const M_PAUSE_15: i32 = 51;
@@ -960,6 +961,7 @@ impl App {
             Item::separator(7),
             Item::action(M_OPEN_FRIGATE, s.menu_open_frigate),
             Item::action(M_HELP, s.menu_help),
+            Item::action(M_SUPPORT, s.menu_support),
             Item::action(M_LOG, s.menu_log),
             Item::action(M_CONFIG, s.menu_config_file),
             Item::separator(12),
@@ -996,6 +998,7 @@ impl App {
             }
             M_OPEN_FRIGATE => open_url(&self.cfg.url),
             M_HELP => open_url(&format!("https://github.com/maciejgornicz/frigate-pip/blob/main/docs/{}/user-guide.md", i18n::current().code())),
+            M_SUPPORT => open_url(crate::util::SPONSOR_URL),
             M_LOG => open_url(&crate::util::log_path().to_string_lossy()),
             M_CONFIG => open_url(&self.path.to_string_lossy()),
             M_EXIT => QUIT.store(true, Ordering::Relaxed),

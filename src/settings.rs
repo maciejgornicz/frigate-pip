@@ -69,6 +69,7 @@ pub const ID_GPU: i32 = 405;
 pub const ID_VOLUME: i32 = 406;
 pub const ID_VOLUME_LBL: i32 = 407;
 pub const ID_WIND: i32 = 408;
+pub const ID_SUPPORT: i32 = 409;
 pub const ID_PREV_CAM: i32 = 500;
 pub const ID_PREVIEW: i32 = 501;
 pub const ID_APPLY: i32 = 502;
@@ -82,7 +83,8 @@ const SS_ENDELLIPSIS: u32 = 0x4000;
 const MAX_POPUPS: usize = 8;
 /// Client area at 96 DPI.
 const WIDTH: i32 = 680;
-const HEIGHT: i32 = 580;
+// The last 26 are the row under the buttons, which holds the support button alone.
+const HEIGHT: i32 = 606;
 /// Right edge of the contents of a tab page.
 const RIGHT: i32 = WIDTH - 28;
 /// `GWLP_USERDATA` mark of controls drawn on a tab page.
@@ -805,6 +807,11 @@ impl Settings {
             }
             x += w + 6;
         }
+        // Its own row under the others: the bottom one has no room left, and this belongs
+        // at the far side from the buttons that change settings anyway.
+        let sw = self.text_w(t.menu_support) + 24;
+        let b = self.add(None, WC_BUTTONW, t.menu_support, WS_VISIBLE.0 | WS_TABSTOP.0 | BS_PUSHBUTTON as u32, 0, ID_SUPPORT, 12, 572, sw, 26);
+        self.tip(&[b], t.tip_support);
         unsafe {
             let _ = SetWindowPos(self.tab, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
