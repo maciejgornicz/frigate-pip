@@ -3,6 +3,7 @@
 [![Latest release](https://img.shields.io/github/v/release/maciejgornicz/frigate-pip)](https://github.com/maciejgornicz/frigate-pip/releases/latest)
 [![Build](https://github.com/maciejgornicz/frigate-pip/actions/workflows/build.yml/badge.svg)](https://github.com/maciejgornicz/frigate-pip/actions/workflows/build.yml)
 [![License: GPL-3.0](https://img.shields.io/github/license/maciejgornicz/frigate-pip)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/maciejgornicz)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/maciejgornicz)
 
 **Instant picture-in-picture camera windows for [Frigate NVR](https://frigate.video) on Windows — and on Linux.**
@@ -120,7 +121,7 @@ Bug reports, translations and pull requests are welcome — please read [CONTRIB
 
 ## Support
 
-FrigatePiP is free and open source, and every feature stays free for everyone. If it is useful to you, you can [buy me a coffee on Ko-fi](https://ko-fi.com/maciejgornicz) — thank you!
+FrigatePiP is free and open source, and every feature stays free for everyone. If it is useful to you, you can [sponsor me on GitHub](https://github.com/sponsors/maciejgornicz) monthly or once, or [buy me a coffee on Ko-fi](https://ko-fi.com/maciejgornicz) — thank you!
 
 ## License
 
