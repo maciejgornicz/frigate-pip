@@ -1127,7 +1127,7 @@ impl App {
             }
             x if x == IDCANCEL.0 => self.close_settings(),
             settings::ID_APPLY => {
-                self.apply_settings();
+                let _ = self.apply_settings();
             }
             settings::ID_HELP => open_url(&settings::help_url()),
             settings::ID_SUPPORT => open_url(crate::util::SPONSOR_URL),
@@ -1219,6 +1219,7 @@ impl App {
 
     /// Saves the settings window's values; `false` = nothing saved (an action URL is not valid:
     /// the window shows which).
+    #[must_use]
     fn apply_settings(&mut self) -> bool {
         let Some(s) = self.settings.as_mut() else { return false };
         if !s.check_actions(&self.cfg) {

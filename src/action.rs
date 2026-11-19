@@ -330,14 +330,15 @@ mod tests {
         let t = Instant::now();
         let mut b = Button::new(false);
         let old = b.press(t).unwrap();
-        assert_eq!(b.look(t + ms(60_000)), Look::Failed, "past SENDING_MAX the request counts as failed");
-        assert_eq!(b.look(t + ms(62_000)), Look::Idle);
-        let new = b.press(t + ms(62_000)).expect("idle again: one click sends");
+        assert_eq!(b.look(t + SENDING_MAX), Look::Failed, "past SENDING_MAX the request counts as failed");
+        let again = t + SENDING_MAX + RESULT_FOR;
+        assert_eq!(b.look(again), Look::Idle);
+        let new = b.press(again).expect("idle again: one click sends");
         assert_ne!(old, new);
-        b.finished(old, true, t + ms(62_100));
-        assert_eq!(b.look(t + ms(62_100)), Look::Sending, "the old request's result is ignored");
-        b.finished(new, false, t + ms(62_200));
-        assert_eq!(b.look(t + ms(62_200)), Look::Failed);
+        b.finished(old, true, again + ms(100));
+        assert_eq!(b.look(again + ms(100)), Look::Sending, "the old request's result is ignored");
+        b.finished(new, false, again + ms(200));
+        assert_eq!(b.look(again + ms(200)), Look::Failed);
     }
 
     #[test]
