@@ -199,7 +199,7 @@ pub static STRINGS: Strings = Strings {
     action_label: "Button label",
     action_confirm: "Ask for confirmation (two clicks)",
     action_note: "The button sends an HTTP POST to this URL, e.g. a Home Assistant webhook. Whoever knows the URL can run the action: keep the webhook local-only. ✓ means the request was received, not that the gate opened.",
-    action_bad_url: "The URL must start with http:// or https://.",
+    action_bad_url: "Not a valid http:// or https:// address.",
     action_default: "Action",
     action_ask: "{0}?",
 

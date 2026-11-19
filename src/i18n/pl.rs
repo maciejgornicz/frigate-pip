@@ -199,7 +199,7 @@ pub static STRINGS: Strings = Strings {
     action_label: "Napis na przycisku",
     action_confirm: "Wymagaj potwierdzenia (dwa kliknięcia)",
     action_note: "Przycisk wysyła HTTP POST na ten adres, np. webhook Home Assistanta. Kto zna adres, może uruchomić akcję: zostaw webhook tylko dla sieci lokalnej. ✓ znaczy, że żądanie dotarło, a nie że furtka się otworzyła.",
-    action_bad_url: "Adres musi zaczynać się od http:// lub https://.",
+    action_bad_url: "To nie jest poprawny adres http:// ani https://.",
     action_default: "Akcja",
     action_ask: "{0}?",
 
