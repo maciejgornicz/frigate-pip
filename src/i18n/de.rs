@@ -198,11 +198,12 @@ pub static STRINGS: Strings = Strings {
     action_url: "URL",
     action_label: "Beschriftung der Schaltfläche",
     action_confirm: "Bestätigung verlangen (zwei Klicks)",
-    action_note: "Die Schaltfläche sendet ein HTTP-POST an diese URL, z. B. an einen Home-Assistant-Webhook. Wer die URL kennt, kann die Aktion auslösen: Lassen Sie den Webhook nur im lokalen Netz erreichbar. ✓ bedeutet, dass die Anfrage angekommen ist, nicht, dass sich das Tor geöffnet hat.",
+    action_note: "Jede Schaltfläche sendet ein HTTP-POST an ihre URL, z. B. an einen Home-Assistant-Webhook. Wer eine URL kennt, kann ihre Aktion auslösen: Lassen Sie die Webhooks nur im lokalen Netz erreichbar. ✓ bedeutet, dass die Anfrage angekommen ist, nicht, dass sich das Tor geöffnet hat.",
     action_bad_url: "Keine gültige http://- oder https://-Adresse.",
     action_default: "Aktion",
     action_ask: "{0}?",
     action_row: "Aktion {0}",
+    action_row_error: "{0}: {1}",
     action_confirm_short: "Bestätigung",
 
     console_keys: "q beenden · x Fenster schließen · p pausieren · m Ton · r Wiederholung · a Aktion · 1–9 Kamera zeigen",

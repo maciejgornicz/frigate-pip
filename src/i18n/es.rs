@@ -198,11 +198,12 @@ pub static STRINGS: Strings = Strings {
     action_url: "URL",
     action_label: "Texto del botón",
     action_confirm: "Pedir confirmación (dos clics)",
-    action_note: "El botón envía un HTTP POST a esta URL, p. ej., un webhook de Home Assistant. Quien conozca la URL puede ejecutar la acción: deje el webhook accesible solo desde la red local. ✓ significa que la solicitud llegó, no que el portón se abriera.",
+    action_note: "Cada botón envía un HTTP POST a su URL, p. ej., un webhook de Home Assistant. Quien conozca una URL puede ejecutar su acción: deje los webhooks accesibles solo desde la red local. ✓ significa que la solicitud llegó, no que el portón se abriera.",
     action_bad_url: "No es una dirección http:// o https:// válida.",
     action_default: "Acción",
     action_ask: "¿{0}?",
     action_row: "Acción {0}",
+    action_row_error: "{0}: {1}",
     action_confirm_short: "Confirmación",
 
     console_keys: "q salir · x cerrar ventanas · p pausar · m sonido · r repetición · a acción · 1–9 mostrar cámara",

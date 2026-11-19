@@ -494,6 +494,14 @@ impl Config {
             *slot = a;
         }
     }
+
+    /// Sets action `n` from a settings form's row, as typed: a valid URL (`action::valid_url`)
+    /// is saved trimmed, an empty one removes the button, and one that is not valid keeps the
+    /// URL saved before (the form says why). The label is trimmed (empty = the default one).
+    pub fn set_action_typed(&mut self, camera: &str, n: usize, url: &str, label: &str, confirm: bool) {
+        let url = if crate::action::valid_url(url) { url.trim().to_string() } else { self.action_url(camera, n).unwrap_or_default().to_string() };
+        self.set_action(camera, n, Some(url), Some(label.trim().to_string()), confirm);
+    }
 }
 
 impl Source {
@@ -1057,6 +1065,31 @@ labels = \"dog\",cat, \"\"
         c.set_action("gate", 5, Some("http://h/5".into()), None, true);
         c.set_action("yard", 5, Some("http://h/5".into()), None, true);
         assert_eq!(c, before);
+    }
+
+    #[test]
+    fn set_action_typed_saves_valid_urls_and_keeps_the_old_one_for_others() {
+        let mut c = Config::from_ini(&IniDoc::parse(
+            "[camera.gate]
+action1_url = http://h/old
+action2_url = http://h/two
+",
+        ));
+        // Valid: saved trimmed, label trimmed too.
+        c.set_action_typed("gate", 3, "  https://h/new  ", "  Light ", false);
+        assert_eq!(c.action_url("gate", 3), Some("https://h/new"));
+        assert_eq!(c.camera("gate").unwrap().action(3).unwrap().label.as_deref(), Some("Light"));
+        // Not valid: the URL saved before stays (none where there was none); the rest is taken.
+        c.set_action_typed("gate", 1, "homeassistant.local/x", "Gate", true);
+        c.set_action_typed("gate", 4, "ftp://h/x", "", true);
+        assert_eq!((c.action_url("gate", 1), c.action_url("gate", 4)), (Some("http://h/old"), None));
+        assert_eq!(c.camera("gate").unwrap().action(1).unwrap().label.as_deref(), Some("Gate"));
+        // Empty: no button; a blank label is none.
+        c.set_action_typed("gate", 2, "  ", " ", true);
+        assert_eq!(c.camera("gate").unwrap().action(2), Some(&ActionCfg::default()));
+        // Nothing set for an unknown camera: no section.
+        c.set_action_typed("yard", 1, "", "", true);
+        assert!(c.camera("yard").is_none());
     }
 
     #[test]

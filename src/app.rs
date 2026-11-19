@@ -1166,7 +1166,7 @@ impl App {
             }
             settings::ID_ACTION_FOR if code == CBN_SELCHANGE => {
                 if let Some(s) = self.settings.as_mut() {
-                    s.switch_action_camera();
+                    s.switch_action_camera(&self.cfg);
                 }
                 self.settings_changed();
             }
@@ -1185,6 +1185,7 @@ impl App {
     fn settings_changed(&mut self) {
         let Some(s) = self.settings.as_mut() else { return };
         s.update_enabled();
+        s.show_action_error(&self.cfg, None);
         let (draft, _) = s.read(&self.cfg);
         s.update_objects(&draft);
         if &draft == self.vcfg() {

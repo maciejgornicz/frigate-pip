@@ -371,6 +371,8 @@ pub struct Strings {
     pub action_ask: &'static str,
     /// An action's row in the settings tab ("Action 2"); {0} = its number.
     pub action_row: &'static str,
+    /// The error line under the action rows: {0} = the row ("Action 2"), {1} = the reason.
+    pub action_row_error: &'static str,
     /// The confirmation checkbox in an action's row (a noun: "Confirmation").
     pub action_confirm_short: &'static str,
 
@@ -513,6 +515,7 @@ mod tests {
                 (en.update_balloon_title, s.update_balloon_title),
                 (en.action_ask, s.action_ask),
                 (en.action_row, s.action_row),
+                (en.action_row_error, s.action_row_error),
             ];
             for (a, b) in pairs {
                 for i in 0..4 {

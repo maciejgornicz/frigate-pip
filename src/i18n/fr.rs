@@ -198,11 +198,12 @@ pub static STRINGS: Strings = Strings {
     action_url: "URL",
     action_label: "Texte du bouton",
     action_confirm: "Demander une confirmation (deux clics)",
-    action_note: "Le bouton envoie une requête HTTP POST à cette URL, p. ex. un webhook Home Assistant. Quiconque connaît l’URL peut déclencher l’action : gardez le webhook accessible uniquement depuis le réseau local. ✓ signifie que la requête a été reçue, pas que le portail s’est ouvert.",
+    action_note: "Chaque bouton envoie une requête HTTP POST à son URL, p. ex. un webhook Home Assistant. Quiconque connaît une URL peut déclencher son action : gardez les webhooks accessibles uniquement depuis le réseau local. ✓ signifie que la requête a été reçue, pas que le portail s’est ouvert.",
     action_bad_url: "Ce n’est pas une adresse http:// ou https:// valide.",
     action_default: "Action",
     action_ask: "{0} ?",
     action_row: "Action {0}",
+    action_row_error: "{0} : {1}",
     action_confirm_short: "Confirmation",
 
     console_keys: "q quitter · x fermer les fenêtres · p pause · m son · r relecture · a action · 1–9 afficher une caméra",
