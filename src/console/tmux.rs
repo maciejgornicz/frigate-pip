@@ -11,7 +11,7 @@ use crate::config::Corner;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
@@ -53,6 +53,14 @@ fn lock_held(path: &PathBuf) -> bool {
             true
         }
     }
+}
+
+/// The file a viewer keeps next to its lock while an action button is busy: the background
+/// process then leaves the popup open past its time.
+pub fn busy_path(lock: &Path) -> PathBuf {
+    let mut name = lock.as_os_str().to_owned();
+    name.push(".busy");
+    PathBuf::from(name)
 }
 
 /// Viewer side: takes the lock for as long as the returned file lives.
@@ -112,6 +120,7 @@ impl Tmux {
         if lock_held(&popup.lock) {
             let _ = Command::new("tmux").args(["display-popup", "-C", "-c", &popup.client]).stderr(Stdio::null()).status();
         }
+        let _ = std::fs::remove_file(busy_path(&popup.lock));
         let _ = std::fs::remove_file(&popup.lock);
         crate::log!("tmux popup {id} closed");
     }
@@ -197,11 +206,17 @@ impl Output for Tmux {
         let alive = !p.seen && p.opened.elapsed().as_secs() < 5;
         if !alive {
             if let Some(p) = self.popups.remove(&id) {
+                let _ = std::fs::remove_file(busy_path(&p.lock));
                 let _ = std::fs::remove_file(&p.lock);
                 crate::log!("tmux popup {id} closed by the user");
             }
         }
         alive
+    }
+
+    fn kept_open(&self, id: u64) -> bool {
+        // Only while the viewer runs: a viewer that died leaves no popup to keep.
+        self.popups.get(&id).is_some_and(|p| busy_path(&p.lock).exists() && lock_held(&p.lock))
     }
 }
 
@@ -223,6 +238,11 @@ mod tests {
     fn shell_quoting() {
         assert_eq!(quote("a b"), "'a b'");
         assert_eq!(quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn the_busy_file_sits_beside_the_lock() {
+        assert_eq!(busy_path(Path::new("/run/user/1000/frigate-pip-7/view-3.lock")), Path::new("/run/user/1000/frigate-pip-7/view-3.lock.busy"));
     }
 
     #[test]
