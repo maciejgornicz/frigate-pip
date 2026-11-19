@@ -4,7 +4,7 @@
 //! testing) is handled by `App` on the UI thread.
 
 use crate::action::valid_url;
-use crate::config::{Config, Corner, LiveMode, Source, StreamPref, TriggerMode};
+use crate::config::{Config, Corner, LiveMode, Source, StreamPref, TriggerMode, ACTIONS};
 use crate::frigate::CameraInfo;
 use crate::i18n::{self, Lang};
 use crate::view::{choices, label_text, listed};
@@ -76,13 +76,13 @@ pub const ID_APPLY: i32 = 502;
 pub const ID_TAB: i32 = 503;
 pub const ID_HELP: i32 = 504;
 pub const ID_SUPPORT: i32 = 505;
-/// Whose action button the action controls show.
+/// Whose action buttons the action rows show.
 pub const ID_ACTION_FOR: i32 = 600;
-pub const ID_ACTION_URL: i32 = 601;
-pub const ID_ACTION_LABEL: i32 = 602;
-pub const ID_ACTION_CONFIRM: i32 = 603;
-/// Why the URL above is not saved (empty while it is valid).
+/// Why a URL in the action rows is not saved (empty while they are all valid).
 pub const ID_ACTION_ERR: i32 = 604;
+/// The action rows: action `n` (1 to `ACTIONS`) has its URL, label and confirmation at
+/// `ID_ACTION_ROW + 3 * (n - 1)` + 0, 1 and 2 (see `url_id`, `label_id`, `confirm_id`).
+pub const ID_ACTION_ROW: i32 = 610;
 /// The tab with the action buttons.
 const PAGE_ACTIONS: usize = 4;
 /// Text colour of `ID_ACTION_ERR` (dark red, 0x00BBGGRR).
@@ -248,8 +248,9 @@ fn stream_name(s: StreamPref) -> &'static str {
     }
 }
 
-/// Background for `WM_CTLCOLORSTATIC`: texts, check boxes and sliders on a tab page
-/// get the colour of the page (with visual styles it is not the window colour).
+/// Colours for `WM_CTLCOLORSTATIC`: texts, check boxes and sliders on a tab page get the
+/// background of the page (with visual styles it is not the window colour), and the reason an
+/// action URL is not saved (`ID_ACTION_ERR`) gets red text.
 pub fn pane_brush(ctl: HWND, hdc: HDC) -> Option<HBRUSH> {
     // The reason an action URL is not saved stands out in red (with either background).
     if unsafe { GetDlgCtrlID(ctl) } == ID_ACTION_ERR {
@@ -362,43 +363,45 @@ impl Default for ActionDraft {
     }
 }
 
-/// The URL of the camera's action 1 in `c`.
-// R3: all four actions of a camera; for now action 1.
-fn saved_url<'a>(c: &'a Config, camera: &str) -> Option<&'a str> {
-    c.camera(camera)?.action(1)?.url.as_deref()
-}
-
-/// Action buttons as set in the window: one for each camera of the camera list.
-// R3: all four actions of a camera; for now action 1.
+/// Action buttons as set in the window: the `ACTIONS` actions of each camera of the camera
+/// list (action `n` at index `n - 1`).
 #[derive(Clone, Debug, PartialEq)]
 struct Actions {
-    per_cam: Vec<ActionDraft>,
+    per_cam: Vec<[ActionDraft; ACTIONS]>,
 }
 
 impl Actions {
     fn from_config(c: &Config, cameras: &[(String, String)]) -> Actions {
         let per_cam = cameras
             .iter()
-            .map(|(n, _)| match c.camera(n).and_then(|o| o.action(1)) {
-                Some(a) => ActionDraft { url: a.url.clone().unwrap_or_default(), label: a.label.clone().unwrap_or_default(), confirm: a.confirm },
-                None => ActionDraft::default(),
+            .map(|(cam, _)| {
+                std::array::from_fn(|i| match c.camera(cam).and_then(|o| o.action(i + 1)) {
+                    Some(a) => ActionDraft { url: a.url.clone().unwrap_or_default(), label: a.label.clone().unwrap_or_default(), confirm: a.confirm },
+                    None => ActionDraft::default(),
+                })
             })
             .collect();
         Actions { per_cam }
     }
 
-    /// Into the settings. A URL that is not valid leaves the camera's URL in `c` as it is.
+    /// Into the settings. A URL that is not valid leaves that action's URL in `c` as it is.
     fn apply(&self, c: &mut Config, cameras: &[(String, String)]) {
-        for ((n, _), a) in cameras.iter().zip(&self.per_cam) {
-            let url = if valid_url(&a.url) { a.url.trim().to_string() } else { saved_url(c, n).unwrap_or_default().to_string() };
-            c.set_action(n, 1, Some(url), Some(a.label.trim().to_string()), a.confirm);
+        for ((cam, _), rows) in cameras.iter().zip(&self.per_cam) {
+            for (n, a) in (1..=ACTIONS).zip(rows) {
+                let url = if valid_url(&a.url) { a.url.trim().to_string() } else { c.action_url(cam, n).unwrap_or_default().to_string() };
+                c.set_action(cam, n, Some(url), Some(a.label.trim().to_string()), a.confirm);
+            }
         }
     }
 
-    /// The first camera whose URL is not valid and not the one in `saved` (a value already in
-    /// the file is the user's own business; it does not block saving the rest).
-    fn first_bad(&self, saved: &Config, cameras: &[(String, String)]) -> Option<usize> {
-        cameras.iter().zip(&self.per_cam).position(|((n, _), a)| !valid_url(&a.url) && saved_url(saved, n).map(str::trim) != Some(a.url.trim()))
+    /// The first (camera index, action number) whose URL is not valid and not the one in
+    /// `saved`, in camera order and then by number (a value already in the file is the user's
+    /// own business; it does not block saving the rest).
+    fn first_bad(&self, saved: &Config, cameras: &[(String, String)]) -> Option<(usize, usize)> {
+        cameras.iter().zip(&self.per_cam).enumerate().find_map(|(i, ((cam, _), rows))| {
+            let bad = |(n, a): &(usize, &ActionDraft)| !valid_url(&a.url) && saved.action_url(cam, *n).map(str::trim) != Some(a.url.trim());
+            (1..=ACTIONS).zip(rows).find(bad).map(|(n, _)| (i, n))
+        })
     }
 
     /// Where the camera shown at `shown` in `old` is in `new` (by name, in any case); `None`
@@ -419,6 +422,19 @@ impl Actions {
         }
         a
     }
+}
+
+/// The controls of action `n`'s row (1 to `ACTIONS`).
+fn url_id(n: usize) -> i32 {
+    ID_ACTION_ROW + 3 * (n as i32 - 1)
+}
+
+fn label_id(n: usize) -> i32 {
+    url_id(n) + 1
+}
+
+fn confirm_id(n: usize) -> i32 {
+    url_id(n) + 2
 }
 
 fn on_pane(h: HWND) -> HWND {
@@ -699,9 +715,6 @@ impl Settings {
             t.live,
             t.stream,
             t.auto_main_width,
-            t.action_camera,
-            t.action_url,
-            t.action_label,
         ];
         let lx = 28;
         let lw = captions.iter().map(|s| self.text_w(s)).max().unwrap_or(0).clamp(150, 250) + 4;
@@ -886,23 +899,39 @@ impl Settings {
         self.set_id_of_last(ID_VOLUME_LBL);
         self.tip(&[l, e], t.tip_camera_volume);
 
-        // ---- Actions: one camera's button at a time
+        // ---- Actions: one camera's buttons at a time, a row for each. Its captions are short
+        // ("Action 4"), so the tab has its own caption column and the URLs get the room.
         let p = PAGE_ACTIONS;
-        let l = self.label(p, t.action_camera, lx, 52, lw);
-        let e = self.combo(Some(p), ID_ACTION_FOR, &self.action_titles(), 0, cx, 52, cw);
+        let row_caption = |n: usize| i18n::fmt(t.action_row, &[&n]);
+        let aw = (1..=ACTIONS).map(|n| self.text_w(&row_caption(n))).chain([self.text_w(t.action_camera)]).max().unwrap_or(0) + 4;
+        let ux = lx + aw + 8;
+        let kw = self.text_w(t.action_confirm_short) + 26;
+        let kx = RIGHT - kw;
+        let bw = 140;
+        let bx = kx - 10 - bw;
+        let uw = bx - 8 - ux;
+        let l = self.label(p, t.action_camera, lx, 52, aw);
+        let e = self.combo(Some(p), ID_ACTION_FOR, &self.action_titles(), 0, ux, 52, uw);
         self.tip(&[l, e], t.tip_action_camera);
+        // Column headings; the label's runs on over the check boxes (it is long in German).
+        let hu = self.label(p, t.action_url, ux, 86, uw);
+        let hb = self.label(p, t.action_label, bx, 86, RIGHT - bx);
+        self.tip(&[hu], t.tip_action_url);
+        self.tip(&[hb], t.tip_action_label);
         let shown = self.actions.per_cam.first().cloned().unwrap_or_default();
-        let l = self.label(p, t.action_url, lx, 84, lw);
-        let e = self.edit(p, ID_ACTION_URL, &shown.url, cx, 84, cw, 0);
-        self.tip(&[l, e], t.tip_action_url);
-        self.label(p, "", cx, 108, cw);
+        for (n, a) in (1..=ACTIONS).zip(shown) {
+            let y = 112 + 32 * (n as i32 - 1);
+            let l = self.label(p, &row_caption(n), lx, y, aw);
+            let u = self.edit(p, url_id(n), &a.url, ux, y, uw, 0);
+            self.tip(&[l, u], t.tip_action_url);
+            let b = self.edit(p, label_id(n), &a.label, bx, y, bw, 0);
+            self.tip(&[b], t.tip_action_label);
+            let k = self.check(Some(p), confirm_id(n), t.action_confirm_short, a.confirm, kx, y + 1, kw);
+            self.tip(&[k], t.tip_action_confirm);
+        }
+        self.label(p, "", lx, 240, full);
         self.set_id_of_last(ID_ACTION_ERR);
-        let l = self.label(p, t.action_label, lx, 136, lw);
-        let e = self.edit(p, ID_ACTION_LABEL, &shown.label, cx, 136, cw.min(240), 0);
-        self.tip(&[l, e], t.tip_action_label);
-        let e = self.check(Some(p), ID_ACTION_CONFIRM, t.action_confirm, shown.confirm, lx, 170, full);
-        self.tip(&[e], t.tip_action_confirm);
-        self.note(p, t.action_note, lx, 204, full, 64);
+        self.note(p, t.action_note, lx, 270, full, 64);
 
         // ---- bottom of the window: preview on the left, buttons on the right
         let buttons = [(IDOK.0, t.ok, true), (IDCANCEL.0, t.cancel, false), (ID_APPLY, t.apply, false), (ID_HELP, t.help, false)];
@@ -1115,11 +1144,14 @@ impl Settings {
         }
     }
 
-    /// The action buttons with the shown camera's values as the controls have them now.
+    /// The action buttons with the shown camera's rows as the controls have them now.
     fn actions_now(&self) -> Actions {
         let mut a = self.actions.clone();
-        if let Some(v) = a.per_cam.get_mut(self.action_cam) {
-            *v = ActionDraft { url: self.text(ID_ACTION_URL), label: self.text(ID_ACTION_LABEL), confirm: self.checked(ID_ACTION_CONFIRM) };
+        if let Some(rows) = a.per_cam.get_mut(self.action_cam) {
+            *rows = std::array::from_fn(|i| {
+                let n = i + 1;
+                ActionDraft { url: self.text(url_id(n)), label: self.text(label_id(n)), confirm: self.checked(confirm_id(n)) }
+            });
         }
         a
     }
@@ -1135,27 +1167,30 @@ impl Settings {
         self.show_action();
     }
 
-    /// Fills the action controls from the shown camera's values.
+    /// Fills the action rows from the shown camera's values.
     fn show_action(&self) {
-        let a = self.actions.per_cam.get(self.action_cam).cloned().unwrap_or_default();
-        unsafe {
-            let _ = SetWindowTextW(self.item(ID_ACTION_URL), &wide(&a.url));
-            let _ = SetWindowTextW(self.item(ID_ACTION_LABEL), &wide(&a.label));
+        let rows = self.actions.per_cam.get(self.action_cam).cloned().unwrap_or_default();
+        for (n, a) in (1..=ACTIONS).zip(rows) {
+            unsafe {
+                let _ = SetWindowTextW(self.item(url_id(n)), &wide(&a.url));
+                let _ = SetWindowTextW(self.item(label_id(n)), &wide(&a.label));
+            }
+            self.set_checked(confirm_id(n), a.confirm);
         }
-        self.set_checked(ID_ACTION_CONFIRM, a.confirm);
         self.update_enabled();
     }
 
-    /// Before saving: a URL typed for any camera that is not valid stops it. The Actions tab
-    /// then shows that camera, the reason and the URL selected; `false` = do not save.
+    /// Before saving: a URL typed for any camera's action that is not valid stops it. The
+    /// Actions tab then shows that camera, the reason and that row's URL selected; `false` =
+    /// do not save.
     pub fn check_actions(&mut self, saved: &Config) -> bool {
-        let Some(bad) = self.actions_now().first_bad(saved, &self.cameras) else { return true };
+        let Some((cam, n)) = self.actions_now().first_bad(saved, &self.cameras) else { return true };
         self.set_page(PAGE_ACTIONS);
         unsafe {
-            let _ = SendMessageW(self.item(ID_ACTION_FOR), CB_SETCURSEL, WPARAM(bad), LPARAM(0));
+            let _ = SendMessageW(self.item(ID_ACTION_FOR), CB_SETCURSEL, WPARAM(cam), LPARAM(0));
         }
         self.switch_action_camera();
-        let url = self.item(ID_ACTION_URL);
+        let url = self.item(url_id(n));
         unsafe {
             let _ = SetFocus(url);
             let _ = SendMessageW(url, EM_SETSEL, WPARAM(0), LPARAM(-1));
@@ -1263,7 +1298,7 @@ impl Settings {
             // Without cameras there is nothing to set an action for. Disabled controls keep no
             // keyboard focus: it goes to the tabs.
             let on = !self.cameras.is_empty();
-            let ids = [ID_ACTION_FOR, ID_ACTION_URL, ID_ACTION_LABEL, ID_ACTION_CONFIRM];
+            let ids: Vec<i32> = std::iter::once(ID_ACTION_FOR).chain((1..=ACTIONS).flat_map(|n| [url_id(n), label_id(n), confirm_id(n)])).collect();
             if !on && ids.iter().any(|id| GetFocus() == self.item(*id)) {
                 let _ = SetFocus(self.tab);
             }
@@ -1274,12 +1309,17 @@ impl Settings {
         self.show_action_error();
     }
 
-    /// Under the URL: why it is not saved, or nothing while it is valid.
+    /// Under the action rows: why the first URL that is not valid is not saved ("Action 2: …"),
+    /// or nothing while they all are.
     fn show_action_error(&self) {
-        let err = if valid_url(&self.text(ID_ACTION_URL)) { "" } else { i18n::t().action_bad_url };
+        let t = i18n::t();
+        let err = (1..=ACTIONS)
+            .find(|n| !valid_url(&self.text(url_id(*n))))
+            .map(|n| format!("{}: {}", i18n::fmt(t.action_row, &[&n]), t.action_bad_url))
+            .unwrap_or_default();
         if self.text(ID_ACTION_ERR) != err {
             unsafe {
-                let _ = SetWindowTextW(self.item(ID_ACTION_ERR), &wide(err));
+                let _ = SetWindowTextW(self.item(ID_ACTION_ERR), &wide(&err));
             }
         }
     }
@@ -1420,14 +1460,23 @@ mod tests {
         ActionDraft { url: url.to_string(), label: label.to_string(), confirm }
     }
 
+    /// A camera's rows: the given actions (by number), the others empty.
+    fn rows(set: &[(usize, ActionDraft)]) -> [ActionDraft; ACTIONS] {
+        std::array::from_fn(|i| set.iter().find(|(n, _)| *n == i + 1).map(|(_, a)| a.clone()).unwrap_or_default())
+    }
+
+    fn view(n: usize, label: Option<&str>, confirm: bool) -> ActionView<'_> {
+        ActionView { n, label, confirm }
+    }
+
     #[test]
     fn actions_roundtrip_through_the_store() {
         let c = Config::from_ini(&IniDoc::parse(
-            "[camera.Gate]\naction1_url = http://h/api/webhook/a\naction1_label = Open\naction1_confirm = false\n[camera.yard]\nlabels = dog\n",
+            "[camera.Gate]\naction1_url = http://h/a\naction1_label = Open\naction1_confirm = false\naction3_url = http://h/c\n[camera.yard]\nlabels = dog\n",
         ));
         let a = Actions::from_config(&c, &cams());
-        // The section's name in any case; a camera without values: no URL, confirmation on.
-        assert_eq!(a.per_cam, [act("http://h/api/webhook/a", "Open", false), act("", "", true)]);
+        // The section's name in any case; actions without values: no URL, confirmation on.
+        assert_eq!(a.per_cam, [rows(&[(1, act("http://h/a", "Open", false)), (3, act("http://h/c", "", true))]), rows(&[])]);
         assert_eq!(ActionDraft::default(), act("", "", true));
         let mut back = c.clone();
         a.apply(&mut back, &cams());
@@ -1435,57 +1484,63 @@ mod tests {
     }
 
     #[test]
-    fn empty_url_removes_the_button() {
-        let mut c = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/x\naction1_label = Gate\n"));
+    fn empty_url_removes_that_button_only() {
+        let mut c = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/x\naction2_url = http://h/y\naction2_label = Light\n"));
         let mut a = Actions::from_config(&c, &cams());
-        a.per_cam[0].url = "  ".into();
+        a.per_cam[0][1].url = "  ".into();
         a.apply(&mut c, &cams());
-        assert!(c.actions_for("gate").is_empty());
+        assert_eq!(c.actions_for("gate"), [view(1, None, true)]);
         // The label stays for when a URL comes back.
-        assert_eq!(c.camera("gate").unwrap().action(1).unwrap().label.as_deref(), Some("Gate"));
+        assert_eq!(c.camera("gate").unwrap().action(2).unwrap().label.as_deref(), Some("Light"));
     }
 
     #[test]
-    fn a_camera_without_values_gets_no_section() {
+    fn rows_with_gaps_are_saved_by_number() {
         let mut doc = IniDoc::parse("[trigger]\nlabels = person\n");
         let mut c = Config::from_ini(&doc);
         let mut a = Actions::from_config(&c, &cams());
-        a.per_cam[1] = act(" http://h/api/webhook/y ", " Light ", true);
+        a.per_cam[1] = rows(&[(2, act(" http://h/api/webhook/y ", " Light ", true)), (4, act("https://h/z", "", false))]);
         a.apply(&mut c, &cams());
         crate::config::write_all(&c, &mut doc);
+        // A camera without values gets no section; unused numbers get no keys.
         assert!(!doc.sections().iter().any(|s| s == "camera.gate"), "{}", doc.to_text());
+        assert_eq!(doc.get("camera.yard", "action1_url"), None);
         let back = Config::from_ini(&doc);
-        assert_eq!(back.action_url("yard", 1), Some("http://h/api/webhook/y"), "trimmed");
-        assert_eq!(back.actions_for("yard"), [ActionView { n: 1, label: Some("Light"), confirm: true }], "trimmed");
-        assert_eq!(doc.get("camera.yard", "action1_confirm"), None, "the default is not written");
+        assert_eq!((back.action_url("yard", 2), back.action_url("yard", 4)), (Some("http://h/api/webhook/y"), Some("https://h/z")), "trimmed");
+        assert_eq!(back.actions_for("yard"), [view(2, Some("Light"), true), view(4, None, false)]);
+        assert_eq!(doc.get("camera.yard", "action2_confirm"), None, "the default is not written");
     }
 
     #[test]
-    fn an_invalid_url_keeps_the_saved_one() {
-        let saved = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/old\n"));
-        let a = Actions { per_cam: vec![act("homeassistant.local/api/webhook/x", "Gate", true), act("ftp://h/x", "", true)] };
+    fn an_invalid_url_keeps_the_saved_one_of_its_row() {
+        let saved = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/old1\naction2_url = http://h/old2\n"));
+        let gate = rows(&[(1, act("homeassistant.local/x", "Gate", true)), (2, act("http://h/new2", "", true)), (3, act("ftp://h/x", "", true))]);
+        let a = Actions { per_cam: vec![gate, rows(&[(1, act("http://h/a b", "", true))])] };
         let mut c = saved.clone();
         a.apply(&mut c, &cams());
-        // The old URL stays (none for yard); the camera's other values are taken.
-        assert_eq!(c.action_url("gate", 1), Some("http://h/old"));
-        assert_eq!(c.actions_for("gate"), [ActionView { n: 1, label: Some("Gate"), confirm: true }]);
+        // Each row on its own: the old URL stays (none where there was none), valid ones are taken.
+        assert_eq!((1..=ACTIONS).map(|n| c.action_url("gate", n)).collect::<Vec<_>>(), [Some("http://h/old1"), Some("http://h/new2"), None, None]);
+        assert_eq!(c.actions_for("gate")[0], view(1, Some("Gate"), true), "the row's other values are taken");
         assert!(c.actions_for("yard").is_empty());
     }
 
     #[test]
-    fn a_typed_invalid_url_stops_saving_first_one_first() {
+    fn the_first_typed_invalid_url_stops_saving_in_camera_then_number_order() {
         let saved = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/old\n"));
-        let mut a = Actions { per_cam: vec![act("homeassistant.local/x", "", true), act("ftp://h/x", "", true)] };
-        assert_eq!(a.first_bad(&saved, &cams()), Some(0));
-        a.per_cam[0].url = "https://h/new".into();
-        assert_eq!(a.first_bad(&saved, &cams()), Some(1));
-        a.per_cam[1].url.clear();
+        let bad = || act("homeassistant.local/x", "", true);
+        let mut a = Actions { per_cam: vec![rows(&[(2, bad()), (4, bad())]), rows(&[(1, bad())])] };
+        assert_eq!(a.first_bad(&saved, &cams()), Some((0, 2)));
+        a.per_cam[0][1].url = "https://h/new".into();
+        assert_eq!(a.first_bad(&saved, &cams()), Some((0, 4)));
+        a.per_cam[0][3].url.clear();
+        assert_eq!(a.first_bad(&saved, &cams()), Some((1, 1)), "then the next camera");
+        a.per_cam[1][0].url.clear();
         assert_eq!(a.first_bad(&saved, &cams()), None, "empty = no button, which is valid");
     }
 
     #[test]
     fn a_bad_url_already_in_the_file_does_not_stop_saving() {
-        let odd = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/a b\n"));
+        let odd = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/ok\naction3_url = http://h/a b\n"));
         let a = Actions::from_config(&odd, &cams());
         assert_eq!(a.first_bad(&odd, &cams()), None);
         let mut c = odd.clone();
@@ -1494,12 +1549,14 @@ mod tests {
     }
 
     #[test]
-    fn typed_actions_follow_their_camera_into_a_new_list() {
-        let c = Config::from_ini(&IniDoc::parse("[camera.drive]\naction1_url = http://h/d\n"));
-        let typed = Actions { per_cam: vec![act("http://h/g", "Gate", false), act("bad url", "", true)] };
+    fn typed_rows_follow_their_camera_into_a_new_list() {
+        let c = Config::from_ini(&IniDoc::parse("[camera.drive]\naction2_url = http://h/d\n"));
+        let gate = rows(&[(1, act("http://h/g", "Gate", false)), (4, act("http://h/l", "Light", true))]);
+        let yard = rows(&[(3, act("bad url", "", true))]);
+        let typed = Actions { per_cam: vec![gate, yard.clone()] };
         let new = vec![("drive".to_string(), "Drive".to_string()), ("Yard".to_string(), "Yard".to_string())];
         let a = typed.for_cameras(&cams(), &new, &c);
-        assert_eq!(a.per_cam, [act("http://h/d", "", true), act("bad url", "", true)]);
+        assert_eq!(a.per_cam, [rows(&[(2, act("http://h/d", "", true))]), yard]);
     }
 
     #[test]
@@ -1512,5 +1569,12 @@ mod tests {
         // Gone, or nothing was shown (no cameras before).
         assert_eq!(Actions::shown_after(&cams(), 0, &[pair("drive")]), None);
         assert_eq!(Actions::shown_after(&[], 0, &new), None);
+    }
+
+    #[test]
+    fn action_rows_have_their_own_ids() {
+        let ids: Vec<i32> = (1..=ACTIONS).flat_map(|n| [url_id(n), label_id(n), confirm_id(n)]).collect();
+        assert_eq!(ids, (ID_ACTION_ROW..ID_ACTION_ROW + 3 * ACTIONS as i32).collect::<Vec<_>>());
+        assert!(ids.iter().all(|id| *id != ID_ACTION_FOR && *id != ID_ACTION_ERR && *id < 700));
     }
 }
