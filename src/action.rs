@@ -71,8 +71,6 @@ impl Button {
 
     /// Drops an armed first click without sending (another action of the window was pressed,
     /// and only one may be armed); no effect in any other state.
-    // R2: used once the Windows window shows all four actions.
-    #[cfg_attr(windows, allow(dead_code))]
     pub fn disarm(&mut self) {
         if let State::Armed(_) = self.state {
             self.state = State::Idle;
@@ -131,6 +129,55 @@ impl Button {
             s => s,
         }
     }
+}
+
+/// A window's action buttons by number: `[n - 1]` is action `n`; `None` = it has no URL.
+pub type Buttons = [Option<Button>; crate::config::ACTIONS];
+
+/// Matches a window's buttons to its actions, given as (number, ask for confirmation), only
+/// those with a URL: a button goes when its action loses its URL, a new one comes when an
+/// action appears or its confirmation setting changes, and one whose action only got another
+/// label or URL is kept (with whatever it is doing).
+pub fn refresh(buttons: &mut Buttons, actions: &[(usize, bool)]) {
+    for (i, b) in buttons.iter_mut().enumerate() {
+        match (actions.iter().find(|a| a.0 == i + 1).map(|a| a.1), &*b) {
+            (None, _) => *b = None,
+            (Some(confirm), Some(old)) if old.confirm() == confirm => {}
+            (Some(confirm), _) => *b = Some(Button::new(confirm)),
+        }
+    }
+}
+
+/// A click on action `n`: an armed first click of any other action of the window is dropped
+/// (only one may be armed), then `n` is pressed. `Some(ticket)` = send action `n` now, as
+/// `Button::press`; `None` also when `n` has no button.
+pub fn press(buttons: &mut Buttons, n: usize, now: Instant) -> Option<u32> {
+    let i = n.checked_sub(1).filter(|&i| buttons.get(i).is_some_and(Option::is_some))?;
+    for (k, b) in buttons.iter_mut().enumerate() {
+        if let (true, Some(b)) = (k != i, b) {
+            b.disarm();
+        }
+    }
+    buttons[i].as_mut()?.press(now)
+}
+
+/// Any of the buttons is armed, sending or showing a result: the window must not close.
+pub fn any_busy(buttons: &Buttons, now: Instant) -> bool {
+    buttons.iter().flatten().any(|b| b.busy(now))
+}
+
+/// The earliest moment one of the buttons' looks changes by itself (see `Button::next_change`).
+pub fn next_change(buttons: &Buttons, now: Instant) -> Option<Instant> {
+    buttons.iter().flatten().filter_map(|b| b.next_change(now)).min()
+}
+
+/// Where an action's pill was drawn: (number, (left, top, right, bottom) in pixels).
+pub type Placed = (usize, (i32, i32, i32, i32));
+
+/// The action whose pill holds the point, given where the pills were drawn as (number, (left,
+/// top, right, bottom)); right and bottom are outside.
+pub fn hit(pills: &[Placed], x: i32, y: i32) -> Option<usize> {
+    pills.iter().find(|(_, (l, t, r, b))| x >= *l && x < *r && y >= *t && y < *b).map(|(n, _)| *n)
 }
 
 /// The button's text: "Gate", "Gate?", "Gate …", "Gate ✓", "Gate ✗".
@@ -408,6 +455,72 @@ mod tests {
         let ticket = b.press(t).unwrap();
         b.finished(ticket.wrapping_add(1), true, t + ms(100));
         assert_eq!(b.look(t + ms(100)), Look::Sending);
+    }
+
+    fn buttons(confirm: [Option<bool>; crate::config::ACTIONS]) -> Buttons {
+        confirm.map(|c| c.map(Button::new))
+    }
+
+    #[test]
+    fn refresh_works_per_action_number() {
+        let t = Instant::now();
+        let mut b = buttons([Some(true), None, Some(false), Some(true)]);
+        press(&mut b, 1, t);
+        press(&mut b, 4, t + ms(10));
+        refresh(&mut b, &[(1, true), (2, false), (4, false)]);
+        assert_eq!(b[0].as_ref().map(|b| b.look(t + ms(10))), Some(Look::Idle), "1: kept, but no longer armed (4 was pressed)");
+        assert!(b[1].as_ref().is_some_and(|b| !b.confirm()), "2: appeared");
+        assert!(b[2].is_none(), "3: lost its URL");
+        assert!(b[3].as_ref().is_some_and(|b| !b.confirm() && b.look(t + ms(10)) == Look::Idle), "4: new confirmation setting, new button");
+
+        let mut b = buttons([Some(true), Some(true), None, None]);
+        press(&mut b, 2, t);
+        refresh(&mut b, &[(2, true)]);
+        assert!(b[0].is_none());
+        assert_eq!(b[1].as_ref().unwrap().look(t), Look::Armed, "kept with its state: nothing moves to another number");
+    }
+
+    #[test]
+    fn only_one_action_is_armed_at_a_time() {
+        let t = Instant::now();
+        let mut b = buttons([Some(true), Some(true), Some(false), None]);
+        assert_eq!(press(&mut b, 1, t), None);
+        assert_eq!(press(&mut b, 2, t + ms(500)), None, "2 arms…");
+        assert_eq!(b[0].as_ref().unwrap().look(t + ms(500)), Look::Idle, "…and 1 is disarmed");
+        let ticket = press(&mut b, 3, t + ms(600)).expect("3 needs no confirmation: it sends");
+        assert_eq!(b[1].as_ref().unwrap().look(t + ms(600)), Look::Idle, "pressing 3 disarmed 2");
+        assert_eq!(press(&mut b, 2, t + ms(700)), None, "2 arms again");
+        assert_eq!(b[2].as_ref().unwrap().look(t + ms(700)), Look::Sending, "a request running is left alone");
+        b[2].as_mut().unwrap().finished(ticket, true, t + ms(800));
+        assert_eq!(press(&mut b, 4, t + ms(900)), None, "no button 4");
+        assert_eq!(b[1].as_ref().unwrap().look(t + ms(900)), Look::Armed, "a click on nothing disarms nothing");
+        assert!(press(&mut b, 2, t + ms(1200)).is_some(), "the second click sends 2");
+        assert_eq!(b[2].as_ref().unwrap().look(t + ms(1200)), Look::Done, "results are left alone");
+        assert_eq!(press(&mut b, 0, t), None);
+        assert_eq!(press(&mut b, 9, t), None);
+    }
+
+    #[test]
+    fn busy_and_next_change_cover_all_buttons() {
+        let t = Instant::now();
+        let mut b = buttons([None, Some(true), Some(false), None]);
+        assert!(!any_busy(&b, t));
+        assert_eq!(next_change(&b, t), None);
+        press(&mut b, 3, t);
+        press(&mut b, 2, t + ms(1000));
+        assert!(any_busy(&b, t + ms(1000)));
+        assert_eq!(next_change(&b, t + ms(1000)), Some(t + ms(4000)), "2's arming expires before 3's request");
+    }
+
+    #[test]
+    fn the_pill_under_the_point_names_its_action() {
+        let pills = [(1, (8, 100, 60, 126)), (3, (66, 100, 120, 126))];
+        assert_eq!(hit(&pills, 8, 100), Some(1));
+        assert_eq!(hit(&pills, 59, 125), Some(1));
+        assert_eq!(hit(&pills, 60, 110), None, "the gap");
+        assert_eq!(hit(&pills, 70, 110), Some(3), "by number, not by place");
+        assert_eq!(hit(&pills, 70, 126), None);
+        assert_eq!(hit(&[], 10, 110), None);
     }
 
     #[test]

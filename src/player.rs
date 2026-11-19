@@ -1,6 +1,6 @@
 //! PiP window thread: an instant snapshot, then live video.
 
-use crate::action::Look;
+use crate::action::{self, Look};
 use crate::audio::{AudioMsg, AudioTrack, Sound};
 use crate::client::Frigate;
 use crate::config::LiveMode;
@@ -56,10 +56,11 @@ pub struct Shared {
     replay: AtomicU8,
     /// The replay button was pressed; the player starts or stops the replay.
     replay_pressed: AtomicBool,
-    /// The action button's text and look (set by the UI thread); `None` = no button.
-    action: Mutex<Option<(String, Look)>>,
-    /// Where the renderer drew the action button (client pixels), for the UI thread's hit-test.
-    action_rect: Mutex<Option<(i32, i32, i32, i32)>>,
+    /// The action buttons: (number, text, look), set by the UI thread; empty = none.
+    actions: Mutex<Vec<(usize, String, Look)>>,
+    /// Where the renderer drew the action buttons: (number, client pixels), for the UI
+    /// thread's hit-test.
+    action_rects: Mutex<Vec<action::Placed>>,
 }
 
 impl Shared {
@@ -74,8 +75,8 @@ impl Shared {
             zoom: Mutex::new(Zoom::FULL),
             replay: AtomicU8::new(0),
             replay_pressed: AtomicBool::new(false),
-            action: Mutex::new(None),
-            action_rect: Mutex::new(None),
+            actions: Mutex::new(Vec::new()),
+            action_rects: Mutex::new(Vec::new()),
         })
     }
 
@@ -119,18 +120,18 @@ impl Shared {
         self.dirty.store(true, Ordering::Relaxed);
     }
 
-    /// The action button to draw (`None` = none); redraws only when it changed.
-    pub fn set_action(&self, v: Option<(String, Look)>) {
-        let mut cur = self.action.lock().unwrap();
+    /// The action buttons to draw (empty = none); redraws only when they changed.
+    pub fn set_actions(&self, v: Vec<(usize, String, Look)>) {
+        let mut cur = self.actions.lock().unwrap();
         if *cur != v {
             *cur = v;
             self.request_redraw();
         }
     }
 
-    /// Where the action button was last drawn (client pixels), if it was.
-    pub fn action_rect(&self) -> Option<(i32, i32, i32, i32)> {
-        *self.action_rect.lock().unwrap()
+    /// Where the action buttons were last drawn: (number, client pixels).
+    pub fn action_rects(&self) -> Vec<action::Placed> {
+        self.action_rects.lock().unwrap().clone()
     }
 }
 
@@ -410,7 +411,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     // `behind`: a replayed picture this far behind live (said in the caption, even without one).
     let overlay_text = |live: bool, behind: Option<Duration>| {
         let text = if shared.overlay_on.load(Ordering::Relaxed) { shared.overlay.lock().unwrap().clone() } else { String::new() };
-        let action = shared.action.lock().unwrap().clone();
+        let actions = shared.actions.lock().unwrap().clone();
         Overlay {
             text: match behind {
                 Some(b) => crate::replay::caption(crate::i18n::t().replay, b, &text),
@@ -424,7 +425,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 (true, true) => 2,
             },
             replay: shared.replay(),
-            action,
+            actions,
             volume: shared.sound.volume.load(Ordering::Relaxed),
             zoom: shared.zoom(),
         }
@@ -438,8 +439,8 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let mut last_snapshot = Instant::now();
     let mut aspect_sent: Option<(u32, u32)> = None;
     let names = ["prebuffer", "rtsp", "replay"];
-    // Where the action button was drawn, as last told to the UI thread.
-    let mut drawn_action: Option<(i32, i32, i32, i32)> = None;
+    // Where the action buttons were drawn, as last told to the UI thread.
+    let mut drawn_actions: Vec<action::Placed> = Vec::new();
 
     while !cancel.is_set() {
         if shared.replay_pressed.swap(false, Ordering::Relaxed) {
@@ -653,9 +654,9 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         } else if shared.dirty.swap(false, Ordering::Relaxed) || r.check_resize().unwrap_or(false) {
             let _ = r.redraw(&overlay_text((shown.is_some() || mjpeg_active) && replay.is_none(), behind));
         }
-        if r.action_rect != drawn_action {
-            drawn_action = r.action_rect;
-            *shared.action_rect.lock().unwrap() = drawn_action;
+        if r.action_rects != drawn_actions {
+            drawn_actions = r.action_rects.clone();
+            *shared.action_rects.lock().unwrap() = drawn_actions.clone();
         }
 
         if shown.is_none() && !mjpeg_active && !snapshot_inflight && last_snapshot.elapsed() > Duration::from_millis(400) {
