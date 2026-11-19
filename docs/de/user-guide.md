@@ -126,6 +126,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 | **Rechtsklick** | Schließt das Fenster. |
 | **Doppelklick** | Öffnet diese Kamera in der Frigate-Weboberfläche. |
 | **Darauf zeigen** | Solange sich der Mauszeiger über dem Fenster befindet, schließt es sich nicht. Nachdem Sie die Maus wegbewegt haben, bleibt es noch mindestens 3 Sekunden geöffnet. |
+| **Aktionsschaltflächen** (unten links) | Führen die [Aktionen](#65-aktionen) der Kamera aus, z. B. das Tor öffnen oder das Licht einschalten. Sie sind immer sichtbar. Mit **Bestätigung** macht der erste Klick die Schaltfläche scharf — sie wird rot und fragt *Tor?* —, und ein zweiter Klick innerhalb von 3 s führt die Aktion aus (frühestens 0,4 s nach dem ersten, sodass ein Doppelklick sie nie auslöst); ohne Bestätigung genügt ein Klick. Danach zeigt die Schaltfläche während des Sendens *Tor …* (orange) und 2 s lang *Tor ✓* (grün: angekommen) oder *Tor ✗* (rot: fehlgeschlagen). Es ist immer nur eine Schaltfläche scharf: Ein Klick auf eine andere entschärft die erste. Ein Klick auf eine Schaltfläche heftet das Fenster nie an, verschiebt es nicht und öffnet Frigate nicht. |
 
 ### Wann schließt sich ein Fenster?
 
@@ -133,6 +134,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 - Spätestens nach der unter **höchstens** eingestellten Zahl von Sekunden, auch wenn sich das Objekt weiter bewegt.
 - Nie, solange es angeheftet ist oder sich der Mauszeiger darüber befindet.
 - Nie während einer Wiederholung; danach bleibt es noch mindestens 5 Sekunden geöffnet.
+- Nie, solange eine seiner [Aktionsschaltflächen](#65-aktionen) scharf ist, sendet oder ihr Ergebnis zeigt. Wie ein angeheftetes Fenster wird es in dieser Zeit auch nicht durch ein neues Ereignis ersetzt.
 
 ### Mehrere Kameras
 
@@ -225,12 +227,72 @@ FrigatePiP ermittelt die go2rtc-Streams jeder Kamera aus der Frigate-Konfigurati
 
 **GPU bereithalten** hält das Grafikgerät initialisiert, sodass das Video ca. 130 ms früher startet. Kosten: ca. 1 % eines CPU-Kerns im Leerlauf (Thread des Grafiktreibers).
 
-### 6.5 Unterer Fensterbereich
+### 6.5 Aktionen
+
+Die Fenster einer Kamera können bis zu vier **Aktionsschaltflächen** haben, z. B. **Tor**, um nach dem Klingeln das Tor zu öffnen, oder **Licht**, um das Licht in der Einfahrt einzuschalten. Jede Schaltfläche sendet ein HTTP-`POST` an ihre eigene URL, mit dem JSON-Inhalt `{"camera": "front_door", "action": 1}` (der Name der Kamera in Frigate und die Nummer der Aktion). Gedacht ist das für eine Home-Assistant-Automatisierung mit einem **Webhook**-Auslöser, aber jede Adresse, die eine solche Anfrage annimmt, funktioniert.
+
+| Option | Beschreibung |
+|---|---|
+| **Kamera** | Kamera, deren Fenster die Schaltflächen erhalten. Jede Kamera hat ihre eigenen vier Aktionen. |
+| **Aktion 1**–**4**: **URL** | Die Adresse, an die die Schaltfläche ihre Anfrage sendet, z. B. `http://homeassistant.local:8123/api/webhook/<webhook-id>`. Leer = keine Schaltfläche. Jede der vier Zeilen kann verwendet werden: Die Schaltflächen behalten ihre Nummern. |
+| **Beschriftung der Schaltfläche** | Text auf der Schaltfläche, z. B. *Tor* oder *Licht*. Leer = *Aktion*. |
+| **Bestätigung** | Zwei Klicks statt einem: Der erste macht die Schaltfläche scharf, der zweite innerhalb von 3 s führt die Aktion aus (siehe [Mausaktionen](#mausaktionen)). Standardmäßig eingeschaltet; für Tore, Türen und Alarmanlagen eingeschaltet lassen. |
+
+Bei einer URL, die keine gültige `http://`- oder `https://`-Adresse ist, erscheint ein roter Hinweis, der ihre Zeile nennt, und **OK** und **Übernehmen** speichern nichts, solange sie dort steht: Der Reiter zeigt dann diese Kamera mit markierter URL. (Eine URL, die schon in der Einstellungsdatei ungültig ist, hindert Sie nicht daran, den Rest zu speichern.)
+
+Die Schaltflächen stehen in einer Reihe unten links im Fenster, in der Reihenfolge ihrer Nummern. Passt die Reihe nicht, behalten kurze Beschriftungen ihre Breite und lange werden gekürzt; Schaltflächen, die gar nicht passen, entfallen, von rechts her. Sie verdecken nie die Schaltflächen oben rechts.
+
+**✓ heißt angekommen, nicht erledigt.** Eine Schaltfläche zeigt ✓, wenn ihre URL mit HTTP 2xx geantwortet hat: Home Assistant hat die Anfrage erhalten. Das sagt nicht, dass sich das Tor geöffnet hat — Home Assistant antwortet auch bei einem unbekannten Webhook mit 200, sodass auch eine vertippte URL ✓ zeigt. Achten Sie auf das Bild oder sehen Sie sich die Traces der Automatisierung in Home Assistant an. ✗ bedeutet einen Fehlerstatus, keine Verbindung oder keine Antwort innerhalb von 5 s; das Protokoll sagt, was davon.
+
+**Sicherheit.** Wer die URL einer Schaltfläche kennt, kann ihre Aktion auslösen: Die URL ist der Schlüssel zum Tor.
+
+- Lassen Sie den Webhook nur im lokalen Netz erreichbar (die Voreinstellung von Home Assistant, *Only accessible from the local network* in der englischen Oberfläche) und behalten Sie die zufällige Webhook-ID, die Home Assistant vorschlägt, statt einer leicht zu erratenden wie `tor`.
+- FrigatePiP schreibt die URL nie in sein Protokoll, nur `action front_door 1: HTTP 200` oder den Fehler. In `config.ini` steht sie als Klartext, wie die Passwörter.
+- Lassen Sie die **Bestätigung** für Tore, Türen und Alarmanlagen eingeschaltet, damit ein versehentlicher Klick nichts auslöst.
+
+**Home Assistant, eine Automatisierung pro Schaltfläche:**
+
+1. Öffnen Sie in Home Assistant *Einstellungen → Automatisierungen & Szenen* und erstellen Sie eine neue Automatisierung.
+2. Fügen Sie den Auslöser **Webhook** hinzu. Kopieren Sie seine URL mit der Kopierschaltfläche neben der Webhook-ID. Lassen Sie in den Optionen des Auslösers den Zugriff nur aus dem lokalen Netz eingeschaltet; die erlaubten Methoden müssen POST enthalten (das tun sie standardmäßig).
+3. Fügen Sie hinzu, was geschehen soll, z. B. *Schalter: Einschalten* (`switch.turn_on`) für das Torrelais oder *Licht: Umschalten* (`light.toggle`). Speichern Sie die Automatisierung.
+4. Fügen Sie in FrigatePiP die URL in das Feld **URL** einer Aktion ein, geben Sie ihr eine Beschriftung und klicken Sie auf **Übernehmen**.
+
+**Eine Automatisierung für mehrere Schaltflächen:** Geben Sie den Schaltflächen dieselbe URL; die Automatisierung unterscheidet sie an `trigger.json.action` (und die Kamera an `trigger.json.camera`). In YAML:
+
+```yaml
+triggers:
+  - trigger: webhook
+    webhook_id: <webhook-id>
+    allowed_methods: [POST]
+    local_only: true
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.json.action == 1 }}"
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: switch.gate
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.json.action == 2 }}"
+        sequence:
+          - action: light.toggle
+            target:
+              entity_id: light.driveway
+```
+
+**Die Vorschau sendet nie.** Das Vorschaufenster (**Live anzeigen**, siehe unten) zeigt die Schaltflächen so, wie Sie sie eingeben, noch vor dem Speichern, aber ein Klick darin sendet nichts: Es zeigt ✓, und das Protokoll meldet `preview, not sent`. Alle anderen Fenster verwenden nur die gespeicherten Einstellungen.
+
+Unter Linux hat die Einstellungsseite dieselben vier Zeilen pro Kamera im Abschnitt **Aktionen**; ohne Maus drückt die Taste **a** die Schaltflächen (siehe [Tasten](#tasten)).
+
+### 6.6 Unterer Fensterbereich
 
 | Element | Beschreibung |
 |---|---|
 | **Vorschau:** Kamera | Kamera für die Live-Vorschau der Einstellungen. |
-| **Live anzeigen** | Öffnet ein echtes Vorschaufenster dieser Kamera. Es übernimmt Ihre Änderungen (Ecke, Größe, Beschriftung, Stream, Audio …) sofort, noch bevor Sie sie speichern. Es ist angeheftet und zählt nicht zum Fensterlimit. |
+| **Live anzeigen** | Öffnet ein echtes Vorschaufenster dieser Kamera. Es übernimmt Ihre Änderungen (Ecke, Größe, Beschriftung, Stream, Audio, Aktionsschaltflächen …) sofort, noch bevor Sie sie speichern; seine Aktionsschaltflächen senden nie etwas. Es ist angeheftet und zählt nicht zum Fensterlimit. |
 | **OK** / **Abbrechen** / **Übernehmen** | Speichern und schließen / verwerfen / speichern und Fenster geöffnet lassen. |
 | **Hilfe** | Öffnet dieses Handbuch (auch **F1**). |
 
@@ -277,6 +339,9 @@ Alle Einstellungen werden in `%APPDATA%\FrigatePiP\config.ini` gespeichert (eine
 | | `camera_volume` | `100` | Lautstärke eines neuen Fensters, 0–100 %. |
 | | `wind_filter` | `false` | Windfilter: macht Wind am Kameramikrofon leise. |
 | `[camera.<name>]` | `labels` | *(leer = wie in `[trigger]`)* | Objekte für diese Kamera statt `labels` aus `[trigger]`, z. B. `person, car, dog`. |
+| | `action1_url` … `action4_url` | *(leer = keine Schaltfläche)* | URL der Aktion 1–4: Ihre Schaltfläche sendet dorthin ein HTTP-POST (siehe [Aktionen](#65-aktionen)). Geheim halten. |
+| | `action1_label` … `action4_label` | *(leer = Aktion)* | Text auf der Schaltfläche. |
+| | `action1_confirm` … `action4_confirm` | `true` | Zwei Klicks (der zweite innerhalb von 3 s) statt einem. |
 
 ### Einstellungen pro Kamera
 
@@ -291,9 +356,17 @@ main = front_door
 sub = front_door_sub
 ; Objects that open a window on this camera, instead of labels in [trigger]
 labels = person, car, dog, cat
+; Action buttons on this camera's windows, action1_* to action4_*
+action1_url = http://homeassistant.local:8123/api/webhook/<webhook-id>
+action1_label = Tor
+action2_url = http://homeassistant.local:8123/api/webhook/<another-webhook-id>
+action2_label = Licht
+action2_confirm = false
 ```
 
 `labels` gibt der Kamera eine eigene Objektliste: Sie ersetzt für diese Kamera `labels` aus `[trigger]`, in jedem Modus (auch für manuelle Ereignisse). Leer oder fehlend = die Liste für alle Kameras. Das Einstellungsfenster und die Einstellungsseite unter Linux setzen sie ebenfalls: Wählen Sie die Kamera über der Liste **Objekte**.
+
+`action1_*` bis `action4_*` legen die [Aktionsschaltflächen](#65-aktionen) der Kamera fest: eine Schaltfläche für jede Aktion mit URL, in der Reihenfolge der Nummern (Lücken sind erlaubt). Die Bestätigung ist eingeschaltet, außer bei `action<n>_confirm = false`. Der Reiter **Aktionen** im Einstellungsfenster und der Abschnitt **Aktionen** der Einstellungsseite unter Linux setzen sie ebenfalls.
 
 ## 8. Befehlszeile
 
@@ -319,7 +392,7 @@ FrigatePiP ist auf Englisch, Polnisch, Deutsch, Spanisch, Portugiesisch und Fran
 | Protokoll | `%APPDATA%\FrigatePiP\frigate-pip.log` (bis zu 512 KB; das vorherige wird als `frigate-pip.old.log` aufbewahrt) |
 | Autostart | Registrierungswert `FrigatePiP` in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
-**Datenschutz:** FrigatePiP verbindet sich nur mit den Adressen, die Sie eingeben (Frigate, go2rtc und der MQTT-Broker), und – sofern Sie **Nach Updates suchen** nicht ausschalten – einmal täglich mit GitHub, um nach einer neuen Version zu suchen. Es gibt keine Telemetrie, keine Konten und keine Clouddienste. Bilder werden nur angezeigt und nie gespeichert. Die Links unter **Hilfe** öffnen dieses Handbuch auf GitHub in Ihrem Browser.
+**Datenschutz:** FrigatePiP verbindet sich nur mit den Adressen, die Sie eingeben (Frigate, go2rtc, der MQTT-Broker und, wenn Sie auf eine Aktionsschaltfläche klicken, deren URL), und – sofern Sie **Nach Updates suchen** nicht ausschalten – einmal täglich mit GitHub, um nach einer neuen Version zu suchen. Es gibt keine Telemetrie, keine Konten und keine Clouddienste. Bilder werden nur angezeigt und nie gespeichert. Die Links unter **Hilfe** öffnen dieses Handbuch auf GitHub in Ihrem Browser.
 
 **Ressourcen:** Während FrigatePiP auf Erkennungen wartet, verbraucht es praktisch keine CPU-Leistung und ca. 5–10 MB Arbeitsspeicher. Video wird nach Möglichkeit von der Grafikkarte decodiert. Ohne nutzbare Grafikkarte (z. B. in manchen virtuellen Maschinen) zeichnet es mit dem Software-Renderer WARP.
 
@@ -393,7 +466,7 @@ Das Video wird vom Programm **ffmpeg** decodiert; der eigene RTSP-Client von Fri
 - Linux auf **x86_64** oder **ARM64** (Raspberry Pi 3, 4 oder 5 mit 64-Bit-System).
 - Für Desktop-Fenster: ein Desktop mit X11 oder Wayland mit XWayland (GNOME, KDE Plasma, Xfce und die meisten anderen).
 - **ffmpeg**: wird mit dem `.deb`-Paket mitinstalliert; sonst `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) oder das entsprechende Paket Ihrer Distribution.
-- Für Beschriftungen im Framebuffer: die Schriftart DejaVu (`fonts-dejavu-core`, wird normalerweise zusammen mit ffmpeg installiert).
+- Für Beschriftungen im Framebuffer und Aktionsschaltflächen in Desktop-Fenstern: die Schriftart DejaVu (`fonts-dejavu-core`, wird normalerweise zusammen mit ffmpeg installiert).
 - Für den Framebuffer: Mitgliedschaft in der Gruppe `video` (`sudo usermod -aG video $USER`, danach neu anmelden).
 - Frigate muss von diesem Rechner aus über seinen API-Port 5000 (`http://`) oder 8971 (`https://`, mit einem Frigate-Benutzer) und, für Livevideo, über den RTSP-Port 8554 von go2rtc erreichbar sein (Einzelheiten unter [Voraussetzungen](#1-voraussetzungen)).
 
@@ -439,9 +512,9 @@ Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rah
 - **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie. Ein zweiter Start (oder `frigate-pip --settings`) öffnet die Einstellungen der laufenden Kopie.
 - **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
 - **Symbol im Infobereich:** mit demselben Menü wie unter Windows (siehe [Das Tray-Symbol](#4-das-tray-symbol)); seine Farbe zeigt den Zustand: blau — verbunden, grau — nicht verbunden, orange — pausiert. Es erscheint unter KDE Plasma, Xfce, Cinnamon, MATE und Budgie sowie unter GNOME mit der Erweiterung AppIndicator (in Ubuntu enthalten).
-- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, ⟲ wiederholt den Beginn des Ereignisses, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, und ein Fenster unter der Maus schließt sich nicht.
+- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, ⟲ wiederholt den Beginn des Ereignisses, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, die Aktionsschaltflächen unten links führen die [Aktionen](#65-aktionen) der Kamera aus, und ein Fenster unter der Maus schließt sich nicht. Die Aktionsschaltflächen brauchen eine Schriftart für Beschriftungen (`fonts-dejavu-core`); ohne sie haben die Fenster keine Schaltflächen, und das Protokoll meldet es einmal.
 - **Fensteroptionen:** `topmost` (bei `false` sind die Fenster gewöhnliche Fenster, die andere verdecken können), `sound` (der Benachrichtigungston des Desktops) und `skip_fullscreen` (nichts, solange das aktive Fenster im Vollbild ist) wirken wie unter Windows.
-- **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben).
+- **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben). Der Abschnitt **Aktionen** nach **Video & Audio** hat dieselben vier Zeilen pro Kamera wie der Reiter unter Windows (siehe [Aktionen](#65-aktionen)); ist eine eingegebene URL ungültig, wird nichts gespeichert, und die Seite zeigt, welche Zeile falsch ist.
 
 ### tmux-Popups
 
@@ -453,8 +526,8 @@ In diesem Modus hat FrigatePiP kein eigenes Fenster: Es wartet im Hintergrund au
 2. Öffnen Sie tmux für Ihre eigene Arbeit — `tmux` startet eine neue Sitzung — und arbeiten Sie dort. Die Popups erscheinen über diesem Fenster.
 
 - Zum Beenden von FrigatePiP: `tmux kill-session -t frigate-pip`. Um seine Tasten zu verwenden (Pause, Kamera anzeigen): `tmux attach -t frigate-pip`.
-- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein. **r** wiederholt den Beginn des Ereignisses (ab dem Öffnen des Popups).
-- tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen).
+- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein. **r** wiederholt den Beginn des Ereignisses (ab dem Öffnen des Popups). **a** (und eine Ziffer) drückt die Aktionsschaltflächen der Kamera des Popups, wie im Terminal (siehe [Tasten](#tasten)). Ein Popup behält die Einstellungen, mit denen es geöffnet wurde; inzwischen gespeicherte Einstellungen gelten ab dem nächsten Popup.
+- tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen). Solange eine Aktionsschaltfläche des Popups scharf ist, sendet oder ihr Ergebnis zeigt, bleibt das Popup offen, und eine neue Erkennung wird übersprungen.
 - Für die vollen Farben des Bildes muss tmux 24-Bit-Farbe weitergeben: Fügen Sie `set -as terminal-features ",xterm-256color:RGB"` zu `~/.tmux.conf` hinzu (verwenden Sie dabei Ihren `$TERM` außerhalb von tmux) und starten Sie tmux neu. FrigatePiP schreibt diesen Hinweis in sein Protokoll, wenn die Farben fehlen.
 
 ### Tasten
@@ -468,7 +541,10 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 | **p** | Benachrichtigungen pausieren / fortsetzen. |
 | **m** | Ton aus / ein (bei `camera_audio = true`) für alle Fenster, auch später geöffnete; die Beschriftung zeigt dann *Ton aus*. |
 | **r** | Den Beginn des Ereignisses in allen Fenstern wiederholen (siehe [Mausaktionen](#mausaktionen)); erneut: zurück zum Livevideo. |
-| **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). |
+| **a** | Drückt eine [Aktionsschaltfläche](#65-aktionen) des neuesten Fensters, dessen Kamera Aktionen hat. Bei einer Aktion drückt **a** sie (mit Bestätigung: **a** und innerhalb von 3 s noch einmal **a**). Bei mehreren listet **a** sie 3 s lang in der Beschriftung auf, z. B. *1 Tor · 2 Licht*; eine Ziffer wählt dann diese Aktion, statt eine Kamera anzuzeigen, und mit Bestätigung führt dieselbe Ziffer sie beim zweiten Mal aus. Die Beschriftung zeigt den Zustand: *Tor?*, *Tor …*, *Tor ✓* oder *Tor ✗*. |
+| **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). Solange die Auswahl von **a** offen ist: die Aktion mit dieser Nummer. |
+
+Die Taste **a** und die Ziffern ihrer Auswahl wirken etwa 150 ms nach dem Drücken. Ein Terminal meldet nicht, wann eine Taste losgelassen wird; FrigatePiP wartet daher ab, ob die Taste gehalten wird: Eine gehaltene Taste zählt einmal und bestätigt nie, und zwei Anschläge innerhalb von 150 ms zählen gar nicht. Das setzt die üblichen Einstellungen der Tastenwiederholung voraus (eine Wiederholung schneller als alle 150 ms, wie Desktops und die Linux-Konsole sie standardmäßig haben).
 
 ### Befehlszeile
 
