@@ -359,10 +359,6 @@ pub struct Strings {
     pub action_camera: &'static str,
     pub action_url: &'static str,
     pub action_label: &'static str,
-    /// The long form ("Ask for confirmation (two clicks)"), for the Linux settings page; the
-    /// Windows tab's rows use `action_confirm_short`.
-    #[cfg_attr(windows, allow(dead_code))]
-    pub action_confirm: &'static str,
     pub action_note: &'static str,
     pub action_bad_url: &'static str,
     /// The button's text when the camera has no label.

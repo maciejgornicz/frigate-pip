@@ -197,7 +197,6 @@ pub static STRINGS: Strings = Strings {
     action_camera: "Câmara",
     action_url: "URL",
     action_label: "Texto do botão",
-    action_confirm: "Pedir confirmação (dois cliques)",
     action_note: "Cada botão envia um HTTP POST para o seu URL, p. ex. um webhook do Home Assistant. Quem souber um URL pode executar a sua ação: deixe os webhooks acessíveis apenas na rede local. ✓ significa que o pedido foi recebido, não que o portão se abriu.",
     action_bad_url: "Não é um endereço http:// ou https:// válido.",
     action_default: "Ação",

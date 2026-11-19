@@ -489,8 +489,9 @@ mod tests {
         p.key_a(1, &[1, 2], t + ms(150));
         assert!(p.key(b'1', t + ms(1000)));
         assert_eq!(p.next_settled(t + ms(1150)), Some(Key::Digit(1, 1)));
-        p.pressed(false, t + ms(1150)); // it sent: the choice ends
-                                        // Auto-repeat from 500 ms after the press, every 33 ms: all swallowed, nothing counts.
+        // It sent: the choice ends.
+        p.pressed(false, t + ms(1150));
+        // Auto-repeat from 500 ms after the press, every 33 ms: all swallowed, nothing counts.
         for at in (1500..=2500).step_by(33) {
             assert!(p.key(b'1', t + ms(at)), "byte at {at} ms shows no camera");
         }
