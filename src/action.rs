@@ -40,8 +40,8 @@ enum State {
 pub struct Button {
     confirm: bool,
     state: State,
-    /// The current request's ticket; a new one for every send and `reset`, so a late result
-    /// of an older request is dropped.
+    /// The current request's ticket; a new one for every send, so a late result of an older
+    /// request is dropped.
     ticket: u32,
 }
 
@@ -76,19 +76,11 @@ impl Button {
     }
 
     /// The request with `ticket` has ended: `ok` = HTTP 2xx. Ignored unless that request is
-    /// still the one being sent (not reset, replaced or past `SENDING_MAX`).
+    /// still the one being sent (not replaced or past `SENDING_MAX`).
     pub fn finished(&mut self, ticket: u32, ok: bool, now: Instant) {
         if ticket == self.ticket && matches!(self.current(now), State::Sending(_)) {
             self.state = State::Result(ok, now);
         }
-    }
-
-    /// Back to idle without sending (e.g. the settings preview changed the action); the result
-    /// of a request still running is dropped. A change to `confirm` needs a new `Button`.
-    #[cfg_attr(windows, allow(dead_code))] // the Windows preview shows "done" instead
-    pub fn reset(&mut self) {
-        self.ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
-        self.state = State::Idle;
     }
 
     /// Armed, sending or showing a result: the window must not close.
@@ -335,27 +327,18 @@ mod tests {
     }
 
     #[test]
-    fn reset_returns_to_idle_without_sending() {
-        let t = Instant::now();
-        let mut b = Button::new(true);
-        b.press(t);
-        b.reset();
-        assert!(!b.busy(t));
-        assert_eq!(b.press(t + ms(800)), None, "idle again: the next click only arms");
-    }
-
-    #[test]
-    fn a_late_result_after_reset_is_dropped() {
+    fn a_late_result_of_an_expired_request_is_dropped() {
         let t = Instant::now();
         let mut b = Button::new(false);
         let old = b.press(t).unwrap();
-        b.reset();
-        let new = b.press(t + ms(100)).unwrap();
+        assert_eq!(b.look(t + ms(60_000)), Look::Failed, "past SENDING_MAX the request counts as failed");
+        assert_eq!(b.look(t + ms(62_000)), Look::Idle);
+        let new = b.press(t + ms(62_000)).expect("idle again: one click sends");
         assert_ne!(old, new);
-        b.finished(old, true, t + ms(200));
-        assert_eq!(b.look(t + ms(200)), Look::Sending, "the old request's result is ignored");
-        b.finished(new, false, t + ms(300));
-        assert_eq!(b.look(t + ms(300)), Look::Failed);
+        b.finished(old, true, t + ms(62_100));
+        assert_eq!(b.look(t + ms(62_100)), Look::Sending, "the old request's result is ignored");
+        b.finished(new, false, t + ms(62_200));
+        assert_eq!(b.look(t + ms(62_200)), Look::Failed);
     }
 
     #[test]
