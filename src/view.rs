@@ -16,6 +16,7 @@ pub enum Slot {
 
 /// Where to show a new event. `states`: (closing, pinned), oldest first.
 pub fn choose_slot(states: &[(bool, bool)], max: usize, replace: bool) -> Slot {
+    // `states[i].1` is `kept` (see `slot_state`): such a window is never replaced.
     if states.iter().filter(|s| !s.0).count() < max {
         return Slot::New;
     }
@@ -26,6 +27,14 @@ pub fn choose_slot(states: &[(bool, bool)], max: usize, replace: bool) -> Slot {
         Some(i) => Slot::Replace(i),
         None => Slot::Skip,
     }
+}
+
+/// A window's state for `choose_slot`: (closing, kept). A window is kept, never replaced by a new
+/// event, while pinned or busy with an action button (armed, sending or showing a result, or
+/// the `a` key's choice open for it): replacing it would close it in the middle of the request
+/// or of the confirmation.
+pub fn slot_state(closing: bool, pinned: bool, action_busy: bool) -> (bool, bool) {
+    (closing, pinned || action_busy)
 }
 
 /// Caption on the picture: camera, object, sub label, confidence and time.
@@ -60,8 +69,10 @@ pub fn choose_stream(cfg: &Config, info: Option<&CameraInfo>, camera: &str, phys
 /// plus those from the settings (so nothing is lost while Frigate is unreachable).
 pub fn choices(cams: &[CameraInfo], cfg: &Config) -> (Vec<(String, String)>, Vec<String>, Vec<String>) {
     let mut cameras: Vec<(String, String)> = cams.iter().map(|c| (c.name.clone(), c.title.clone())).collect();
-    // Cameras named in the settings: in the camera filter, and those with an object list.
-    let mut listed: Vec<(&String, &crate::config::CamOverride)> = cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty()).collect();
+    // Cameras named in the settings: in the camera filter, and those with an object list or
+    // an action button.
+    let mut listed: Vec<(&String, &crate::config::CamOverride)> =
+        cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty() || o.actions.iter().any(|a| a.url.is_some())).collect();
     listed.sort_by_key(|(n, _)| n.to_ascii_lowercase());
     let named = cfg.cameras.iter().map(|c| (c.clone(), c.clone()));
     for (c, title) in named.chain(listed.into_iter().map(|(n, o)| (n.clone(), o.name.clone().unwrap_or_else(|| n.clone())))) {
@@ -374,6 +385,24 @@ mod tests {
     }
 
     #[test]
+    fn choices_offer_cameras_with_an_action_while_frigate_is_away() {
+        let cfg = Config::from_ini(&crate::config::IniDoc::parse(
+            "[camera.gate]
+name = Gate
+action1_url = http://h/api/webhook/x
+[camera.yard]
+action4_url = http://h/api/webhook/y
+[camera.drive]
+action1_label = Drive
+action2_confirm = false
+",
+        ));
+        // Any action URL keeps the camera editable; a label or a confirmation alone is no button.
+        let (cameras, _, _) = choices(&[], &cfg);
+        assert_eq!(cameras, [("gate".to_string(), "Gate".to_string()), ("yard".to_string(), "yard".to_string())]);
+    }
+
+    #[test]
     fn slot_choice_new_replace_or_skip() {
         // (closing, pinned)
         let open2 = [(false, false), (false, false)];
@@ -387,5 +416,16 @@ mod tests {
         // closing windows take no slot and are not replaced
         assert_eq!(choose_slot(&[(true, false), (false, false)], 2, true), Slot::New);
         assert_eq!(choose_slot(&[(true, false), (false, false), (false, false)], 2, true), Slot::Replace(1));
+    }
+
+    #[test]
+    fn a_window_busy_with_an_action_is_kept_like_a_pinned_one() {
+        assert_eq!(slot_state(false, false, true), (false, true));
+        assert_eq!(slot_state(true, false, false), (true, false));
+        // The oldest window is sending a request: the next one goes instead.
+        let states = [slot_state(false, false, true), slot_state(false, false, false)];
+        assert_eq!(choose_slot(&states, 2, true), Slot::Replace(1));
+        // The single tmux popup is busy: the new event is skipped, not shown over it.
+        assert_eq!(choose_slot(&[slot_state(false, false, true)], 1, true), Slot::Skip);
     }
 }

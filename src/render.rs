@@ -1,6 +1,7 @@
 //! PiP window rendering: D3D11 swapchain, VideoProcessor for GPU frames,
 //! Direct2D for JPEG images / software frames, and a DirectWrite overlay.
 
+use crate::action::{self, Look, Shown};
 use crate::decoder::{nv12_to_bgra, Frame};
 use crate::view::Zoom;
 use std::mem::ManuallyDrop;
@@ -29,6 +30,10 @@ pub struct Overlay {
     pub sound: u8,
     /// Replay button: 0 = nothing to replay (no button), 1 = shown with the others, 2 = replaying (it stays).
     pub replay: u8,
+    /// Action buttons in number order; empty = the camera has none. Always shown.
+    pub actions: Vec<Shown>,
+    /// The action button under the mouse (its number), 0 = none.
+    pub hot_action: usize,
     /// Volume in percent (volume slider).
     pub volume: u8,
     /// The part of the picture that is shown (Ctrl + mouse wheel).
@@ -93,6 +98,13 @@ pub struct Renderer {
     grey: ID2D1SolidColorBrush,
     /// Lightens a button under the mouse.
     light: ID2D1SolidColorBrush,
+    /// The action button while sending.
+    amber: ID2D1SolidColorBrush,
+    /// The action button after a request got HTTP 2xx.
+    green: ID2D1SolidColorBrush,
+    /// Where the action buttons were last drawn: (number, client pixels); the ones that did
+    /// not fit are missing.
+    pub action_rects: Vec<action::Placed>,
     wic: IWICImagingFactory,
     size: (u32, u32),
     vp: Option<Vp>,
@@ -243,6 +255,8 @@ impl Renderer {
             let red = brush(color(0.94, 0.27, 0.27, 1.0))?;
             let grey = brush(color(0.75, 0.75, 0.75, 1.0))?;
             let light = brush(color(1.0, 1.0, 1.0, 0.3))?;
+            let amber = brush(color(0.96, 0.62, 0.04, 1.0))?;
+            let green = brush(color(0.13, 0.70, 0.33, 1.0))?;
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
@@ -284,6 +298,9 @@ impl Renderer {
                 red,
                 grey,
                 light,
+                amber,
+                green,
+                action_rects: Vec::new(),
                 wic,
                 size,
                 vp: None,
@@ -413,14 +430,15 @@ impl Renderer {
                     );
                 }
             }
-            self.draw_overlay(ov);
+            self.action_rects = self.draw_overlay(ov);
             self.d2d.EndDraw(None, None)?;
             self.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
         }
         Ok(())
     }
 
-    unsafe fn draw_overlay(&self, ov: &Overlay) {
+    /// Returns where the action buttons went: (number, client pixels).
+    unsafe fn draw_overlay(&self, ov: &Overlay) -> Vec<action::Placed> {
         self.d2d.SetTransform(&Matrix3x2::identity());
         let dpi = GetDpiForWindow(self.hwnd);
         let button = (ov.close > 0).then(|| close_button_rect(self.size.0 as i32, dpi));
@@ -432,6 +450,8 @@ impl Renderer {
             // The caption must not run under the buttons.
             self.draw_caption(ov, replay.or(sound).or(button).map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
         }
+        // Always shown, not only under the mouse; under the other buttons (they win the hit-test too).
+        let actions = self.draw_actions(ov, dpi);
         if let Some((l, t, r, b)) = button {
             let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
             let circle = D2D1_ELLIPSE { point: D2D_POINT_2F { x: cx, y: cy }, radiusX: rad, radiusY: rad };
@@ -453,6 +473,83 @@ impl Renderer {
                 self.draw_volume(slider, ov.volume);
             }
         }
+        actions
+    }
+
+    /// The action buttons: a row of pills from the bottom-left corner in number order, each
+    /// coloured by its look and lit under the mouse. Returns where they went; pills that do not
+    /// fit beside the top-right controls are left out.
+    unsafe fn draw_actions(&self, ov: &Overlay, dpi: u32) -> Vec<action::Placed> {
+        let (w, height) = (self.size.0 as i32, self.size.1 as i32);
+        let scale = dpi.max(96) as f32 / 96.0;
+        let trimming = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };
+        let mut pills = Vec::new();
+        for Shown { n, text, look } in &ov.actions {
+            let text = HSTRING::from(text.as_str());
+            let Ok(layout) = self.dwrite.CreateTextLayout(text.as_wide(), &self.font, w as f32, self.font_px * 2.0) else { continue };
+            let _ = layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            let _ = layout.SetTrimming(&trimming, None);
+            let mut m = DWRITE_TEXT_METRICS::default();
+            let _ = layout.GetMetrics(&mut m);
+            pills.push((*n, *look, layout, m));
+        }
+        let Some(text_h) = pills.iter().map(|p| p.3.height).reduce(f32::max) else { return Vec::new() };
+        // The row ends left of the top-right controls level with it: the ones the window has,
+        // shown or not, so that the pills do not change width under the mouse.
+        let (top, bottom) = crate::action::pill_band(height, text_h, scale);
+        let mut controls = vec![close_button_rect(w, dpi)];
+        if ov.sound > 0 {
+            controls.push(sound_button_rect(w, dpi));
+            controls.extend(volume_slider_rect(w, height, dpi));
+        }
+        if ov.replay > 0 {
+            controls.push(replay_button_rect(w, dpi, ov.sound > 0));
+        }
+        let right = controls.iter().filter(|c| c.1 < bottom && c.3 > top).map(|c| c.0).min().unwrap_or(w);
+        let widths: Vec<f32> = pills.iter().map(|p| p.3.width).collect();
+        let rects = crate::action::pill_row(height, &widths, text_h, scale, Some(right));
+        // `pill_row` drops pills from the right: `zip` stops at the last one it kept.
+        pills
+            .into_iter()
+            .zip(rects)
+            .map(|((n, look, layout, m), rect)| (n, self.draw_pill(&layout, m, rect, look, ov.hot_action == n, scale)))
+            .collect()
+    }
+
+    /// One action pill at `rect`, its text trimmed to fit. Returns `rect`.
+    unsafe fn draw_pill(
+        &self,
+        layout: &IDWriteTextLayout,
+        mut m: DWRITE_TEXT_METRICS,
+        rect: action::Rect,
+        look: Look,
+        hot: bool,
+        scale: f32,
+    ) -> action::Rect {
+        let (l, t, r, b) = rect;
+        let max_w = crate::action::pill_text_room(rect, scale);
+        let _ = layout.SetMaxWidth(max_w.max(1.0));
+        let _ = layout.GetMetrics(&mut m);
+        let text_w = m.width.min(max_w);
+        let h = (b - t) as f32;
+        let rr = D2D1_ROUNDED_RECT {
+            rect: D2D_RECT_F { left: l as f32, top: t as f32, right: r as f32, bottom: b as f32 },
+            radiusX: h / 2.0,
+            radiusY: h / 2.0,
+        };
+        let fill = match look {
+            Look::Idle => &self.shade,
+            Look::Armed | Look::Failed => &self.red,
+            Look::Sending => &self.amber,
+            Look::Done => &self.green,
+        };
+        self.d2d.FillRoundedRectangle(&rr, fill);
+        if hot {
+            self.d2d.FillRoundedRectangle(&rr, &self.light);
+        }
+        let origin = D2D_POINT_2F { x: (l + r) as f32 / 2.0 - text_w / 2.0 - m.left, y: (t + b) as f32 / 2.0 - m.height / 2.0 - m.top };
+        self.d2d.DrawTextLayout(origin, layout, &self.white, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        rect
     }
 
     /// A dark bar with the track and the knob at `volume` percent.

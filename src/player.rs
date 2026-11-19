@@ -1,5 +1,6 @@
 //! PiP window thread: an instant snapshot, then live video.
 
+use crate::action::{self, Shown};
 use crate::audio::{AudioMsg, AudioTrack, Sound};
 use crate::client::Frigate;
 use crate::config::LiveMode;
@@ -55,6 +56,13 @@ pub struct Shared {
     replay: AtomicU8,
     /// The replay button was pressed; the player starts or stops the replay.
     replay_pressed: AtomicBool,
+    /// The action buttons, set by the UI thread; empty = none.
+    actions: Mutex<Vec<Shown>>,
+    /// The action button under the mouse (its number), 0 = none.
+    hot_action: AtomicU8,
+    /// Where the renderer drew the action buttons: (number, client pixels), for the UI
+    /// thread's hit-test.
+    action_rects: Mutex<Vec<action::Placed>>,
 }
 
 impl Shared {
@@ -69,6 +77,9 @@ impl Shared {
             zoom: Mutex::new(Zoom::FULL),
             replay: AtomicU8::new(0),
             replay_pressed: AtomicBool::new(false),
+            actions: Mutex::new(Vec::new()),
+            hot_action: AtomicU8::new(0),
+            action_rects: Mutex::new(Vec::new()),
         })
     }
 
@@ -110,6 +121,28 @@ impl Shared {
 
     pub fn request_redraw(&self) {
         self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// The action buttons to draw (empty = none); redraws only when they changed.
+    pub fn set_actions(&self, v: Vec<Shown>) {
+        let mut cur = self.actions.lock().unwrap();
+        if *cur != v {
+            *cur = v;
+            self.request_redraw();
+        }
+    }
+
+    /// Lights the action button `n` under the mouse (0 = none).
+    pub fn set_hot_action(&self, n: usize) {
+        let n = u8::try_from(n).unwrap_or(0);
+        if self.hot_action.swap(n, Ordering::Relaxed) != n {
+            self.dirty.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Where the action buttons were last drawn: (number, client pixels).
+    pub fn action_rects(&self) -> Vec<action::Placed> {
+        self.action_rects.lock().unwrap().clone()
     }
 }
 
@@ -389,6 +422,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     // `behind`: a replayed picture this far behind live (said in the caption, even without one).
     let overlay_text = |live: bool, behind: Option<Duration>| {
         let text = if shared.overlay_on.load(Ordering::Relaxed) { shared.overlay.lock().unwrap().clone() } else { String::new() };
+        let actions = shared.actions.lock().unwrap().clone();
         Overlay {
             text: match behind {
                 Some(b) => crate::replay::caption(crate::i18n::t().replay, b, &text),
@@ -402,6 +436,8 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 (true, true) => 2,
             },
             replay: shared.replay(),
+            actions,
+            hot_action: shared.hot_action.load(Ordering::Relaxed).into(),
             volume: shared.sound.volume.load(Ordering::Relaxed),
             zoom: shared.zoom(),
         }
@@ -415,6 +451,8 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let mut last_snapshot = Instant::now();
     let mut aspect_sent: Option<(u32, u32)> = None;
     let names = ["prebuffer", "rtsp", "replay"];
+    // Where the action buttons were drawn, as last told to the UI thread.
+    let mut drawn_actions: Vec<action::Placed> = Vec::new();
 
     while !cancel.is_set() {
         if shared.replay_pressed.swap(false, Ordering::Relaxed) {
@@ -627,6 +665,10 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             }
         } else if shared.dirty.swap(false, Ordering::Relaxed) || r.check_resize().unwrap_or(false) {
             let _ = r.redraw(&overlay_text((shown.is_some() || mjpeg_active) && replay.is_none(), behind));
+        }
+        if r.action_rects != drawn_actions {
+            drawn_actions = r.action_rects.clone();
+            *shared.action_rects.lock().unwrap() = drawn_actions.clone();
         }
 
         if shown.is_none() && !mjpeg_active && !snapshot_inflight && last_snapshot.elapsed() > Duration::from_millis(400) {

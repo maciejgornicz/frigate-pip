@@ -126,6 +126,7 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 | **Kliknięcie prawym przyciskiem** | Zamyka okno. |
 | **Dwukrotne kliknięcie** | Otwiera tę kamerę w interfejsie webowym Frigate. |
 | **Najechanie kursorem** | Dopóki wskaźnik myszy jest nad oknem, okno się nie zamyka. Gdy odsuniesz kursor, okno pozostaje jeszcze co najmniej 3 sekundy. |
+| **Przyciski akcji** (lewy dolny róg) | Uruchamiają [akcje](#65-akcje) kamery, na przykład otwierają furtkę albo włączają światło. Są zawsze widoczne. Z **Potwierdzeniem** pierwsze kliknięcie uzbraja przycisk — robi się czerwony i pyta *Furtka?* — a drugie w ciągu 3 s uruchamia akcję (najwcześniej 0,4 s po pierwszym, więc dwuklik nigdy jej nie uruchomi); bez potwierdzenia wystarczy jedno kliknięcie. Potem przycisk pokazuje *Furtka …* (pomarańczowy) w trakcie wysyłania, a przez 2 s *Furtka ✓* (zielony: dotarło) albo *Furtka ✗* (czerwony: nie udało się). Uzbrojony może być tylko jeden przycisk naraz: kliknięcie innego rozbraja ten pierwszy. Kliknięcie przycisku nigdy nie przypina ani nie przesuwa okna i nie otwiera Frigate. |
 
 ### Kiedy okno się zamyka?
 
@@ -133,6 +134,7 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 - Najpóźniej po upływie liczby sekund ustawionej w **najdłużej**, nawet jeśli obiekt wciąż się porusza.
 - Nigdy, gdy jest przypięte lub gdy wskaźnik myszy znajduje się nad nim.
 - Nigdy w trakcie powtórki; po niej zostaje otwarte jeszcze co najmniej 5 sekund.
+- Nigdy, gdy któryś z jego [przycisków akcji](#65-akcje) jest uzbrojony, wysyła żądanie albo pokazuje wynik, ani (w Linuksie) gdy trwa dla niego wybór akcji po klawiszu [**a**](#klawisze). Tak jak przypięte okno, nie zostanie w tym czasie zastąpione przez nowe zdarzenie.
 
 ### Więcej niż jedna kamera
 
@@ -225,12 +227,81 @@ FrigatePiP znajduje strumienie go2rtc każdej kamery w konfiguracji Frigate (`li
 
 **Gotowe GPU** utrzymuje zainicjowane urządzenie graficzne, dzięki czemu wideo startuje ok. 130 ms szybciej. Koszt: ok. 1% jednego rdzenia CPU w spoczynku (wątek sterownika graficznego).
 
-### 6.5 Dolna część okna
+### 6.5 Akcje
+
+Okna kamery mogą mieć do czterech **przycisków akcji**, na przykład **Furtka**, żeby otworzyć furtkę po dzwonku, albo **Światło**, żeby zapalić światło na podjeździe. Każdy przycisk wysyła HTTP `POST` na swój adres (URL), z treścią JSON `{"camera": "front_door", "action": 1}` (nazwa kamery we Frigate i numer akcji). Przyciski są przeznaczone przede wszystkim dla automatyzacji Home Assistanta z wyzwalaczem **Webhook**, ale zadziała też każdy inny adres, który przyjmuje takie żądanie.
+
+| Opcja | Opis |
+|---|---|
+| **Kamera** | Kamera, której okna dostaną przyciski. Każda kamera ma własne cztery akcje. |
+| **Akcja 1**–**4**: **Adres (URL)** | Adres, na który przycisk wysyła żądanie, np. `http://homeassistant.local:8123/api/webhook/<webhook-id>`. Puste = brak przycisku. Można użyć dowolnego z czterech wierszy: przyciski zachowują swoje numery. |
+| **Napis na przycisku** | Tekst na przycisku, np. *Furtka* albo *Światło*. Puste = *Akcja*. |
+| **Potwierdzenie** | Dwa kliknięcia zamiast jednego: pierwsze uzbraja przycisk, drugie w ciągu 3 s uruchamia akcję (zob. [Obsługa myszą](#obsługa-myszą)). Domyślnie włączone; zostaw je włączone dla furtek, drzwi i alarmów. |
+
+Przy wpisanym adresie, który nie jest poprawnym adresem `http://` ani `https://`, pojawia się czerwony komunikat z numerem wiersza, a **OK** i **Zastosuj** niczego nie zapisują, dopóki go nie poprawisz: karta pokazuje wtedy tę kamerę z zaznaczonym adresem. Adres, który już w pliku ustawień jest niepoprawny, też dostaje taki komunikat, ale nie blokuje zapisywania; jego przycisk pokazuje ✗.
+
+Przyciski są ułożone w jednym rzędzie w lewym dolnym rogu okna, w kolejności numerów. Gdy rząd się nie mieści, krótkie napisy zachowują szerokość, a długie są skracane; przyciski, które nie mieszczą się wcale, są pomijane, zaczynając od prawej. Nigdy nie zasłaniają przycisków w prawym górnym rogu.
+
+**✓ znaczy „dotarło”, a nie „zrobione”.** Przycisk pokazuje ✓, gdy adres odpowiedział kodem HTTP 2xx: Home Assistant odebrał żądanie. Nie oznacza to jednak, że furtka się otworzyła — Home Assistant odpowiada 200 nawet dla webhooka, którego nie zna, albo automatyzacji, która jest wyłączona, więc literówka w adresie też da ✓. Sprawdź to na obrazie albo w śladach (traces) automatyzacji w Home Assistancie. ✗ oznacza kod błędu, brak połączenia albo brak odpowiedzi: nawiązywanie połączenia i każde oczekiwanie na odpowiedź trwa najwyżej 5 s, a przycisk pokazuje ✗ najpóźniej po 60 s (powolne wyszukiwanie nazwy hosta nie ma własnego limitu); szczegóły znajdziesz w logu.
+
+**Bezpieczeństwo.** Kto zna adres przycisku, może uruchomić jego akcję: adres jest kluczem do furtki.
+
+- Zostaw webhook dostępny tylko z sieci lokalnej (to domyślne ustawienie Home Assistanta; w angielskim interfejsie *Only accessible from the local network*) i zachowaj losowy identyfikator webhooka, który proponuje Home Assistant, zamiast łatwego do zgadnięcia, np. `furtka`.
+- FrigatePiP nigdy nie zapisuje adresu w logu, tylko `action front_door 1: HTTP 200` albo błąd. W `config.ini` adres jest zapisany zwykłym tekstem, tak jak hasła.
+- Przy furtce, drzwiach i alarmie zostaw **Potwierdzenie** włączone, żeby przypadkowe kliknięcie niczego nie zrobiło.
+
+**Home Assistant, jedna automatyzacja na przycisk:**
+
+1. W Home Assistancie otwórz w ustawieniach automatyzacje (w angielskim interfejsie *Settings → Automations & scenes*) i utwórz nową automatyzację.
+2. Dodaj wyzwalacz **Webhook**. Skopiuj jego adres przyciskiem kopiowania obok identyfikatora webhooka — zrób to, gdy korzystasz z Home Assistanta przez jego lokalny adres. W opcjach wyzwalacza zostaw włączony dostęp tylko z sieci lokalnej; dozwolone metody muszą obejmować POST (domyślnie obejmują).
+3. Dodaj to, co ma się stać, np. `switch.turn_on` (*Switch: Turn on*) na przekaźniku furtki albo `light.toggle` (*Light: Toggle*). Zapisz automatyzację.
+4. We FrigatePiP wklej adres w pole **Adres (URL)** jednej z akcji, wypełnij **Napis na przycisku** i kliknij **Zastosuj**.
+
+**Jedna automatyzacja na kilka przycisków:** daj każdemu przyciskowi własny wyzwalacz webhook z identyfikatorem (`id`) i niech `choose` wybierze akcję według wyzwalacza (w edytorze automatyzacji edycja w YAML, *Edit in YAML*):
+
+```yaml
+mode: queued
+triggers:
+  - trigger: webhook
+    webhook_id: <gate-webhook-id>
+    allowed_methods: [POST]
+    local_only: true
+    id: gate
+  - trigger: webhook
+    webhook_id: <light-webhook-id>
+    allowed_methods: [POST]
+    local_only: true
+    id: light
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: gate
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: switch.gate
+      - conditions:
+          - condition: trigger
+            id: light
+        sequence:
+          - action: light.toggle
+            target:
+              entity_id: light.driveway
+```
+
+Treść żądania jest też dostępna w szablonach jako `trigger.json.action` i `trigger.json.camera` — przydaje się, gdy kilka przycisków ma jeden adres.
+
+**Podgląd nigdy nie wysyła.** Okno podglądu (**Pokaż na żywo**, zob. niżej) pokazuje przyciski tak, jak je wpisujesz, jeszcze przed zapisaniem, ale kliknięcie w nim niczego nie wysyła: pokazuje ✓, a w logu pojawia się `preview, not sent`. Wszystkie inne okna korzystają tylko z zapisanych ustawień.
+
+W Linuksie strona ustawień ma te same cztery wiersze na kamerę w sekcji **Akcje**; bez myszy przyciski można naciskać klawiszem **a** (zob. [Klawisze](#klawisze)).
+
+### 6.6 Dolna część okna
 
 | Element | Opis |
 |---|---|
 | **Podgląd:** kamera | Kamera używana do podglądu ustawień na żywo. |
-| **Pokaż na żywo** | Otwiera prawdziwe okno podglądu tej kamery. Od razu odzwierciedla Twoje zmiany (róg, rozmiar, napis, strumień, dźwięk…), zanim je zapiszesz. Jest przypięte i nie wlicza się do limitu okien. |
+| **Pokaż na żywo** | Otwiera prawdziwe okno podglądu tej kamery. Od razu odzwierciedla Twoje zmiany (róg, rozmiar, napis, strumień, dźwięk, przyciski akcji…), zanim je zapiszesz; jego przyciski akcji nigdy niczego nie wysyłają. Jest przypięte i nie wlicza się do limitu okien. |
 | **OK** / **Anuluj** / **Zastosuj** | Zapisz i zamknij / odrzuć zmiany / zapisz i pozostaw okno otwarte. |
 | **Pomoc** | Otwiera tę instrukcję (także **F1**). |
 
@@ -277,6 +348,9 @@ Wszystkie ustawienia są przechowywane w `%APPDATA%\FrigatePiP\config.ini` (zwyk
 | | `camera_volume` | `100` | Głośność nowego okna, 0–100 %. |
 | | `wind_filter` | `false` | Filtr wiatru: ucisza wiatr wiejący w mikrofon kamery. |
 | `[camera.<name>]` | `labels` | *(puste = jak w `[trigger]`)* | Obiekty dla tej kamery zamiast `labels` z `[trigger]`, np. `person, car, dog`. |
+| | `action1_url` … `action4_url` | *(puste = brak przycisku)* | Adres akcji 1–4: jej przycisk wysyła tam HTTP POST (zob. [Akcje](#65-akcje)). Trzymaj go w tajemnicy. |
+| | `action1_label` … `action4_label` | *(puste = Akcja)* | Napis na przycisku. |
+| | `action1_confirm` … `action4_confirm` | `true` | Dwa kliknięcia (drugie w ciągu 3 s) zamiast jednego. |
 
 ### Ustawienia poszczególnych kamer
 
@@ -291,9 +365,17 @@ main = front_door
 sub = front_door_sub
 ; Objects that open a window on this camera, instead of labels in [trigger]
 labels = person, car, dog, cat
+; Action buttons on this camera's windows, action1_* to action4_*
+action1_url = http://homeassistant.local:8123/api/webhook/<webhook-id>
+action1_label = Furtka
+action2_url = http://homeassistant.local:8123/api/webhook/<another-webhook-id>
+action2_label = Światło
+action2_confirm = false
 ```
 
 `labels` daje kamerze własną listę obiektów: zastępuje dla niej `labels` z `[trigger]` w każdym trybie (także dla zdarzeń ręcznych). Pusta lub brak = lista dla wszystkich kamer. To samo ustawia okno ustawień i strona ustawień w Linuksie: wybierz kamerę nad listą **Obiekty**.
+
+`action1_*` do `action4_*` ustawiają [przyciski akcji](#65-akcje) kamery: przycisk dla każdej akcji z adresem, w kolejności numerów (luki są dozwolone). Potwierdzenie jest włączone, chyba że ustawisz `action<n>_confirm = false`. To samo ustawia karta **Akcje** w oknie ustawień i sekcja **Akcje** na stronie ustawień w Linuksie.
 
 ## 8. Wiersz poleceń
 
@@ -319,7 +401,7 @@ FrigatePiP jest dostępny w językach: angielskim, polskim, niemieckim, hiszpań
 | Log | `%APPDATA%\FrigatePiP\frigate-pip.log` (do 512 KB; poprzedni jest zachowywany jako `frigate-pip.old.log`) |
 | Autostart | Wartość rejestru `FrigatePiP` w `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
-**Prywatność:** FrigatePiP łączy się tylko z adresami, które wpiszesz (Frigate, go2rtc i broker MQTT), oraz — jeśli nie wyłączysz opcji **Sprawdzaj aktualizacje** — raz dziennie z GitHubem, aby sprawdzić, czy jest nowa wersja. Nie ma telemetrii, kont ani usług w chmurze. Obrazy są tylko wyświetlane i nigdy nie są zapisywane. Polecenia **Pomoc** otwierają tę instrukcję na GitHubie w Twojej przeglądarce.
+**Prywatność:** FrigatePiP łączy się tylko z adresami, które wpiszesz (Frigate, go2rtc, broker MQTT i adres przycisku akcji — po kliknięciu tego przycisku), oraz — jeśli nie wyłączysz opcji **Sprawdzaj aktualizacje** — raz dziennie z GitHubem, aby sprawdzić, czy jest nowa wersja. Nie ma telemetrii, kont ani usług w chmurze. Obrazy są tylko wyświetlane i nigdy nie są zapisywane. Polecenia **Pomoc** otwierają tę instrukcję na GitHubie w Twojej przeglądarce.
 
 **Zasoby:** podczas oczekiwania na wykrycia FrigatePiP praktycznie nie obciąża CPU i zajmuje ok. 5–10 MB pamięci. Wideo jest dekodowane przez kartę graficzną, gdy to możliwe. Bez działającej karty graficznej (np. w niektórych maszynach wirtualnych) rysuje obraz programowym rendererem WARP.
 
@@ -393,7 +475,7 @@ Wideo dekoduje program **ffmpeg**; dane dostarcza mu własny klient RTSP Frigate
 - Linux na **x86_64** lub **ARM64** (Raspberry Pi 3, 4 lub 5 z systemem 64-bitowym).
 - Dla okien na pulpicie: pulpit z X11 albo Wayland z XWayland (GNOME, KDE Plasma, Xfce i większość innych).
 - **ffmpeg**: instaluje się razem z paczką `.deb`; w innym wypadku `sudo apt install ffmpeg` (Debian, Ubuntu, Raspberry Pi OS) lub pakiet z Twojej dystrybucji.
-- Do napisów na framebufferze: czcionka DejaVu (`fonts-dejavu-core`, zwykle instalowana razem z ffmpeg).
+- Do napisów na framebufferze i przycisków akcji w oknach na pulpicie: czcionka DejaVu (`fonts-dejavu-core`, zwykle instalowana razem z ffmpeg).
 - Do framebuffera: członkostwo w grupie `video` (`sudo usermod -aG video $USER`, a potem ponowne zalogowanie).
 - Frigate dostępny z tego komputera na porcie API 5000 (`http://`) albo 8971 (`https://`, z użytkownikiem Frigate), a dla wideo na żywo — port RTSP 8554 serwera go2rtc (szczegóły: [Wymagania](#1-wymagania)).
 
@@ -439,9 +521,9 @@ Na pulpicie Linuksa okna podglądu działają jak w Windows: okna bez ramek nad 
 - **Uruchomienie:** menu aplikacji → **FrigatePiP** (po instalacji przez apt) albo `frigate-pip` w terminalu na pulpicie. Program działa w tle, bez terminala; na użytkownika działa jedna kopia. Ponowne uruchomienie (albo `frigate-pip --settings`) otwiera ustawienia działającej kopii.
 - **Razem z sesją pulpitu:** `frigate-pip --autostart on` (wyłączenie: `frigate-pip --autostart off`). Zatrzymanie: `frigate-pip --quit`.
 - **Ikona w zasobniku:** z tym samym menu co w Windows (zob. [Ikona w zasobniku](#4-ikona-w-zasobniku)); jej kolor pokazuje stan: niebieski — połączono, szary — brak połączenia, pomarańczowy — wstrzymano. Pojawia się w KDE Plasma, Xfce, Cinnamon, MATE i Budgie, a w GNOME z rozszerzeniem AppIndicator (jest w Ubuntu).
-- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, suwak pod nim ustawia głośność, ⟲ powtarza początek zdarzenia, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, a okno pod wskaźnikiem myszy się nie zamyka.
+- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, suwak pod nim ustawia głośność, ⟲ powtarza początek zdarzenia, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, przyciski akcji w lewym dolnym rogu uruchamiają [akcje](#65-akcje) kamery, a okno pod wskaźnikiem myszy się nie zamyka. Przyciski akcji wymagają czcionki do napisów (`fonts-dejavu-core` albo innej czcionki TrueType ustawionej jako `font` w `[console]`); bez niej okna nie mają przycisków, a log raz o tym informuje.
 - **Opcje okien:** `topmost` (przy `false` okna są zwykłymi oknami, które inne mogą zasłonić), `sound` (dźwięk powiadomienia pulpitu) i `skip_fullscreen` (nic, gdy aktywne okno jest na pełnym ekranie) działają jak w Windows.
-- **Ustawienia:** kliknięcie ikony (albo **Ustawienia…** w jej menu) otwiera je w przeglądarce — te same opcje, opisy i test połączenia co w Windows; strona otwiera się tylko na tym komputerze. Przy pierwszym uruchomieniu otwiera się sama. Zapisują się w `~/.config/frigate-pip/config.ini` (opisane niżej).
+- **Ustawienia:** kliknięcie ikony (albo **Ustawienia…** w jej menu) otwiera je w przeglądarce — te same opcje, opisy i test połączenia co w Windows; strona otwiera się tylko na tym komputerze. Przy pierwszym uruchomieniu otwiera się sama. Zapisują się w `~/.config/frigate-pip/config.ini` (opisane niżej). Sekcja **Akcje**, po **Wideo i dźwięk**, ma te same cztery wiersze na kamerę co karta w Windows (zob. [Akcje](#65-akcje)); gdy wpisany adres jest niepoprawny, nic nie zostaje zapisane, a strona pokazuje, który wiersz jest błędny.
 
 ### Okienka tmux
 
@@ -453,8 +535,8 @@ W tym trybie FrigatePiP nie ma własnego okna: czeka na wykrycia w tle i przy ka
 2. Otwórz tmux do własnej pracy — `tmux` zaczyna nową sesję — i pracuj w nim. Okienka pojawiają się nad tym oknem.
 
 - Aby zatrzymać FrigatePiP: `tmux kill-session -t frigate-pip`. Aby używać jego klawiszy (wstrzymanie, pokazanie kamery): `tmux attach -t frigate-pip`.
-- Okienko pojawia się w wybranym **rogu ekranu** (`position`), a jego rozmiar zależy od **szerokości okna** (`width`). Zamyka się samo po zwykłym czasie (`duration`, `max_duration`) albo od razu po naciśnięciu **q**, **x** lub **Esc**. **m** wyłącza i włącza jego dźwięk. **r** powtarza początek zdarzenia (od chwili otwarcia okienka).
-- tmux pokazuje jedno okienko naraz: wykrycie na innej kamerze zastępuje otwarte okienko (lub jest pomijane, gdy `replace = false`).
+- Okienko pojawia się w wybranym **rogu ekranu** (`position`), a jego rozmiar zależy od **szerokości okna** (`width`). Zamyka się samo po zwykłym czasie (`duration`, `max_duration`) albo od razu po naciśnięciu **q**, **x** lub **Esc**. **m** wyłącza i włącza jego dźwięk. **r** powtarza początek zdarzenia (od chwili otwarcia okienka). **a** (i cyfra) naciska przyciski akcji kamery pokazanej w okienku, tak jak w terminalu (zob. [Klawisze](#klawisze)). Okienko zachowuje ustawienia, z którymi się otworzyło; ustawienia zapisane w międzyczasie działają od następnego okienka.
+- tmux pokazuje jedno okienko naraz: wykrycie na innej kamerze zastępuje otwarte okienko (lub jest pomijane, gdy `replace = false`). Gdy przycisk akcji okienka jest uzbrojony, wysyła żądanie albo pokazuje wynik, okienko zostaje otwarte: wykrycie na innej kamerze jest pomijane, a wykrycie na tej samej kamerze przedłuża okienko.
 - Aby obraz miał pełne kolory, tmux musi przekazywać dalej 24-bitowy kolor: dodaj `set -as terminal-features ",xterm-256color:RGB"` do `~/.tmux.conf` (użyj swojej wartości `$TERM` spoza tmux) i uruchom tmux ponownie. Gdy brakuje kolorów, FrigatePiP zapisuje tę wskazówkę w logu.
 
 ### Klawisze
@@ -468,7 +550,10 @@ Gdy FrigatePiP działa w terminalu lub w konsoli:
 | **p** | Wstrzymaj / wznów powiadomienia. |
 | **m** | Wyłącza / włącza dźwięk (przy `camera_audio = true`) we wszystkich oknach, także otwieranych później; podpis pokazuje wtedy *dźwięk wyłączony*. |
 | **r** | Powtórka początku zdarzenia we wszystkich oknach (zob. [Obsługa myszą](#obsługa-myszą)); ponownie: powrót do obrazu na żywo. |
-| **1**–**9** | Pokaż kamerę 1–9 (w kolejności z konfiguracji Frigate). |
+| **a** | Naciska [przycisk akcji](#65-akcje) najnowszego okna, którego kamera ma akcje. Przy jednej akcji **a** ją naciska (z potwierdzeniem: **a**, a potem znowu **a** w ciągu 3 s). Przy kilku akcjach **a** wyświetla je na 3 s w napisie na obrazie, np. *1 Furtka · 2 Światło*; cyfra wybiera wtedy tę akcję zamiast pokazywać kamerę, a przy włączonym potwierdzeniu uruchamia ją ponowne naciśnięcie tej samej cyfry. Podpis pokazuje stan: *Furtka?*, *Furtka …*, *Furtka ✓* albo *Furtka ✗*. Dopóki trwa wybór dla okna, to okno się nie zamyka i nie zostaje zastąpione. |
+| **1**–**9** | Pokaż kamerę 1–9 (w kolejności z konfiguracji Frigate). Gdy po **a** trwa wybór akcji, a ten numer jest na liście: ta akcja. |
+
+Klawisz **a** i cyfry wybierające akcję działają ok. 150 ms po naciśnięciu. Terminal nie informuje o puszczeniu klawisza, więc FrigatePiP chwilę czeka, żeby sprawdzić, czy klawisz nie jest przytrzymany: przytrzymany klawisz liczy się raz i nigdy nie potwierdza, a dwa naciśnięcia w odstępie krótszym niż 150 ms nie liczą się wcale. Wymaga to zwykłych ustawień powtarzania klawiszy (powtórzenie częściej niż co 150 ms — tak domyślnie mają pulpity i konsola Linuksa).
 
 ### Wiersz poleceń
 

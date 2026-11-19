@@ -168,6 +168,7 @@ pub struct Strings {
     pub tab_detection: &'static str,
     pub tab_window: &'static str,
     pub tab_video: &'static str,
+    pub tab_actions: &'static str,
     pub frigate_url: &'static str,
     pub frigate_login: &'static str,
     pub source: &'static str,
@@ -287,6 +288,10 @@ pub struct Strings {
     pub tip_preview_live: &'static str,
     pub tip_help: &'static str,
     pub tip_support: &'static str,
+    pub tip_action_camera: &'static str,
+    pub tip_action_url: &'static str,
+    pub tip_action_label: &'static str,
+    pub tip_action_confirm: &'static str,
 
     // ---- connection test
     /// {0} = version, {1} = ms
@@ -349,6 +354,23 @@ pub struct Strings {
 
     /// Caption during a replay of the event start ("Replay −12 s").
     pub replay: &'static str,
+
+    // ---- action button: the settings tab and the button on the window
+    pub action_camera: &'static str,
+    pub action_url: &'static str,
+    pub action_label: &'static str,
+    pub action_note: &'static str,
+    pub action_bad_url: &'static str,
+    /// The button's text when the camera has no label.
+    pub action_default: &'static str,
+    /// The armed button ("Gate?"); {0} = label
+    pub action_ask: &'static str,
+    /// An action's row in the settings tab ("Action 2"); {0} = its number.
+    pub action_row: &'static str,
+    /// The error line under the action rows: {0} = the row ("Action 2"), {1} = the reason.
+    pub action_row_error: &'static str,
+    /// The confirmation checkbox in an action's row (a noun: "Confirmation").
+    pub action_confirm_short: &'static str,
 
     // ---- Linux console version
     /// Keys shown in the status line.
@@ -487,6 +509,9 @@ mod tests {
                 (en.update_failed, s.update_failed),
                 (en.update_check_failed, s.update_check_failed),
                 (en.update_balloon_title, s.update_balloon_title),
+                (en.action_ask, s.action_ask),
+                (en.action_row, s.action_row),
+                (en.action_row_error, s.action_row_error),
             ];
             for (a, b) in pairs {
                 for i in 0..4 {

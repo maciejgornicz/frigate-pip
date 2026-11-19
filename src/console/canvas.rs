@@ -1,5 +1,6 @@
-//! Pictures in memory (BGRA) and the caption drawn on them.
+//! Pictures in memory (BGRA) and the caption and action buttons drawn on them.
 
+use crate::action::{self, Look};
 use crate::view::Zoom;
 
 /// Picture in BGRA, 4 bytes per pixel, rows without padding.
@@ -133,6 +134,22 @@ impl Image {
                 let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
                 let cover = (r - d + 0.5).clamp(0.0, 1.0) * opacity;
                 self.blend(x, y, color, (cover * 255.0) as u8);
+            }
+        }
+    }
+
+    /// A box with round ends filling `rect` (left, top, right, bottom), smooth edges, with
+    /// opacity `opacity` (0–1).
+    fn stadium(&mut self, (l, t, r, b): action::Rect, color: (u8, u8, u8), opacity: f32) {
+        let rad = (b - t) as f32 / 2.0;
+        let cy = (t + b) as f32 / 2.0;
+        let (c0, c1) = (l as f32 + rad, (r as f32 - rad).max(l as f32 + rad));
+        for y in t..b {
+            for x in l..r {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let dx = if px < c0 { c0 - px } else { (px - c1).max(0.0) };
+                let d = (dx * dx + (py - cy).powi(2)).sqrt();
+                self.blend(x, y, color, ((rad - d + 0.5).clamp(0.0, 1.0) * opacity * 255.0) as u8);
             }
         }
     }
@@ -283,6 +300,35 @@ impl Image {
     }
 }
 
+/// An action pill's colour and opacity by its look — like on Windows.
+fn pill_fill(look: Look) -> ((u8, u8, u8), f32) {
+    match look {
+        Look::Idle => ((0, 0, 0), 0.55),
+        Look::Armed | Look::Failed => ((239, 68, 68), 1.0),
+        Look::Sending => ((245, 158, 11), 1.0),
+        Look::Done => ((34, 179, 84), 1.0),
+    }
+}
+
+/// The text with the signs of the action buttons that the font lacks (`has` = it has the
+/// glyph) spelled in ASCII: fontdue draws a missing glyph as an empty box, with no other font
+/// to fall back on.
+fn ascii_fallback(text: &str, has: impl Fn(char) -> bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '✓' if !has(c) => out.push_str("OK"),
+            '✗' if !has(c) => out.push('!'),
+            '…' if !has(c) => out.push_str("..."),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Glyphs laid out from x = 0: (x, metrics, coverage bitmap).
+type Glyphs = Vec<(f32, fontdue::Metrics, Vec<u8>)>;
+
 /// Caption font, loaded from a TrueType file installed on the system.
 pub struct Font {
     font: fontdue::Font,
@@ -320,16 +366,28 @@ impl Font {
         None
     }
 
-    /// Caption in the top-left corner: a dark rounded box, a dot (red while the
-    /// picture is live) and the text — like the Windows version. `reserve` = pixels
-    /// kept free on the right (buttons).
-    pub fn caption(&self, img: &mut Image, text: &str, live: bool, reserve: f32) {
-        let px = (img.h as f32 / 20.0).clamp(12.0, 36.0);
-        let pad = (px * 0.6).round();
-        let dot = px * 0.62;
-        let max_w = img.w as f32 - pad * 4.0 - dot * 2.0 - reserve;
-        let line = self.font.horizontal_line_metrics(px).map(|m| m.ascent).unwrap_or(px * 0.8);
-        // Glyphs that still fit into the width.
+    /// Font size of the caption (and the action buttons) on a picture `height` pixels high.
+    pub fn text_px(height: u32) -> f32 {
+        (height as f32 / 20.0).clamp(12.0, 36.0)
+    }
+
+    /// `text` with the signs the font lacks in ASCII (see `ascii_fallback`).
+    pub fn drawable(&self, text: &str) -> String {
+        ascii_fallback(text, |c| self.font.lookup_glyph_index(c) != 0)
+    }
+
+    /// Width of `text` in pixels at size `px`.
+    pub fn width(&self, text: &str, px: f32) -> f32 {
+        text.chars().map(|c| self.font.metrics(c, px).advance_width).sum()
+    }
+
+    /// Height of a line of text at size `px`.
+    pub fn line_height(&self, px: f32) -> f32 {
+        self.font.horizontal_line_metrics(px).map(|m| m.new_line_size).unwrap_or(px * 1.2)
+    }
+
+    /// The glyphs of `text` that fit into `max_w` pixels, and their width.
+    fn glyphs(&self, text: &str, px: f32, max_w: f32) -> (Glyphs, f32) {
         let mut glyphs = Vec::new();
         let mut width = 0.0;
         for ch in text.chars() {
@@ -340,6 +398,34 @@ impl Font {
             glyphs.push((width, m, bitmap));
             width += m.advance_width;
         }
+        (glyphs, width)
+    }
+
+    /// Draws glyphs in white from `x` on the line `baseline`.
+    fn blit(img: &mut Image, glyphs: Glyphs, x: f32, baseline: f32) {
+        for (gx, m, bitmap) in glyphs {
+            let left = (x + gx).round() as i32 + m.xmin;
+            let top = baseline as i32 - m.height as i32 - m.ymin;
+            for row in 0..m.height {
+                for col in 0..m.width {
+                    let a = bitmap[row * m.width + col];
+                    img.blend(left + col as i32, top + row as i32, (255, 255, 255), a);
+                }
+            }
+        }
+    }
+
+    /// Caption in the top-left corner: a dark rounded box, a dot (red while the
+    /// picture is live) and the text — like the Windows version. `reserve` = pixels
+    /// kept free on the right (buttons).
+    pub fn caption(&self, img: &mut Image, text: &str, live: bool, reserve: f32) {
+        let px = Self::text_px(img.h);
+        let pad = (px * 0.6).round();
+        let dot = px * 0.62;
+        let max_w = img.w as f32 - pad * 4.0 - dot * 2.0 - reserve;
+        let line = self.font.horizontal_line_metrics(px).map(|m| m.ascent).unwrap_or(px * 0.8);
+        // Glyphs that still fit into the width.
+        let (glyphs, width) = self.glyphs(&self.drawable(text), px, max_w);
         let x0 = pad;
         let y0 = pad;
         let box_h = px * 1.3 + pad * 0.7;
@@ -349,16 +435,33 @@ impl Font {
         img.disc(x0 + pad * 0.8 + dot / 2.0, cy, dot / 2.0, if live { (239, 68, 68) } else { (191, 191, 191) });
         let tx = x0 + pad * 0.8 + dot + pad * 0.6;
         let baseline = (cy + line / 2.0 - px * 0.1).round();
-        for (gx, m, bitmap) in glyphs {
-            let left = (tx + gx).round() as i32 + m.xmin;
-            let top = baseline as i32 - m.height as i32 - m.ymin;
-            for row in 0..m.height {
-                for col in 0..m.width {
-                    let a = bitmap[row * m.width + col];
-                    img.blend(left + col as i32, top + row as i32, (255, 255, 255), a);
-                }
-            }
+        Self::blit(img, glyphs, tx, baseline);
+    }
+
+    /// One action button: a pill filling `rect` in the colour of `look`, lit when `hot`, with
+    /// `text` (already `drawable`) at size `px` in the middle, cut with an ellipsis when it
+    /// does not fit (see `action::pill_text_room`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn pill(&self, img: &mut Image, rect: action::Rect, text: &str, look: Look, hot: bool, px: f32, scale: f32) {
+        let (color, opacity) = pill_fill(look);
+        img.stadium(rect, color, opacity);
+        if hot {
+            img.stadium(rect, (255, 255, 255), 0.3);
         }
+        let room = action::pill_text_room(rect, scale);
+        let text = if self.width(text, px) <= room {
+            text.to_string()
+        } else {
+            let ellipsis = self.drawable("…");
+            let (glyphs, _) = self.glyphs(text, px, (room - self.width(&ellipsis, px)).max(0.0));
+            let kept: String = text.chars().take(glyphs.len()).collect();
+            format!("{kept}{ellipsis}")
+        };
+        let (glyphs, width) = self.glyphs(&text, px, room);
+        let (ascent, descent) = self.font.horizontal_line_metrics(px).map(|m| (m.ascent, m.descent)).unwrap_or((px * 0.8, -px * 0.2));
+        let x = (rect.0 + rect.2) as f32 / 2.0 - width / 2.0;
+        let baseline = ((rect.1 + rect.3) as f32 / 2.0 + (ascent + descent) / 2.0).round();
+        Self::blit(img, glyphs, x, baseline);
     }
 }
 
@@ -393,6 +496,28 @@ mod tests {
         assert!(row(&filled, 0)[..12].iter().all(|&b| b == 128));
         assert!(row(&filled, 0)[20..].iter().all(|&b| b == 255));
         assert_eq!(img.zoomed(Zoom::FULL, Zoom::FULL, None).data, img.data);
+    }
+
+    #[test]
+    fn signs_the_font_lacks_are_spelled_in_ascii() {
+        let none = |_: char| false;
+        assert_eq!(ascii_fallback("Gate ✓", none), "Gate OK");
+        assert_eq!(ascii_fallback("Gate ✗", none), "Gate !");
+        assert_eq!(ascii_fallback("Gate …", none), "Gate ...");
+        assert_eq!(ascii_fallback("Gate?", none), "Gate?");
+        assert_eq!(ascii_fallback("Brama ✓ … ✗", |_| true), "Brama ✓ … ✗", "kept when the font has them");
+        // Only the missing ones.
+        assert_eq!(ascii_fallback("✓ ✗ …", |c| c == '…'), "OK ! …");
+    }
+
+    #[test]
+    fn the_pill_is_round_at_both_ends() {
+        let mut img = Image::new(60, 20);
+        img.stadium((0, 0, 60, 20), (255, 255, 255), 1.0);
+        assert_eq!(img.rgb(30, 10), (255, 255, 255), "the middle is filled");
+        assert_eq!(img.rgb(0, 0), (0, 0, 0), "the corners stay outside");
+        assert_eq!(img.rgb(59, 19), (0, 0, 0));
+        assert_eq!(img.rgb(1, 10), (255, 255, 255), "the round end reaches the edge in the middle");
     }
 
     #[test]

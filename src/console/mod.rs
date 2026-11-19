@@ -3,6 +3,7 @@
 //! inside a terminal (Kitty graphics, Sixel or coloured half blocks) or as tmux popups.
 //! Video is decoded by the `ffmpeg` program.
 
+mod action_keys;
 mod canvas;
 mod dbus;
 mod desktop;
@@ -15,6 +16,7 @@ mod video;
 mod web;
 mod x11;
 
+use crate::action::{self, Look, Shown};
 use crate::config::{self, Config, Corner, IniDoc, LiveMode};
 use crate::filter::Detection;
 use crate::frigate::{self, CameraInfo, Notice};
@@ -23,6 +25,7 @@ use crate::hub::Hub;
 use crate::i18n::{self, t};
 use crate::util::Cancel;
 use crate::view::{choose_slot, choose_stream, Slot, Zoom};
+use action_keys::Key;
 use canvas::Image;
 use ffmpeg::Ffmpeg;
 use std::collections::HashMap;
@@ -77,6 +80,10 @@ pub trait Output {
     fn alive(&mut self, _id: u64) -> bool {
         true
     }
+    /// Windows shown by another process: it asks to stay open (an action button is busy there).
+    fn kept_open(&self, _id: u64) -> bool {
+        false
+    }
     /// The settings changed.
     fn configure(&mut self, _cfg: &Config) {}
     /// Mouse input on desktop windows: which window and what the user did.
@@ -87,6 +94,9 @@ pub trait Output {
     fn set_sound(&mut self, _id: u64, _state: u8) {}
     /// Replay of window `id`: 0 = nothing to replay, 1 = possible, 2 = replaying (desktop windows show a button).
     fn set_replay(&mut self, _id: u64, _state: u8) {}
+    /// The action buttons of window `id` as they look now, in number order (desktop windows
+    /// show them as pills; the others show them in the caption).
+    fn set_actions(&mut self, _id: u64, _actions: &[Shown]) {}
     /// The picture of window `id` is zoomed in (desktop windows: Ctrl + drag then moves it).
     fn set_zoomed(&mut self, _id: u64, _zoomed: bool) {}
     /// Volume of window `id` in percent (desktop windows show a slider).
@@ -136,6 +146,8 @@ pub enum Action {
     Volume(u8),
     /// Replay button: start or stop a replay of the event start.
     Replay,
+    /// The pill of action `n` (1 to `config::ACTIONS`): arm it or send its request.
+    Run(usize),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -211,9 +223,10 @@ Where the windows appear (--output):
                the others in a corner of the screen; runs in the background. Mouse: x
                closes, the speaker mutes, the slider under it sets the volume, drag
                moves, the wheel resizes, Ctrl + wheel zooms the picture around the
-               mouse, Ctrl + drag moves the zoomed picture,
-               a click pins, a double click opens the camera in Frigate, the right
-               button closes.
+               mouse, Ctrl + drag moves the zoomed picture, the buttons in the
+               bottom-left corner run the camera's actions (see [camera.<name>] in
+               config.ini), a click pins, a double click opens the camera in Frigate,
+               the right button closes.
                A tray icon has the menu known from Windows; the settings open in the
                browser.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
@@ -242,20 +255,25 @@ Options:
   --help                                    this help
 
 Keys (when started in a terminal or on a console): q quit, x close windows,
-p pause / resume, m sound on / off, 1-9 show camera 1-9.
-In a tmux popup: q, x or Esc close it, m sound on / off.
+p pause / resume, m sound on / off, r replay, 1-9 show camera 1-9, a runs the action
+of the newest window that has one (a second a confirms it if asked); with several
+actions a shows them numbered for 3 s and their number runs one.
+In a tmux popup: q, x or Esc close it, m sound on / off, r replay, a as above.
 Settings: ~/.config/frigate-pip/config.ini - user guide:
 https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md#12-linux-version";
 
 enum Ev {
     Notice(Notice),
-    Key(u8),
+    /// A key byte, and when the reader thread got it (see `action_keys::drain`).
+    Key(u8, Instant),
     /// A window has a new picture.
     Wake,
     /// Mouse on a desktop window, or the desktop went away.
     Pointer(x11::Event),
     /// Tray menu item (or `tray::ACTIVATE`, `tray::NOTIFICATION`).
     Tray(i32),
+    /// An action request ended: its ticket, and whether it got HTTP 2xx.
+    ActionDone(u32, bool),
 }
 
 static QUIT: AtomicBool = AtomicBool::new(false);
@@ -429,7 +447,7 @@ pub fn main() {
         let tx = tx.clone();
         // The terminal output switches the terminal to raw mode itself.
         term::Keys::start(mode != Mode::Terminal, move |k| {
-            let _ = tx.send(Ev::Key(k));
+            let _ = tx.send(Ev::Key(k, Instant::now()));
         })
     });
     let mut app = App::new(cfg, path, out, ff, tx);
@@ -669,7 +687,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     let _keys = {
         let tx = tx.clone();
         term::Keys::start(false, move |k| {
-            let _ = tx.send(Ev::Key(k));
+            let _ = tx.send(Ev::Key(k, Instant::now()));
         })
     };
     let (sw, sh) = out.size();
@@ -702,16 +720,73 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     shared.muted.store(args.iter().any(|a| a == "--view-muted"), Ordering::Relaxed);
     let rect = Rect { x: 0, y: 0, w: sw, h: sh };
     let mut last: Option<Instant> = None;
+    // The camera's action buttons and the `a` key, like in the main window list (one window: 0).
+    // A viewer keeps the settings it started with: it lives for one event.
+    let labels = action_keys::labels(cfg, camera);
+    let mut buttons: action::Buttons = Default::default();
+    action_keys::refresh(&mut buttons, cfg, camera);
+    let mut picker = action_keys::Picker::default();
+    let mut shown: (Vec<Shown>, bool) = (Vec::new(), false);
+    // While a button is busy this file asks the background process to leave the popup open.
+    let busy_file = arg(args, "--view-lock").map(|p| tmux::busy_path(std::path::Path::new(&p)));
+    let mut held = false;
     while !QUIT.load(Ordering::Relaxed) {
-        match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(Ev::Key(b'q' | b'Q' | b'x' | b'X' | 27 | 3)) | Err(RecvTimeoutError::Disconnected) => break,
-            Ok(Ev::Key(b'm' | b'M')) if cfg.camera_audio => {
-                let muted = !shared.muted.fetch_xor(true, Ordering::Relaxed);
-                crate::log!("{camera}: sound {}", if muted { "muted" } else { "on" });
-                shared.dirty.store(true, Ordering::Relaxed);
+        let timeout = picker.wait(Instant::now()).map_or(Duration::from_millis(100), |d| d.min(Duration::from_millis(100)));
+        let first = match rx.recv_timeout(timeout) {
+            Ok(ev) => Some(ev),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        let (go, now) = action_keys::drain(first, &rx, |ev| {
+            match ev {
+                Ev::Key(b'q' | b'Q' | b'x' | b'X' | 27 | 3, _) => return false,
+                Ev::Key(b'm' | b'M', _) if cfg.camera_audio => {
+                    let muted = !shared.muted.fetch_xor(true, Ordering::Relaxed);
+                    crate::log!("{camera}: sound {}", if muted { "muted" } else { "on" });
+                    shared.dirty.store(true, Ordering::Relaxed);
+                }
+                Ev::Key(b'r' | b'R', _) => shared.replay_pressed.store(true, Ordering::Relaxed),
+                // They count once settled (see `Picker::key`); the popup has no camera keys.
+                Ev::Key(k, at) => {
+                    picker.key(k, at);
+                }
+                Ev::ActionDone(ticket, ok) => {
+                    let now = Instant::now();
+                    let _ = buttons.iter_mut().flatten().any(|b| b.finished(ticket, ok, now));
+                }
+                _ => {}
             }
-            Ok(Ev::Key(b'r' | b'R')) => shared.replay_pressed.store(true, Ordering::Relaxed),
-            _ => {}
+            true
+        });
+        if !go {
+            break;
+        }
+        while let Some(key) = picker.next_settled(now) {
+            match key {
+                Key::A => {
+                    if let Some(n) = picker.key_a(0, &action_keys::numbers(&buttons), now) {
+                        action_keys::press(&mut buttons, n, cfg, camera, &tx, now);
+                    }
+                }
+                Key::Digit(_, n) => {
+                    let look = action_keys::press(&mut buttons, n, cfg, camera, &tx, now);
+                    picker.pressed(look == Some(Look::Armed), now);
+                }
+            }
+        }
+        // The buttons' looks also change by themselves (arming and results expire).
+        let view = (action::shown(&buttons, &labels, now), picker.choosing(0, now));
+        if view != shown {
+            shown = view;
+            shared.dirty.store(true, Ordering::Relaxed);
+        }
+        let busy = action::any_busy(&buttons, now) || shown.1;
+        if busy != held {
+            // Tried again on the next pass (≤ 100 ms) when it fails.
+            let done = busy_file.as_ref().is_none_or(|f| set_busy_file(f, busy));
+            if done {
+                held = busy;
+            }
         }
         if last.is_some_and(|t| t.elapsed() < out.min_interval()) || !shared.dirty.swap(false, Ordering::Relaxed) {
             continue;
@@ -719,11 +794,24 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         let frame = shared.frame.lock().unwrap().clone();
         if let Some((frame, _)) = frame {
             let text = with_replay(&shared, with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed)));
+            let text = action_keys::with_actions(&text, &shown.0, shown.1);
             out.draw(1, rect, frame, &text, shared.live.load(Ordering::Relaxed));
             last = Some(Instant::now());
         }
     }
+    if let (true, Some(f)) = (held, &busy_file) {
+        let _ = std::fs::remove_file(f);
+    }
     shared.cancel.cancel();
+}
+
+/// Creates or removes a viewer's busy file (see `tmux::busy_path`); `true` = done.
+fn set_busy_file(f: &std::path::Path, busy: bool) -> bool {
+    if busy {
+        std::fs::File::create(f).is_ok()
+    } else {
+        std::fs::remove_file(f).is_ok() || !f.exists()
+    }
 }
 
 /// Opens an address in the desktop's browser (xdg-open).
@@ -789,6 +877,15 @@ struct Win {
     /// When the event came, and what the window recorded itself (replays, also after a restart).
     event: Instant,
     own: Arc<Mutex<Recorder>>,
+    /// The action buttons by number (`[n - 1]` is action `n`); none for windows shown by
+    /// another process (`external`: a tmux popup has its own).
+    actions: action::Buttons,
+    external: bool,
+    /// The actions' labels (number, label), kept from the settings.
+    labels: Vec<(usize, String)>,
+    /// The buttons as last shown, and whether the choice of the `a` key was open (a change
+    /// draws the window again).
+    action_view: (Vec<Shown>, bool),
 }
 
 impl Win {
@@ -826,6 +923,8 @@ struct App {
     /// `prebuffer`: a connection to every camera's sub stream, by camera name.
     hubs: HashMap<String, Arc<Hub>>,
     prebuffer_possible: bool,
+    /// The `a` key's choice among several actions.
+    picker: action_keys::Picker,
 }
 
 impl App {
@@ -853,6 +952,7 @@ impl App {
             info: Arc::default(),
             hubs: HashMap::new(),
             prebuffer_possible: false,
+            picker: action_keys::Picker::default(),
         }
     }
 
@@ -1034,27 +1134,17 @@ impl App {
         let mut last_reload = Instant::now();
         self.show_status();
         while !QUIT.load(Ordering::Relaxed) {
-            match rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(Ev::Notice(n)) => self.on_notice(n),
-                Ok(Ev::Key(k)) => {
-                    if !self.on_key(k) {
-                        break;
-                    }
-                }
-                Ok(Ev::Wake) => {}
-                Ok(Ev::Pointer(x11::Event::Closed)) => {
-                    crate::log!("The desktop session ended");
-                    break;
-                }
-                Ok(Ev::Pointer(e)) => {
-                    for (id, action) in self.out.pointer(&e) {
-                        self.on_action(id, action);
-                    }
-                }
-                Ok(Ev::Tray(id)) => self.on_tray(id),
-                Err(RecvTimeoutError::Timeout) => {}
+            let timeout = self.picker.wait(Instant::now()).map_or(Duration::from_millis(100), |d| d.min(Duration::from_millis(100)));
+            let first = match rx.recv_timeout(timeout) {
+                Ok(ev) => Some(ev),
+                Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => break,
+            };
+            let (go, t) = action_keys::drain(first, &rx, |ev| self.on_event(ev));
+            if !go {
+                break;
             }
+            self.settled_keys(t);
             self.draw();
             if last_tick.elapsed() >= Duration::from_millis(500) {
                 last_tick = Instant::now();
@@ -1078,6 +1168,27 @@ impl App {
             self.close(i);
         }
         self.listener.cancel();
+    }
+
+    /// One event of the main loop; `false` = quit.
+    fn on_event(&mut self, ev: Ev) -> bool {
+        match ev {
+            Ev::Notice(n) => self.on_notice(n),
+            Ev::Key(k, at) => return self.on_key(k, at),
+            Ev::Wake => {}
+            Ev::Pointer(x11::Event::Closed) => {
+                crate::log!("The desktop session ended");
+                return false;
+            }
+            Ev::Pointer(e) => {
+                for (id, action) in self.out.pointer(&e) {
+                    self.on_action(id, action);
+                }
+            }
+            Ev::Tray(id) => self.on_tray(id),
+            Ev::ActionDone(ticket, ok) => self.action_done(ticket, ok),
+        }
+        true
     }
 
     fn on_notice(&mut self, n: Notice) {
@@ -1120,6 +1231,10 @@ impl App {
             Action::Close => {
                 crate::log!("{}: closed by the user", w.camera);
                 self.close(i);
+                return;
+            }
+            Action::Run(n) => {
+                self.press_action(i, n);
                 return;
             }
             Action::Sound => {
@@ -1192,6 +1307,27 @@ impl App {
             }
         }
         w.shared.dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// Action `n` of window `i`: arms it or sends its request (see `action_keys::press`). Returns
+    /// its look afterwards (`None` = the window has no such action).
+    fn press_action(&mut self, i: usize, n: usize) -> Option<Look> {
+        let w = &mut self.wins[i];
+        let look = action_keys::press(&mut w.actions, n, &self.cfg, &w.camera, &self.tx, Instant::now());
+        w.shared.dirty.store(true, Ordering::Relaxed);
+        look
+    }
+
+    /// An action request ended. Tickets are unique, so only the button that sent it takes the
+    /// result; a window closed meanwhile has no button left to take it.
+    fn action_done(&mut self, ticket: u32, ok: bool) {
+        let now = Instant::now();
+        for w in &mut self.wins {
+            if w.actions.iter_mut().flatten().any(|b| b.finished(ticket, ok, now)) {
+                w.shared.dirty.store(true, Ordering::Relaxed);
+                break;
+            }
+        }
     }
 
     /// The decoder of window `i` again, at the window's current size and zoom (after the wheel).
@@ -1268,8 +1404,15 @@ impl App {
             w.shared.dirty.store(true, Ordering::Relaxed);
             return;
         }
-        // Pinned windows are never replaced.
-        let states: Vec<(bool, bool)> = self.wins.iter().map(|w| (false, w.pinned)).collect();
+        // Pinned windows, and windows busy with an action, are never replaced.
+        let states: Vec<(bool, bool)> = self
+            .wins
+            .iter()
+            .map(|w| {
+                let busy = action::any_busy(&w.actions, now) || self.picker.choosing(w.id, now) || self.out.kept_open(w.id);
+                crate::view::slot_state(false, w.pinned, busy)
+            })
+            .collect();
         let max_windows = self.out.max_windows().map_or(self.cfg.max_popups, |m| m.min(self.cfg.max_popups));
         let replace_at = match choose_slot(&states, max_windows, self.cfg.replace) {
             Slot::New => None,
@@ -1292,7 +1435,9 @@ impl App {
         let main = self.is_main(&d.camera, stream.as_deref());
         let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone(), muted: self.muted, main };
         let own: Arc<Mutex<Recorder>> = Arc::default();
-        let shared = match self.out.open_external(id, &view) {
+        let opened = self.out.open_external(id, &view);
+        let external = opened.is_some();
+        let shared = match opened {
             Some(true) => Arc::new(video::Shared::default()),
             Some(false) => {
                 self.layout();
@@ -1327,7 +1472,7 @@ impl App {
         };
         shared.muted.store(self.muted, Ordering::Relaxed);
         crate::log!("{}: window after {} ms", d.camera, t0.elapsed().as_millis());
-        let win = Win {
+        let mut win = Win {
             id,
             camera: d.camera,
             caption,
@@ -1350,7 +1495,15 @@ impl App {
             sound: 0,
             event: t0,
             own,
+            actions: Default::default(),
+            external,
+            labels: Vec::new(),
+            action_view: (Vec::new(), false),
         };
+        if !external {
+            action_keys::refresh(&mut win.actions, &self.cfg, &win.camera);
+            win.labels = action_keys::labels(&self.cfg, &win.camera);
+        }
         match replace_at {
             Some(i) => self.wins.insert(i, win),
             None => self.wins.push(win),
@@ -1405,6 +1558,7 @@ impl App {
         let caption_h = self.out.caption_height();
         let min_gap = self.out.min_interval();
         let buttons = self.out.buttons();
+        let now = Instant::now();
         for w in &mut self.wins {
             // A restarted decoder takes over at its first live picture (a picture of any kind
             // when the old one has none live, or after 5 s).
@@ -1431,6 +1585,16 @@ impl App {
                 w.sound = sound;
                 self.out.set_sound(w.id, sound);
             }
+            // The action buttons also change by themselves (arming and results expire): shown
+            // within a pass of the loop (≤ 100 ms), as pills or in the caption.
+            let view = (action::shown(&w.actions, &w.labels, now), self.picker.choosing(w.id, now));
+            if view != w.action_view {
+                w.action_view = view;
+                self.out.set_actions(w.id, &w.action_view.0);
+                if !buttons {
+                    w.shared.dirty.store(true, Ordering::Relaxed);
+                }
+            }
             if w.last_draw.is_some_and(|t| t.elapsed() < min_gap) || !w.shared.dirty.swap(false, Ordering::Relaxed) {
                 continue;
             }
@@ -1452,12 +1616,15 @@ impl App {
                     String::new()
                 },
             );
+            // Desktop windows show pills instead (also without a caption).
+            let caption = if buttons { caption } else { action_keys::with_actions(&caption, &w.action_view.0, w.action_view.1) };
             self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
             // Each time: a window that did not fit for a while comes back as a new one.
             self.out.set_zoomed(w.id, !w.zoom.is_full());
             self.out.set_volume(w.id, w.shared.volume.load(Ordering::Relaxed));
             self.out.set_sound(w.id, w.sound);
             self.out.set_replay(w.id, w.shared.replay.load(Ordering::Relaxed));
+            self.out.set_actions(w.id, &w.action_view.0);
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).
@@ -1483,9 +1650,19 @@ impl App {
                 w.deadline = w.deadline.max(now + Duration::from_secs(5));
             }
         }
-        // A window under the mouse or pinned stays (desktop windows).
-        let expired: Vec<usize> =
-            (0..self.wins.len()).filter(|&i| now >= self.wins[i].deadline && !self.wins[i].hovered && !self.wins[i].pinned).collect();
+        // A window under the mouse or pinned stays (desktop windows), and so does one whose action
+        // button is armed, sending or showing a result, or that the `a` key's choice is open for.
+        let expired: Vec<usize> = (0..self.wins.len())
+            .filter(|&i| {
+                let w = &self.wins[i];
+                now >= w.deadline
+                    && !w.hovered
+                    && !w.pinned
+                    && !action::any_busy(&w.actions, now)
+                    && !self.picker.choosing(w.id, now)
+                    && !self.out.kept_open(w.id)
+            })
+            .collect();
         for i in expired.into_iter().rev() {
             self.close(i);
         }
@@ -1528,8 +1705,8 @@ impl App {
         self.layout();
     }
 
-    /// `false` = quit.
-    fn on_key(&mut self, k: u8) -> bool {
+    /// Key `k`, which the reader thread got `at`; `false` = quit.
+    fn on_key(&mut self, k: u8, at: Instant) -> bool {
         match k {
             b'q' | b'Q' | 3 => return false,
             b'x' | b'X' | 27 => {
@@ -1562,14 +1739,68 @@ impl App {
                     }
                 }
             }
-            b'1'..=b'9' => {
-                if let Some(c) = self.cameras.get((k - b'1') as usize) {
-                    let name = c.name.clone();
-                    self.test(&name);
-                }
-            }
+            b'a' | b'A' | b'1'..=b'9' => self.action_or_camera_key(k, at),
             _ => {}
         }
+        true
+    }
+
+    /// `a`, and a digit the `a` key's choice lists, count once settled (see `Picker::key` and
+    /// `settled_keys`); any other digit shows a camera at once.
+    fn action_or_camera_key(&mut self, k: u8, at: Instant) {
+        let taken = self.picker.key(k, at);
+        if !taken {
+            self.show_camera(k);
+        }
+    }
+
+    /// Digit key `k` (`'1'`–`'9'`): shows that camera.
+    fn show_camera(&mut self, k: u8) {
+        if let Some(c) = k.checked_sub(b'1').and_then(|i| self.cameras.get(i as usize)) {
+            let name = c.name.clone();
+            self.test(&name);
+        }
+    }
+
+    /// The action key presses that count by `t`, the moment the event queue was emptied (see
+    /// `action_keys::drain`), oldest first.
+    fn settled_keys(&mut self, t: Instant) {
+        while let Some(key) = self.picker.next_settled(t) {
+            match key {
+                Key::A => self.key_a(),
+                Key::Digit(win, n) => {
+                    if !self.choose_action(win, n) {
+                        self.show_camera(b'0' + n as u8);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The `a` key: the newest window on the screen whose camera has actions — one only, so that
+    /// with two gates one key never opens both. One action is pressed at once, several open the
+    /// choice (see `action_keys::Picker`).
+    fn key_a(&mut self) {
+        let wins: Vec<(u64, bool, bool)> = self.wins.iter().map(|w| (w.id, w.actions.iter().any(Option::is_some), w.rect.is_some())).collect();
+        let Some(id) = action_keys::a_target(&wins) else { return };
+        let Some(i) = self.wins.iter().position(|w| w.id == id) else { return };
+        let numbers = action_keys::numbers(&self.wins[i].actions);
+        if let Some(n) = self.picker.key_a(self.wins[i].id, &numbers, Instant::now()) {
+            self.press_action(i, n);
+        }
+    }
+
+    /// A digit of the `a` key's choice: presses action `n` of window `id`. `false` = the digit
+    /// shows a camera after all: the window has closed, or the action has gone meanwhile (the
+    /// settings were saved without it).
+    fn choose_action(&mut self, id: u64, n: usize) -> bool {
+        let now = Instant::now();
+        let Some(i) = self.wins.iter().position(|w| w.id == id) else {
+            self.picker.close();
+            return false;
+        };
+        let Some(look) = self.press_action(i, n) else { return false };
+        self.picker.pressed(look == Look::Armed, now);
         true
     }
 
@@ -1634,6 +1865,11 @@ impl App {
         i18n::set(i18n::resolve(&cfg.language));
         self.cfg = cfg;
         self.out.configure(&self.cfg);
+        // The action buttons follow the new settings, number by number (the next draw shows them).
+        for w in self.wins.iter_mut().filter(|w| !w.external) {
+            action_keys::refresh(&mut w.actions, &self.cfg, &w.camera);
+            w.labels = action_keys::labels(&self.cfg, &w.camera);
+        }
         self.update_hubs();
         // The listener also applies the filters (cameras, objects, zones…).
         self.start_listener();

@@ -11,7 +11,7 @@ use crate::config::Corner;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
@@ -42,7 +42,7 @@ fn quote(s: &str) -> String {
 }
 
 /// `true` if another process (the viewer) holds the lock on `path`.
-fn lock_held(path: &PathBuf) -> bool {
+fn lock_held(path: &Path) -> bool {
     let Ok(f) = File::open(path) else { return false };
     let fd = f.as_raw_fd();
     unsafe {
@@ -53,6 +53,20 @@ fn lock_held(path: &PathBuf) -> bool {
             true
         }
     }
+}
+
+/// The file a viewer keeps next to its lock while an action button is busy: the background
+/// process then leaves the popup open past its time.
+pub fn busy_path(lock: &Path) -> PathBuf {
+    let mut name = lock.as_os_str().to_owned();
+    name.push(".busy");
+    PathBuf::from(name)
+}
+
+/// The viewer of the popup with this lock runs and asks to keep the popup open. Only while it
+/// holds the lock: a viewer that died leaves no popup to keep, whatever file it left behind.
+fn viewer_busy(lock: &Path) -> bool {
+    busy_path(lock).exists() && lock_held(lock)
 }
 
 /// Viewer side: takes the lock for as long as the returned file lives.
@@ -112,6 +126,7 @@ impl Tmux {
         if lock_held(&popup.lock) {
             let _ = Command::new("tmux").args(["display-popup", "-C", "-c", &popup.client]).stderr(Stdio::null()).status();
         }
+        let _ = std::fs::remove_file(busy_path(&popup.lock));
         let _ = std::fs::remove_file(&popup.lock);
         crate::log!("tmux popup {id} closed");
     }
@@ -197,11 +212,16 @@ impl Output for Tmux {
         let alive = !p.seen && p.opened.elapsed().as_secs() < 5;
         if !alive {
             if let Some(p) = self.popups.remove(&id) {
+                let _ = std::fs::remove_file(busy_path(&p.lock));
                 let _ = std::fs::remove_file(&p.lock);
                 crate::log!("tmux popup {id} closed by the user");
             }
         }
         alive
+    }
+
+    fn kept_open(&self, id: u64) -> bool {
+        self.popups.get(&id).is_some_and(|p| viewer_busy(&p.lock))
     }
 }
 
@@ -211,7 +231,8 @@ impl Drop for Tmux {
         for id in ids {
             self.clear(id);
         }
-        let _ = std::fs::remove_dir(&self.lock_dir);
+        // The folder is this process's own; a busy file a viewer could not remove goes with it.
+        let _ = std::fs::remove_dir_all(&self.lock_dir);
     }
 }
 
@@ -223,6 +244,31 @@ mod tests {
     fn shell_quoting() {
         assert_eq!(quote("a b"), "'a b'");
         assert_eq!(quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn the_busy_file_sits_beside_the_lock() {
+        assert_eq!(busy_path(Path::new("/run/user/1000/frigate-pip-7/view-3.lock")), Path::new("/run/user/1000/frigate-pip-7/view-3.lock.busy"));
+    }
+
+    #[test]
+    fn a_busy_viewer_keeps_its_popup_only_while_it_runs() {
+        let dir = std::env::temp_dir().join(format!("frigate-pip-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join("view-1.lock");
+        let viewer = hold_lock(&lock.to_string_lossy()).unwrap();
+        assert!(!viewer_busy(&lock), "running, nothing busy");
+        std::fs::write(busy_path(&lock), b"").unwrap();
+        assert!(viewer_busy(&lock), "running and busy");
+        drop(viewer);
+        // A child that another test forks at this moment holds a copy of the descriptor until
+        // it execs, so the lock may outlive the drop for an instant: wait for it.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while viewer_busy(&lock) && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!viewer_busy(&lock), "the viewer is gone: its busy file keeps nothing open");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -138,7 +138,7 @@ fn handle(mut s: TcpStream, port: u16, token: &str, path: &Path, info: &Mutex<In
     let (route, query) = rest.split_once('?').unwrap_or((rest, ""));
     match (req.method.as_str(), route) {
         ("GET", "") => {
-            let html = page(&current(path), &info.lock().unwrap(), query.contains("saved=1").then_some(Ok(())));
+            let html = page(&current(path), &info.lock().unwrap(), query.contains("saved=1").then_some(Ok(())), &[]);
             respond(&mut s, "200 OK", "text/html; charset=utf-8", "", html.as_bytes())
         }
         ("POST", "save") => {
@@ -148,13 +148,29 @@ fn handle(mut s: TcpStream, port: u16, token: &str, path: &Path, info: &Mutex<In
             }
             let form = parse_form(&String::from_utf8_lossy(&req.body));
             let known = info.lock().unwrap().cameras.clone();
-            let saved = config::load(&path.to_path_buf()).and_then(|(_, mut doc)| {
+            // An action URL typed that is not valid stops the whole save, as on Windows.
+            let saved = config::load(&path.to_path_buf()).and_then(|(before, mut doc)| {
+                let bad = bad_urls(&form, &before, &known);
                 let autostart = apply(&form, &mut doc, &known);
-                std::fs::write(path, doc.to_text())?;
-                Ok(autostart)
+                if bad.is_empty() {
+                    std::fs::write(path, doc.to_text())?;
+                }
+                Ok((autostart, bad, doc))
             });
             match saved {
-                Ok(autostart) => {
+                Ok((autostart, bad, doc)) if !bad.is_empty() => {
+                    // The page again with everything as typed (not saved) and the reason by
+                    // each such row. Never the URL itself in the log.
+                    crate::log!("Settings not saved: an action URL is not valid");
+                    let mut shown = info.lock().unwrap().clone();
+                    shown.autostart = autostart.unwrap_or(shown.autostart);
+                    let first = &bad[0];
+                    let row = format!("{} – {}", first.title, i18n::fmt(t().action_row, &[&first.n]));
+                    let why = i18n::fmt(t().action_row_error, &[&row, &t().action_bad_url]);
+                    let html = page(&Config::from_ini(&doc), &shown, Some(Err(why)), &bad);
+                    respond(&mut s, "422 Unprocessable Content", "text/html; charset=utf-8", "", html.as_bytes())
+                }
+                Ok((autostart, _, _)) => {
                     crate::log!("Settings saved from the settings page");
                     if let Some(on) = autostart {
                         on_autostart(on);
@@ -165,7 +181,7 @@ fn handle(mut s: TcpStream, port: u16, token: &str, path: &Path, info: &Mutex<In
                     // The page again, with the reason (what was entered is not lost: Back).
                     let why = format!("{}: {e}", path.display());
                     crate::log!("Cannot save settings: {why}");
-                    let html = page(&current(path), &info.lock().unwrap(), Some(Err(why)));
+                    let html = page(&current(path), &info.lock().unwrap(), Some(Err(why)), &[]);
                     respond(&mut s, "500 Internal Server Error", "text/html; charset=utf-8", "", html.as_bytes())
                 }
             }
@@ -229,27 +245,27 @@ const FIELDS: [&str; 29] = [
     "video.camera_volume",
 ];
 
+/// The form's last value for `name`, as sent.
+fn last<'a>(form: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    form.iter().rev().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+}
+
 /// Puts the form values into the settings file; returns the autostart choice when the
 /// form had it. Lists of checkboxes: everything checked = everything (also cameras and
 /// objects added to Frigate later), as on Windows.
 fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> Option<bool> {
     // Credentials exactly as typed (spaces included); the rest without outer spaces.
-    let last = |name: &str| {
-        form.iter().rev().find(|(k, _)| k == name).map(|(_, v)| {
-            if matches!(name, "mqtt.user" | "mqtt.password" | "frigate.password") {
-                v.clone()
-            } else {
-                v.trim().to_string()
-            }
-        })
+    let value = |name: &str| {
+        last(form, name)
+            .map(|v| if matches!(name, "mqtt.user" | "mqtt.password" | "frigate.password") { v.to_string() } else { v.trim().to_string() })
     };
     for f in FIELDS.iter().chain(["video.prebuffer", "video.camera_audio", "video.wind_filter"].iter()) {
-        if let (Some(v), Some((section, key))) = (last(f), f.split_once('.')) {
+        if let (Some(v), Some((section, key))) = (value(f), f.split_once('.')) {
             // Quoted when needed: "abc #def" must not lose its end as a comment.
             doc.set(section, key, &config::ini_value(&v));
         }
     }
-    if let Some(v) = last("trigger.min_score") {
+    if let Some(v) = value("trigger.min_score") {
         let pct: f32 = v.replace(',', ".").parse().unwrap_or(0.0);
         doc.set("trigger", "min_score", &format!("{}", (pct.clamp(0.0, 100.0) / 100.0 * 100.0).round() / 100.0));
     }
@@ -278,16 +294,59 @@ fn apply(form: &[(String, String)], doc: &mut IniDoc, known: &[CameraInfo]) -> O
         let name = format!("camera.{cam}.labels");
         if form.iter().any(|(k, _)| *k == name) {
             let picked: Vec<String> = form.iter().filter(|(k, v)| *k == name && !v.is_empty()).map(|(_, v)| v.clone()).collect();
-            let own = if last(&format!("camera.{cam}.follow")).as_deref() == Some("0") {
+            let own = if value(&format!("camera.{cam}.follow")).as_deref() == Some("0") {
                 picked
             } else {
                 crate::view::own_labels(&picked, &cfg.labels, &labels)
             };
             cfg.set_own_labels(cam, own);
         }
+        // Its action buttons, by the rule the Windows tab uses (a URL that is not valid keeps
+        // the one saved; `bad_urls` tells the user). A row that was not sent stays as it is.
+        for n in 1..=config::ACTIONS {
+            let Some(url) = value(&action_field(cam, n, "url")) else { continue };
+            let saved = cfg.camera(cam).and_then(|o| o.action(n)).cloned().unwrap_or_default();
+            let label = value(&action_field(cam, n, "label")).unwrap_or_else(|| saved.label.unwrap_or_default());
+            let confirm = value(&action_field(cam, n, "confirm")).map_or(saved.confirm, |v| v == "true");
+            cfg.set_action_typed(cam, n, &url, &label, confirm);
+        }
     }
     config::write_all(&cfg, doc);
-    last("autostart").map(|v| v == "true")
+    value("autostart").map(|v| v == "true")
+}
+
+/// The form field of a camera's action `n`: `camera.<cam>.action<n>_<what>`.
+fn action_field(cam: &str, n: usize, what: &str) -> String {
+    format!("camera.{cam}.action{n}_{what}")
+}
+
+/// An action URL typed in the form that is not valid, so not saved. No `Debug`: the URL is a
+/// secret.
+struct BadUrl {
+    cam: String,
+    /// The camera's name on the page.
+    title: String,
+    /// The action's number, 1 to `ACTIONS`.
+    n: usize,
+    /// As typed: shown again in its field, nowhere else.
+    url: String,
+}
+
+/// The form's action URLs that are not valid (`action::valid_url`), camera by camera as the
+/// page lists them. One already so in the saved settings (`before`) is the user's own business,
+/// as on Windows: it does not stop saving the rest.
+fn bad_urls(form: &[(String, String)], before: &Config, known: &[CameraInfo]) -> Vec<BadUrl> {
+    let (cams, _, _) = crate::view::choices(known, before);
+    let mut bad = Vec::new();
+    for (cam, title) in &cams {
+        for n in 1..=config::ACTIONS {
+            let Some(url) = last(form, &action_field(cam, n, "url")) else { continue };
+            if !crate::action::valid_url(url) && before.action_url(cam, n).map(str::trim) != Some(url.trim()) {
+                bad.push(BadUrl { cam: cam.clone(), title: title.clone(), n, url: url.to_string() });
+            }
+        }
+    }
+    bad
 }
 
 fn esc(s: &str) -> String {
@@ -353,8 +412,94 @@ fn opts(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
     pairs.iter().map(|(v, l)| (v.to_string(), l.to_string())).collect()
 }
 
-/// The settings page; `saved` = the result of the last save, shown above the form.
-fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
+/// The Actions section: a camera select and, for every camera, a group of `ACTIONS` rows
+/// (`action_row`); the page's script shows the selected camera's group. A URL that is not
+/// valid gets the reason under its row: one in `bad` (typed, not saved) is shown as typed, one
+/// from the settings file as it is there. Cameras with such a row are marked " !" in the select.
+fn actions(c: &Config, cams: &[(String, String)], bad: &[BadUrl]) -> String {
+    let s = t();
+    if cams.is_empty() {
+        // Nothing to pick: a caption without a control to point at.
+        return format!(
+            "<div class=\"row\"><span class=\"label\">{}</span><div><p class=\"tip\">{}</p></div></div>\n",
+            esc(s.action_camera),
+            esc(s.menu_no_cameras)
+        );
+    }
+    let typed = |cam: &str, n: usize| bad.iter().find(|b| b.cam.eq_ignore_ascii_case(cam) && b.n == n).map(|b| b.url.as_str());
+    // Selected first: a camera with a URL typed wrong, else one with buttons, else the first.
+    let selected = bad
+        .first()
+        .and_then(|b| cams.iter().position(|(n, _)| n.eq_ignore_ascii_case(&b.cam)))
+        .or_else(|| cams.iter().position(|(n, _)| !c.actions_for(n).is_empty()))
+        .unwrap_or(0);
+    let (mut options, mut groups) = (String::new(), String::new());
+    for (i, (cam, title)) in cams.iter().enumerate() {
+        // Column headings, then a row per action.
+        let mut rows = format!(
+            "<span class=\"head\"></span><span class=\"head\" title=\"{}\">{}</span><span class=\"head\" title=\"{}\">{}</span><span class=\"head\"></span>",
+            esc(s.tip_action_url),
+            esc(s.action_url),
+            esc(s.tip_action_label),
+            esc(s.action_label)
+        );
+        let mut wrong = false;
+        for n in 1..=config::ACTIONS {
+            let a = c.camera(cam).and_then(|o| o.action(n)).cloned().unwrap_or_default();
+            let url = typed(cam, n).or(a.url.as_deref()).unwrap_or_default();
+            wrong |= !crate::action::valid_url(url);
+            rows += &action_row(cam, i, n, url, &a);
+        }
+        let mark = if wrong { " !" } else { "" };
+        options += &format!("<option value=\"{}\"{}>{}{mark}</option>", esc(cam), if i == selected { " selected" } else { "" }, esc(title));
+        // The camera's name for screen readers, which do not see which group is shown.
+        groups += &format!("<div class=\"actions\" role=\"group\" aria-label=\"{}\" data-action-for=\"{}\">{rows}</div>", esc(title), esc(cam));
+    }
+    let select = format!("<select id=\"action-for\" title=\"{}\">{options}</select>", esc(s.tip_action_camera));
+    format!("{}{groups}<p class=\"note\">{}</p>\n", row("action-for", s.action_camera, select, s.tip_action_camera), esc(s.action_note))
+}
+
+/// The row of action `n` of camera `cam` (the `i`th in the select) with `url` in its field:
+/// caption, URL, label, confirmation, and the reason under it when the URL is not valid. Ids
+/// by position: a camera's name can hold anything, its form names are escaped.
+fn action_row(cam: &str, i: usize, n: usize, url: &str, a: &config::ActionCfg) -> String {
+    let s = t();
+    let caption = i18n::fmt(s.action_row, &[&n]);
+    let id = format!("action-{i}-{n}");
+    let error = !crate::action::valid_url(url);
+    let invalid_attrs = if error { format!(" aria-invalid=\"true\" aria-describedby=\"{id}-error\"") } else { String::new() };
+    let mut row = format!(
+        "<label for=\"{id}-url\" title=\"{tip_url}\">{caption}</label>\
+         <input type=\"text\" inputmode=\"url\" spellcheck=\"false\" autocomplete=\"off\" id=\"{id}-url\" name=\"{url_name}\" value=\"{url}\" \
+         title=\"{tip_url}\" placeholder=\"{url_head}\" aria-label=\"{caption} {url_head}\"{invalid_attrs}>\
+         <input type=\"text\" autocomplete=\"off\" id=\"{id}-label\" name=\"{label_name}\" value=\"{label}\" title=\"{tip_label}\" \
+         placeholder=\"{label_head}\" aria-label=\"{caption} {label_head}\">\
+         <span><input type=\"hidden\" name=\"{confirm_name}\" value=\"false\"><label class=\"check\" title=\"{tip_confirm}\">\
+         <input type=\"checkbox\" id=\"{id}-confirm\" name=\"{confirm_name}\" value=\"true\" aria-label=\"{caption} {confirm}\"{checked}> {confirm}</label></span>",
+        caption = esc(&caption),
+        tip_url = esc(s.tip_action_url),
+        url_name = esc(&action_field(cam, n, "url")),
+        url = esc(url),
+        url_head = esc(s.action_url),
+        label_name = esc(&action_field(cam, n, "label")),
+        label = esc(a.label.as_deref().unwrap_or_default()),
+        tip_label = esc(s.tip_action_label),
+        label_head = esc(s.action_label),
+        confirm_name = esc(&action_field(cam, n, "confirm")),
+        tip_confirm = esc(s.tip_action_confirm),
+        confirm = esc(s.action_confirm_short),
+        checked = if a.confirm { " checked" } else { "" },
+    );
+    if error {
+        let why = i18n::fmt(s.action_row_error, &[&caption, &s.action_bad_url]);
+        row += &format!("<p class=\"error\" id=\"{id}-error\">{}</p>", esc(&why));
+    }
+    row
+}
+
+/// The settings page; `saved` = the result of the last save, shown above the form; `bad` = the
+/// action URLs typed that stopped it (see `actions`).
+fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>, bad: &[BadUrl]) -> String {
     let s = t();
     let lang = i18n::current();
     let (cams, labels, zones) = crate::view::choices(&info.cameras, c);
@@ -537,6 +682,8 @@ fn page(c: &Config, info: &Info, saved: Option<Result<(), String>>) -> String {
     video += &row("video.camera_volume", s.camera_volume, number("video.camera_volume", c.camera_volume, 0, 100, "%"), s.tip_camera_volume);
     video += &row("video.wind_filter", "", checkbox("video.wind_filter", c.wind_filter, s.wind_filter), s.tip_wind_filter);
 
+    let actions = actions(c, &cams, bad);
+
     let saved = match saved {
         Some(Ok(())) => format!("<p class=\"saved\">{}</p>", esc(s.linux_settings_saved)),
         Some(Err(why)) => format!("<p class=\"error\">{}</p>", esc(&i18n::fmt(s.linux_settings_not_saved, &[&why]))),
@@ -575,13 +722,23 @@ label.check {{ display: inline-flex; align-items: center; gap: 6px; margin: 2px 
 .checks {{ display: flex; flex-wrap: wrap; }}
 #labels-for {{ max-width: 260px; margin-bottom: 6px; }}
 button.same {{ margin-top: 6px; }}
+#action-for {{ max-width: 260px; }}
+.actions {{ display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 170px) auto; gap: 6px 10px; align-items: center; padding: 8px 0; }}
+.actions > label, .row > span.label {{ font-weight: 600; }}
+.actions .head {{ font-weight: 600; color: var(--muted); font-size: 13px; }}
+.actions input[type=text] {{ max-width: none; }}
+.actions .error {{ grid-column: 2 / -1; margin: -2px 0 4px; font-size: 13px; }}
 button {{ cursor: pointer; }}
 button.primary {{ background: var(--accent); border-color: var(--accent); color: #fff; padding: 8px 20px; font-weight: 600; }}
 pre {{ white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 8px 0 0; font-size: 13px; }}
 .bar {{ position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 12px 16px; text-align: center; }}
 .saved {{ color: var(--ok); font-weight: 600; margin: 0 0 12px; }}
 .error {{ color: var(--bad); font-weight: 600; margin: 0 0 12px; }}
-@media (max-width: 640px) {{ .row {{ grid-template-columns: 1fr; }} .row > label {{ padding-top: 0; }} }}
+@media (max-width: 640px) {{
+  .row, .actions {{ grid-template-columns: 1fr; }} .row > label {{ padding-top: 0; }}
+  .actions .head {{ display: none; }} .actions .error {{ grid-column: auto; }}
+  .actions > label ~ label {{ border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; }}
+}}
 </style>
 </head>
 <body>
@@ -597,6 +754,8 @@ pre {{ white-space: pre-wrap; background: var(--bg); border: 1px solid var(--lin
 {window}</section>
 <section><h2>{tab_video}</h2>
 {video}</section>
+<section><h2>{tab_actions}</h2>
+{actions}</section>
 <div class="bar"><button type="submit" class="primary">{apply}</button></div>
 </form>
 </main>
@@ -651,11 +810,30 @@ if (scope) {{
   form.addEventListener("change", mark);
   pick();
 }}
+// actions:begin
+// One camera's action buttons at a time (the page selects the one to show first).
+const actionFor = document.getElementById("action-for");
+if (actionFor) {{
+  const groups = [...document.querySelectorAll("[data-action-for]")];
+  const pick = () => groups.forEach((g) => {{ g.style.display = g.dataset.actionFor === actionFor.value ? "" : "none"; }});
+  actionFor.addEventListener("change", pick);
+  pick();
+}}
+// actions:end
+// test-query:begin
+// The form's values for the connection test, in the address: without the action buttons'
+// fields, whose URLs are secrets the test does not need.
+const testQuery = (form) => {{
+  const data = new FormData(form);
+  for (const f of form.querySelectorAll("[data-action-for] [name]")) data.delete(f.name);
+  return new URLSearchParams(data).toString();
+}};
+// test-query:end
 document.getElementById("test").addEventListener("click", async () => {{
   const out = document.getElementById("out");
   out.textContent = "…";
   try {{
-    const r = await fetch("test?" + new URLSearchParams(new FormData(form)));
+    const r = await fetch("test?" + testQuery(form));
     out.textContent = await r.text();
   }} catch (e) {{ out.textContent = String(e); }}
 }});
@@ -672,6 +850,7 @@ document.getElementById("test").addEventListener("click", async () => {{
         tab_detection = esc(s.tab_detection),
         tab_window = esc(s.tab_window),
         tab_video = esc(s.tab_video),
+        tab_actions = esc(s.tab_actions),
         apply = esc(s.apply),
     )
 }
@@ -772,7 +951,7 @@ mod tests {
         i18n::set(Lang::En);
         let c = Config::from_ini(&IniDoc::parse("[trigger]\nlabels = person\n[camera.garden]\nlabels = dog\n"));
         let info = Info { cameras: vec![cam("front", &["person", "car"]), cam("garden", &["person", "dog"])], ..Default::default() };
-        let html = page(&c, &info, None);
+        let html = page(&c, &info, None, &[]);
         assert!(html.contains("<option value=\"\">All cameras</option>"), "{html}");
         assert!(html.contains("<option value=\"front\" data-title=\"front\">front</option>"));
         assert!(html.contains("<option value=\"garden\" data-title=\"garden\">garden *</option>"));
@@ -793,7 +972,7 @@ mod tests {
     fn page_object_rules() {
         i18n::set(Lang::En);
         let c = Config::from_ini(&IniDoc::parse(""));
-        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None);
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None, &[]);
         let rules = html.split("// rules:begin").nth(1).and_then(|r| r.split("// rules:end").next()).expect("rules in the page");
         let checks = r#"
 const assert = require("assert");
@@ -824,9 +1003,254 @@ eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
     fn camera_names_are_escaped_in_object_lists() {
         i18n::set(Lang::En);
         let c = Config::from_ini(&IniDoc::parse("[trigger]\ncameras = front, x\"<y\n"));
-        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None);
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None, &[]);
         assert!(html.contains("name=\"camera.x&quot;&lt;y.labels\""), "{html}");
         assert!(!html.contains("x\"<y"));
+    }
+
+    #[test]
+    fn saving_camera_actions() {
+        let mut doc = IniDoc::parse(config::DEFAULT_INI);
+        let known = [cam("front", &["person"]), cam("gate", &["person"])];
+        // Rows 1 and 3 with a URL, 2 with a label only, 4 empty; the checkbox sends "false"
+        // and, when checked, "true" after it.
+        let form = parse_form(
+            "camera.gate.action1_url=+http%3A%2F%2Fh%2Fapi%2Fwebhook%2Fa+&camera.gate.action1_label=+Gate+\
+             &camera.gate.action1_confirm=false&camera.gate.action1_confirm=true\
+             &camera.gate.action2_url=&camera.gate.action2_label=Light&camera.gate.action2_confirm=false&camera.gate.action2_confirm=true\
+             &camera.gate.action3_url=https%3A%2F%2Fh%2Flight%3Fa%3D1%26b%3D2&camera.gate.action3_label=&camera.gate.action3_confirm=false\
+             &camera.gate.action4_url=&camera.gate.action4_label=&camera.gate.action4_confirm=false",
+        );
+        apply(&form, &mut doc, &known);
+        let c = Config::from_ini(&doc);
+        let shown = c.actions_for("gate");
+        assert_eq!(shown.iter().map(|a| a.n).collect::<Vec<_>>(), [1, 3], "no URL = no button");
+        assert_eq!((shown[0].label, shown[0].confirm), (Some("Gate"), true));
+        assert_eq!((shown[1].label, shown[1].confirm), (None, false));
+        assert_eq!(c.action_url("gate", 1), Some("http://h/api/webhook/a"));
+        assert_eq!(c.action_url("gate", 3), Some("https://h/light?a=1&b=2"));
+        assert_eq!(c.action_url("gate", 2), None);
+        assert!(c.actions_for("front").is_empty());
+        assert_eq!(doc.get("camera.front", "action1_url"), None, "no section for a camera without buttons");
+        // Rows that were not sent stay as they are.
+        apply(&parse_form("camera.gate.action1_url=http%3A%2F%2Fh%2Fb"), &mut doc, &known);
+        let c = Config::from_ini(&doc);
+        assert_eq!(c.actions_for("gate").iter().map(|a| (a.n, a.label, a.confirm)).collect::<Vec<_>>(), [(1, Some("Gate"), true), (3, None, false)]);
+        assert_eq!(c.action_url("gate", 1), Some("http://h/b"));
+    }
+
+    #[test]
+    fn an_action_url_that_is_not_valid_is_never_saved() {
+        let ini = format!("{}\n[camera.gate]\naction1_url = http://h/old\naction3_url = nonsense\n", config::DEFAULT_INI);
+        let before = Config::from_ini(&IniDoc::parse(&ini));
+        let form = parse_form(
+            "camera.gate.action1_url=not+a+url&camera.gate.action1_label=Gate&camera.gate.action2_url=ftp%3A%2F%2Fh%2Fx\
+             &camera.gate.action3_url=nonsense&camera.gate.action4_url=",
+        );
+        // Typed ones stop the save; one already in the file (row 3) does not, as on Windows.
+        let bad = bad_urls(&form, &before, &[]);
+        assert_eq!(
+            bad.iter().map(|b| (b.cam.as_str(), b.n, b.url.as_str())).collect::<Vec<_>>(),
+            [("gate", 1, "not a url"), ("gate", 2, "ftp://h/x")]
+        );
+        // Applied anyway (the test button does), the saved URLs stay.
+        let mut doc = IniDoc::parse(&ini);
+        apply(&form, &mut doc, &[]);
+        let c = Config::from_ini(&doc);
+        assert_eq!(c.action_url("gate", 1), Some("http://h/old"));
+        assert_eq!(c.action_url("gate", 2), None);
+        assert_eq!(c.action_url("gate", 3), Some("nonsense"));
+        assert_eq!(c.camera("gate").unwrap().action(1).unwrap().label.as_deref(), Some("Gate"));
+    }
+
+    #[test]
+    fn the_camera_filter_counts_cameras_with_buttons_or_objects() {
+        // A camera Frigate does not know, with only an action button or only an object list,
+        // is in the filter; all checked = all cameras (empty).
+        for extra in ["[camera.gate]\naction1_url = http://h/a\n", "[camera.gate]\nlabels = cat\n"] {
+            let known = [cam("front", &["person"])];
+            let mut doc = IniDoc::parse(&format!("{}\n{extra}", config::DEFAULT_INI));
+            apply(&parse_form("trigger.cameras=&trigger.cameras=front&trigger.cameras=gate"), &mut doc, &known);
+            assert!(Config::from_ini(&doc).cameras.is_empty(), "{extra}");
+            apply(&parse_form("trigger.cameras=&trigger.cameras=front"), &mut doc, &known);
+            assert_eq!(Config::from_ini(&doc).cameras, ["front"], "{extra}");
+        }
+    }
+
+    #[test]
+    fn page_shows_camera_actions() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse(
+            "[camera.gate]\naction2_url = http://h/api/webhook/x\naction2_label = Gate\naction2_confirm = false\naction3_url = nonsense\n",
+        ));
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"]), cam("gate", &["person"])], ..Default::default() }, None, &[]);
+        let video = html.find("<h2>Video &amp; audio</h2>").expect("video section");
+        assert!(html.find("<section><h2>Actions</h2>").is_some_and(|a| a > video), "the Actions section after the Video one");
+        // A camera with buttons is shown first.
+        // Marked: a row with a URL that is not valid (action 3).
+        assert!(html.contains("<option value=\"front\">front</option><option value=\"gate\" selected>gate !</option>"), "{html}");
+        assert!(html.contains("role=\"group\" aria-label=\"gate\" data-action-for=\"gate\""));
+        assert!(html.contains("data-action-for=\"front\"") && html.contains("data-action-for=\"gate\""));
+        assert!(html.contains(">Action 4</label>") && html.contains("aria-label=\"Action 2 URL\""));
+        assert!(html.contains("name=\"camera.gate.action2_url\" value=\"http://h/api/webhook/x\""));
+        assert!(html.contains("name=\"camera.gate.action2_label\" value=\"Gate\""));
+        // Confirmation: on unless switched off; unchecked still sends "false".
+        assert!(html.contains("<input type=\"hidden\" name=\"camera.gate.action2_confirm\" value=\"false\">"));
+        assert!(html.contains("name=\"camera.gate.action2_confirm\" value=\"true\" aria-label=\"Action 2 Confirmation\"> Confirmation"));
+        assert!(html.contains("name=\"camera.gate.action1_confirm\" value=\"true\" aria-label=\"Action 1 Confirmation\" checked>"));
+        // A URL in the file that is not valid: the reason under its row (and only there).
+        assert!(html.contains("<p class=\"error\" id=\"action-1-3-error\">Action 3: Not a valid http:// or https:// address.</p>"));
+        assert_eq!(html.matches("class=\"error\"").count(), 1);
+    }
+
+    #[test]
+    fn page_shows_action_urls_typed_wrong() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/old\n[camera.yard]\naction1_url = http://h/y\n"));
+        let bad = [BadUrl { cam: "yard".into(), title: "yard".into(), n: 2, url: "x\"<y".into() }];
+        let html = page(&c, &Info::default(), Some(Err("Action 2: …".into())), &bad);
+        // That camera is shown, the field keeps what was typed, the reason is under it.
+        assert!(html.contains("<option value=\"yard\" selected>"), "{html}");
+        assert!(html.contains("name=\"camera.yard.action2_url\" value=\"x&quot;&lt;y\" title="));
+        assert!(html.contains("aria-invalid=\"true\" aria-describedby=\"action-1-2-error\""));
+        assert!(html.contains("id=\"action-1-2-error\">Action 2: Not a valid"));
+        assert!(!html.contains("x\"<y"));
+    }
+
+    #[test]
+    fn page_lists_cameras_only_known_by_their_buttons() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/a\n"));
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None, &[]);
+        assert!(html.contains("data-action-for=\"gate\"") && html.contains("<option value=\"gate\" selected>gate</option>"), "{html}");
+        assert!(html.contains("name=\"trigger.cameras\" value=\"gate\" checked"));
+        // No cameras at all: no rows, a word why.
+        let html = page(&Config::from_ini(&IniDoc::parse("")), &Info::default(), None, &[]);
+        assert!(!html.contains("<div class=\"actions\"") && html.contains("(no cameras)"));
+        assert!(!html.contains("for=\"action-for\""), "no label without its control");
+    }
+
+    #[test]
+    fn camera_names_are_escaped_in_action_groups() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse("[camera.x\"<y]\naction1_url = http://h/a\n"));
+        let html = page(&c, &Info::default(), None, &[]);
+        assert!(html.contains("data-action-for=\"x&quot;&lt;y\""), "{html}");
+        assert!(html.contains("name=\"camera.x&quot;&lt;y.action1_url\""));
+        assert!(html.contains("<option value=\"x&quot;&lt;y\" selected>x&quot;&lt;y</option>"));
+        assert!(!html.contains("x\"<y"));
+    }
+
+    /// The script that shows one camera's action rows, run by node on stand-ins for the page.
+    #[test]
+    fn page_action_camera_select() {
+        i18n::set(Lang::En);
+        let html = page(&Config::from_ini(&IniDoc::parse("")), &Info { cameras: vec![cam("front", &[])], ..Default::default() }, None, &[]);
+        let script = html.split("// actions:begin").nth(1).and_then(|r| r.split("// actions:end").next()).expect("script in the page");
+        let setup = r#"
+const assert = require("assert");
+const groups = [{ dataset: { actionFor: "front" }, style: {} }, { dataset: { actionFor: "gate" }, style: {} }];
+// The object lists' groups are not touched.
+const other = { dataset: { for: "front" }, style: {} };
+let changed;
+const select = { value: "gate", addEventListener: (e, f) => { assert.strictEqual(e, "change"); changed = f; } };
+const document = {
+  getElementById: (id) => (id === "action-for" ? select : null),
+  querySelectorAll: (q) => (q === "[data-action-for]" ? groups : q === "[data-for]" ? [other] : []),
+};
+"#;
+        let checks = r#"
+const shown = () => groups.map((g) => g.style.display);
+assert.deepStrictEqual(shown(), ["none", ""]);
+select.value = "front";
+changed();
+assert.deepStrictEqual(shown(), ["", "none"]);
+assert.strictEqual(other.style.display, undefined);
+"#;
+        match std::process::Command::new("node").arg("-e").arg(format!("{setup}\n{script}\n{checks}")).output() {
+            Ok(out) => assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)),
+            Err(e) => eprintln!("node is not available ({e}): the page's action script was not run"),
+        }
+    }
+
+    #[test]
+    fn saving_stops_at_an_action_url_typed_wrong() {
+        i18n::set(Lang::En);
+        let dir = TempDir::new("fpip-web-actions");
+        let path = dir.0.join("config.ini");
+        std::fs::write(&path, format!("{}\n[camera.gate]\naction1_url = http://h/old\naction3_url = nonsense\n", config::DEFAULT_INI)).unwrap();
+        let autostart = Arc::new(Mutex::new(Vec::new()));
+        let calls = autostart.clone();
+        let web = start(path.clone(), Arc::new(Mutex::new(Info::default())), Arc::new(move |on| calls.lock().unwrap().push(on))).unwrap();
+        let (port, key) = web.url.strip_prefix("http://127.0.0.1:").unwrap().split_once('/').unwrap();
+        let (port, host) = (port.parse().unwrap(), format!("127.0.0.1:{port}"));
+        let save = |form: &str| {
+            let head = format!("POST /{key}save HTTP/1.1\r\nHost: {host}\r\nOrigin: http://{host}\r\nContent-Length: {}", form.len());
+            send(port, &format!("{head}\r\n\r\n{form}"))
+        };
+        let before = std::fs::read_to_string(&path).unwrap();
+        let answer = save("display.width=640&autostart=false&autostart=true&camera.gate.action1_url=not+a+url&camera.gate.action3_url=nonsense");
+        assert!(answer.starts_with("HTTP/1.1 422 "), "{answer}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "nothing is saved");
+        assert!(autostart.lock().unwrap().is_empty(), "nor is autostart changed");
+        assert!(answer.contains("id=\"autostart\" name=\"autostart\" value=\"true\" checked"), "but shown as typed");
+        // The page again: what was typed, and why it was not saved.
+        assert!(answer.contains("<p class=\"error\">Not saved: gate – Action 1: Not a valid http:// or https:// address.</p>"), "{answer}");
+        assert!(answer.contains("name=\"camera.gate.action1_url\" value=\"not a url\""));
+        assert!(answer.contains("id=\"display-width\" name=\"display.width\" value=\"640\""));
+        // A URL that is not valid but already in the file does not stop the rest.
+        let answer = save("display.width=640&camera.gate.action1_url=http%3A%2F%2Fh%2Fnew&camera.gate.action3_url=nonsense");
+        assert!(answer.starts_with("HTTP/1.1 303 "), "{answer}");
+        let c = config::load(&path).unwrap().0;
+        assert_eq!((c.width, c.action_url("gate", 1), c.action_url("gate", 3)), (640, Some("http://h/new"), Some("nonsense")));
+    }
+
+    #[test]
+    fn page_marks_every_camera_with_a_url_typed_wrong() {
+        i18n::set(Lang::En);
+        let c = Config::from_ini(&IniDoc::parse("[camera.a]\naction1_url = http://h/a\n[camera.b]\naction1_url = http://h/b\n"));
+        let info = Info { cameras: vec![cam("a", &[]), cam("b", &[]), cam("c", &[])], ..Default::default() };
+        let bad = [
+            BadUrl { cam: "b".into(), title: "b".into(), n: 2, url: "x".into() },
+            BadUrl { cam: "c".into(), title: "c".into(), n: 4, url: "y".into() },
+        ];
+        let html = page(&c, &info, Some(Err("…".into())), &bad);
+        assert!(html.contains("<option value=\"a\">a</option><option value=\"b\" selected>b !</option><option value=\"c\">c !</option>"), "{html}");
+    }
+
+    /// The connection test sends the form in its address: never the action URLs. Run by node
+    /// on stand-ins for the form.
+    #[test]
+    fn connection_test_leaves_out_the_actions() {
+        i18n::set(Lang::En);
+        let html = page(&Config::from_ini(&IniDoc::parse("")), &Info { cameras: vec![cam("front", &[])], ..Default::default() }, None, &[]);
+        // The Test button must build its query with testQuery, not from the whole form.
+        assert!(html.contains(r#"fetch("test?" + testQuery(form))"#), "the Test button uses testQuery");
+        let script = html.split("// test-query:begin").nth(1).and_then(|r| r.split("// test-query:end").next()).expect("script in the page");
+        let setup = r#"
+const assert = require("assert");
+class FormData {
+  constructor(form) { this.pairs = form.pairs.slice(); }
+  delete(name) { this.pairs = this.pairs.filter(([k]) => k !== name); }
+  [Symbol.iterator]() { return this.pairs[Symbol.iterator](); }
+}
+const form = {
+  pairs: [["frigate.url", "http://f:5000"], ["camera.front.action1_url", "http://h/secret"], ["camera.front.action1_label", "Gate"],
+    ["camera.front.action1_confirm", "false"], ["camera.front.action1_confirm", "true"], ["mqtt.user", "me"]],
+  querySelectorAll: (q) => {
+    assert.strictEqual(q, "[data-action-for] [name]");
+    const names = ["camera.front.action1_url", "camera.front.action1_label", "camera.front.action1_confirm", "camera.front.action1_confirm"];
+    return names.map((name) => ({ name }));
+  },
+};
+"#;
+        let checks = r#"
+assert.strictEqual(testQuery(form), "frigate.url=http%3A%2F%2Ff%3A5000&mqtt.user=me");
+"#;
+        match std::process::Command::new("node").arg("-e").arg(format!("{setup}\n{script}\n{checks}")).output() {
+            Ok(out) => assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)),
+            Err(e) => eprintln!("node is not available ({e}): the page's connection test script was not run"),
+        }
     }
 
     #[test]
@@ -839,6 +1263,24 @@ eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
         // Saved again (e.g. another setting changed): still the same.
         let c2 = Config::from_ini(&IniDoc::parse(&doc.to_text()));
         assert_eq!(c2.mqtt_password, " ab;c #d ");
+    }
+
+    /// A folder of its own for a test, removed when the test ends (also when it fails).
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> TempDir {
+            let dir = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     /// A raw request to the running page; the whole answer (the server then closes).
@@ -855,9 +1297,8 @@ eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
         // Chromium sends `Origin: null` with the form of a page served with
         // `Referrer-Policy: no-referrer`, and that origin is refused. Other sites must
         // still get no referrer: the page address carries the key.
-        let dir = std::env::temp_dir().join(format!("fpip-web-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join("config.ini");
+        let dir = TempDir::new("fpip-web");
+        let path = dir.0.join("config.ini");
         let web = start(path.clone(), Arc::new(Mutex::new(Info::default())), Arc::new(|_| {})).unwrap();
         let (port, key) = web.url.strip_prefix("http://127.0.0.1:").unwrap().split_once('/').unwrap();
         let (port, host) = (port.parse().unwrap(), format!("127.0.0.1:{port}"));
@@ -874,7 +1315,6 @@ eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
         assert!(save("http://example.com").starts_with("HTTP/1.1 403 "));
         assert!(save(&format!("http://{host}")).starts_with("HTTP/1.1 303 "));
         assert_eq!(config::load(&path).unwrap().0.url, "http://10.0.0.5:5000");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -896,14 +1336,14 @@ eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
             monitors: vec![(-1920, 1280, 1024, false), (0, 1920, 1080, true)],
             autostart: true,
         };
-        let html = page(&c, &info, Some(Ok(())));
+        let html = page(&c, &info, Some(Ok(())), &[]);
         assert!(html.contains("&lt;script&gt;") && !html.contains("\"<script>"));
         assert!(html.contains("name=\"trigger.cameras\" value=\"front_door\" checked"));
         // Monitors are numbered from the left.
         assert!(html.contains("<option value=\"1\">Monitor 1 – 1280×1024</option>"));
         assert!(html.contains("Monitor 2 – 1920×1080 (primary)"));
         assert!(html.contains("id=\"autostart\" name=\"autostart\" value=\"true\" checked"));
-        let failed = page(&c, &info, Some(Err("/x/config.ini: <denied>".into())));
+        let failed = page(&c, &info, Some(Err("/x/config.ini: <denied>".into())), &[]);
         assert!(failed.contains("class=\"error\">Not saved: /x/config.ini: &lt;denied&gt;</p>"));
     }
 
@@ -915,7 +1355,7 @@ eq(rules.after(cam(["d"], false), ["p", "c"], "same"), cam(["p", "c"], true));
         // and these tests run side by side, so a test that changes it breaks another.
         i18n::set(Lang::En);
         let c = Config::from_ini(&IniDoc::parse(config::DEFAULT_INI));
-        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None);
+        let html = page(&c, &Info { cameras: vec![cam("front", &["person"])], ..Default::default() }, None, &[]);
         assert!(html.contains("user-guide.md"), "no link to the user guide");
         let link = format!("<a href=\"{}\" target=\"_blank\" rel=\"noreferrer\">Support FrigatePiP</a>", crate::util::SPONSOR_URL);
         assert!(html.contains(&link), "no link to the sponsors page");
