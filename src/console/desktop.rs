@@ -1,24 +1,27 @@
 //! Desktop output: each preview window is a borderless always-on-top X11 window (an X11
 //! desktop, or Wayland through XWayland) in the chosen corner of the chosen monitor.
 //! The mouse works like on Windows: × closes, the speaker mutes, the slider under it sets
-//! the volume, ⟲ replays the start of the event, dragging moves (with Ctrl a zoomed
-//! picture, otherwise the window), a click pins, a double click opens the camera in
-//! Frigate, the right button closes.
+//! the volume, ⟲ replays the start of the event, the pills in the bottom-left corner run the
+//! camera's actions, dragging moves (with Ctrl a zoomed picture, otherwise the window), a
+//! click pins, a double click opens the camera in Frigate, the right button closes.
 
 use super::canvas::{Font, Image};
 use super::x11::{Event, Monitor, BUTTON1_MASK, CONTROL_MASK, X11};
 use super::{Action, Output, Rect};
+use crate::action::{self, Placed, Shown};
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// The button under the mouse.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Hot {
     None,
     Close,
     Sound,
     Volume,
     Replay,
+    /// The pill of action `n`.
+    Action(usize),
 }
 
 /// Left button held on a window.
@@ -88,6 +91,10 @@ struct Win {
     volume: u8,
     /// The picture is zoomed in.
     zoomed: bool,
+    /// The action buttons as they look now, and where their pills were last drawn (window
+    /// pixels; pills that did not fit are left out).
+    actions: Vec<Shown>,
+    pills: Vec<Placed>,
     press: Option<Press>,
     /// Time and place of the last left click (double clicks).
     last_click: Option<(u32, i32, i32)>,
@@ -127,6 +134,58 @@ fn button_rects(w: u32, scale: f32) -> (Area, Area) {
 /// Replay button: left of the sound button with camera audio, otherwise in its place.
 fn replay_rect(close: Area, sound: Area, with_sound: bool, scale: f32) -> Area {
     crate::view::left_of(if with_sound { sound } else { close }, scale)
+}
+
+/// The action pills of a window `w`×`h` with the given sound and replay states (see `Win`), one
+/// per text width, as `action::pill_row` places them: the row ends left of the leftmost
+/// top-right control level with it — the controls the window has, shown or not, so that the
+/// pills keep their width under the mouse (like on Windows).
+fn pill_rects(w: u32, h: u32, sound: u8, replay: u8, text_widths: &[f32], text_h: f32, scale: f32) -> Vec<Area> {
+    let (close, speaker) = button_rects(w, scale);
+    let mut controls = vec![close];
+    if sound > 0 {
+        controls.push(speaker);
+        controls.extend(crate::view::volume_slider(speaker, h as i32, scale));
+    }
+    if replay > 0 {
+        controls.push(replay_rect(close, speaker, sound > 0, scale));
+    }
+    let (top, bottom) = action::pill_band(h as i32, text_h, scale);
+    let right = controls.iter().filter(|c| c.1 < bottom && c.3 > top).map(|c| c.0).min().unwrap_or(w as i32);
+    action::pill_row(h as i32, text_widths, text_h, scale, Some(right))
+}
+
+/// Draws the window's action pills on `pic` and returns where they went.
+fn draw_pills(font: &Font, pic: &mut Image, w: &Win, scale: f32) -> Vec<Placed> {
+    let px = Font::text_px(pic.h);
+    let texts: Vec<String> = w.actions.iter().map(|a| font.drawable(&a.text)).collect();
+    let widths: Vec<f32> = texts.iter().map(|t| font.width(t, px)).collect();
+    let rects = pill_rects(pic.w, pic.h, w.sound, w.replay, &widths, font.line_height(px), scale);
+    // `pill_row` drops pills from the right: `zip` stops at the last one it kept.
+    w.actions
+        .iter()
+        .zip(texts)
+        .zip(rects)
+        .map(|((a, text), rect)| {
+            font.pill(pic, rect, &text, a.look, w.hot == Hot::Action(a.n), px, scale);
+            (a.n, rect)
+        })
+        .collect()
+}
+
+/// What is under the mouse at (x, y) in window `w`: the top-right controls show under the mouse
+/// and win where they overlap a pill; the action pills are always there.
+fn hot_at(w: &Win, x: i32, y: i32, scale: f32) -> Hot {
+    let (close, sound) = button_rects(w.rect.w, scale);
+    let slider = crate::view::volume_slider(sound, w.rect.h as i32, scale);
+    let replay = replay_rect(close, sound, w.sound > 0, scale);
+    match () {
+        _ if w.hover && inside(close, x, y) => Hot::Close,
+        _ if w.hover && w.sound > 0 && inside(sound, x, y) => Hot::Sound,
+        _ if w.hover && w.sound > 0 && slider.is_some_and(|s| inside(s, x, y)) => Hot::Volume,
+        _ if w.hover && w.replay > 0 && inside(replay, x, y) => Hot::Replay,
+        _ => action::hit(&w.pills, x, y).map_or(Hot::None, Hot::Action),
+    }
 }
 
 fn inside((x0, y0, x1, y1): Area, x: i32, y: i32) -> bool {
@@ -219,6 +278,11 @@ impl Desktop {
         if let (Some(font), false) = (&self.font, caption.is_empty()) {
             font.caption(&mut pic, caption, *live, reserve);
         }
+        // Always shown, not only under the mouse; under the other buttons.
+        let pills = match &self.font {
+            Some(font) if !w.actions.is_empty() => draw_pills(font, &mut pic, w, self.scale),
+            _ => Vec::new(),
+        };
         if w.hover {
             pic.close_button(close, w.hot == Hot::Close);
         }
@@ -233,6 +297,9 @@ impl Desktop {
         }
         let xid = w.xid;
         self.x.put_image(xid, &pic);
+        if let Some(w) = self.wins.get_mut(&id) {
+            w.pills = pills;
+        }
     }
 }
 
@@ -266,6 +333,8 @@ impl Output for Desktop {
             replay: 0,
             volume: 100,
             zoomed: false,
+            actions: Vec::new(),
+            pills: Vec::new(),
             press: None,
             last_click: None,
             on_top: *topmost,
@@ -334,6 +403,17 @@ impl Output for Desktop {
         }
     }
 
+    fn set_actions(&mut self, id: u64, actions: &[Shown]) {
+        if let Some(w) = self.wins.get_mut(&id) {
+            if w.actions != actions {
+                w.actions = actions.to_vec();
+                // An action that went is no longer clickable, even before the next paint.
+                w.pills.retain(|(n, _)| actions.iter().any(|a| a.n == *n));
+                self.paint(id);
+            }
+        }
+    }
+
     fn set_volume(&mut self, id: u64, volume: u8) {
         if let Some(w) = self.wins.get_mut(&id).filter(|w| !matches!(w.press, Some(Press::Volume(_)))) {
             w.volume = volume;
@@ -377,17 +457,7 @@ impl Output for Desktop {
         let Some(id) = self.wins.iter().find(|(_, w)| w.xid == window).map(|(id, _)| *id) else { return Vec::new() };
         let (scale, area) = (self.scale, self.area);
         let Some(w) = self.wins.get_mut(&id) else { return Vec::new() };
-        let (close, sound) = button_rects(w.rect.w, scale);
-        let slider = crate::view::volume_slider(sound, w.rect.h as i32, scale);
-        let replay = replay_rect(close, sound, w.sound > 0, scale);
-        let hot_at = |w: &Win, x: i32, y: i32| match () {
-            _ if !w.hover => Hot::None,
-            _ if inside(close, x, y) => Hot::Close,
-            _ if w.sound > 0 && inside(sound, x, y) => Hot::Sound,
-            _ if w.sound > 0 && slider.is_some_and(|s| inside(s, x, y)) => Hot::Volume,
-            _ if w.replay > 0 && inside(replay, x, y) => Hot::Replay,
-            _ => Hot::None,
-        };
+        let slider = crate::view::volume_slider(button_rects(w.rect.w, scale).1, w.rect.h as i32, scale);
         let mut actions = Vec::new();
         let mut repaint = false;
         match *e {
@@ -423,17 +493,22 @@ impl Output for Desktop {
                         None => {}
                     }
                 } else {
-                    let h = hot_at(w, x, y);
+                    let h = hot_at(w, x, y, scale);
                     if h != w.hot {
                         w.hot = h;
                         repaint = true;
                     }
                 }
             }
-            Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y) {
+            Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y, scale) {
                 Hot::Close => actions.push(Action::Close),
                 Hot::Sound => actions.push(Action::Sound),
                 Hot::Replay => actions.push(Action::Replay),
+                // Neither a click that pins nor the start of a move or a double click.
+                Hot::Action(n) => {
+                    w.last_click = None;
+                    actions.push(Action::Run(n));
+                }
                 Hot::Volume => {
                     if let Some(slider) = slider {
                         w.volume = crate::view::volume_at(slider, y);
@@ -546,6 +621,71 @@ mod tests {
         assert_eq!(replay_rect(close, sound, true, 1.0), (388, 8, 412, 32));
         // Without camera audio it takes the speaker's place.
         assert_eq!(replay_rect(close, sound, false, 1.0), sound);
+    }
+
+    #[test]
+    fn action_pills_stay_clear_of_the_buttons() {
+        // Four long labels, every control the window can have, sizes from 160 px to full HD.
+        let texts = [400.0, 400.0, 400.0, 400.0];
+        let overlaps = |a: Area, b: Area| a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3;
+        for scale in [1.0, 1.5, 2.0] {
+            for aspect in [16.0 / 9.0, 4.0 / 3.0, 1.0, 9.0 / 16.0, 21.0 / 9.0] {
+                for w in (160..=1920).step_by(8) {
+                    let h = ((w as f32 / aspect) as u32).max(2);
+                    for (sound, replay) in [(0, 0), (1, 0), (2, 1), (0, 1), (1, 2)] {
+                        let (close, speaker) = button_rects(w, scale);
+                        let mut controls = vec![close];
+                        if sound > 0 {
+                            controls.push(speaker);
+                            controls.extend(crate::view::volume_slider(speaker, h as i32, scale));
+                        }
+                        if replay > 0 {
+                            controls.push(replay_rect(close, speaker, sound > 0, scale));
+                        }
+                        for pill in pill_rects(w, h, sound, replay, &texts, 16.0 * scale, scale) {
+                            let case = format!("{w}x{h} at {scale}, sound {sound}, replay {replay}: {pill:?}");
+                            assert!(pill.0 >= 0 && pill.2 <= w as i32 && pill.0 < pill.2, "{case}");
+                            assert!(controls.iter().all(|c| !overlaps(pill, *c)), "{case}");
+                        }
+                    }
+                }
+            }
+        }
+        // A short label on an ordinary window: one pill, its own width.
+        assert_eq!(pill_rects(480, 270, 1, 1, &[40.0], 16.0, 1.0), [(8, 236, 68, 262)]);
+    }
+
+    /// A desktop window's state for the mouse tests, without an X11 connection.
+    fn test_win(pills: Vec<Placed>) -> Win {
+        Win {
+            xid: 1,
+            rect: Rect { x: 0, y: 0, w: 480, h: 270 },
+            last: None,
+            hover: true,
+            hot: Hot::None,
+            sound: 1,
+            replay: 1,
+            volume: 100,
+            zoomed: false,
+            actions: Vec::new(),
+            pills,
+            press: None,
+            last_click: None,
+            on_top: true,
+        }
+    }
+
+    #[test]
+    fn a_pill_is_hit_with_or_without_hover_but_the_buttons_win() {
+        let (close, _) = button_rects(480, 1.0);
+        let mut w = test_win(vec![(2, (8, 236, 68, 262)), (4, close)]);
+        let hot = |w: &Win, x, y| hot_at(w, x, y, 1.0);
+        assert_eq!(hot(&w, 20, 250), Hot::Action(2));
+        assert_eq!(hot(&w, 460, 20), Hot::Close, "the close button wins over a pill under it");
+        w.hover = false;
+        assert_eq!(hot(&w, 20, 250), Hot::Action(2), "not only under the mouse");
+        assert_eq!(hot(&w, 460, 20), Hot::Action(4));
+        assert_eq!(hot(&w, 100, 100), Hot::None);
     }
 
     #[test]

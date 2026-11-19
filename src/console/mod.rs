@@ -3,6 +3,7 @@
 //! inside a terminal (Kitty graphics, Sixel or coloured half blocks) or as tmux popups.
 //! Video is decoded by the `ffmpeg` program.
 
+mod actions;
 mod canvas;
 mod dbus;
 mod desktop;
@@ -15,6 +16,7 @@ mod video;
 mod web;
 mod x11;
 
+use crate::action::{self, Look, Shown};
 use crate::config::{self, Config, Corner, IniDoc, LiveMode};
 use crate::filter::Detection;
 use crate::frigate::{self, CameraInfo, Notice};
@@ -87,6 +89,9 @@ pub trait Output {
     fn set_sound(&mut self, _id: u64, _state: u8) {}
     /// Replay of window `id`: 0 = nothing to replay, 1 = possible, 2 = replaying (desktop windows show a button).
     fn set_replay(&mut self, _id: u64, _state: u8) {}
+    /// The action buttons of window `id` as they look now, in number order (desktop windows
+    /// show them as pills).
+    fn set_actions(&mut self, _id: u64, _actions: &[Shown]) {}
     /// The picture of window `id` is zoomed in (desktop windows: Ctrl + drag then moves it).
     fn set_zoomed(&mut self, _id: u64, _zoomed: bool) {}
     /// Volume of window `id` in percent (desktop windows show a slider).
@@ -136,6 +141,8 @@ pub enum Action {
     Volume(u8),
     /// Replay button: start or stop a replay of the event start.
     Replay,
+    /// The pill of action `n` (1 to `config::ACTIONS`): arm it or send its request.
+    Run(usize),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -211,9 +218,10 @@ Where the windows appear (--output):
                the others in a corner of the screen; runs in the background. Mouse: x
                closes, the speaker mutes, the slider under it sets the volume, drag
                moves, the wheel resizes, Ctrl + wheel zooms the picture around the
-               mouse, Ctrl + drag moves the zoomed picture,
-               a click pins, a double click opens the camera in Frigate, the right
-               button closes.
+               mouse, Ctrl + drag moves the zoomed picture, the buttons in the
+               bottom-left corner run the camera's actions (see [camera.<name>] in
+               config.ini), a click pins, a double click opens the camera in Frigate,
+               the right button closes.
                A tray icon has the menu known from Windows; the settings open in the
                browser.
   framebuffer  On the screen of a Linux console without a desktop (e.g. a Raspberry Pi
@@ -256,6 +264,8 @@ enum Ev {
     Pointer(x11::Event),
     /// Tray menu item (or `tray::ACTIVATE`, `tray::NOTIFICATION`).
     Tray(i32),
+    /// An action request ended: its ticket, and whether it got HTTP 2xx.
+    ActionDone(u32, bool),
 }
 
 static QUIT: AtomicBool = AtomicBool::new(false);
@@ -789,6 +799,12 @@ struct Win {
     /// When the event came, and what the window recorded itself (replays, also after a restart).
     event: Instant,
     own: Arc<Mutex<Recorder>>,
+    /// The action buttons by number (`[n - 1]` is action `n`); none for windows shown by
+    /// another process (`external`: a tmux popup has its own).
+    actions: action::Buttons,
+    external: bool,
+    /// The buttons as last given to the output.
+    action_view: Vec<Shown>,
 }
 
 impl Win {
@@ -1052,6 +1068,7 @@ impl App {
                     }
                 }
                 Ok(Ev::Tray(id)) => self.on_tray(id),
+                Ok(Ev::ActionDone(ticket, ok)) => self.action_done(ticket, ok),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
@@ -1120,6 +1137,10 @@ impl App {
             Action::Close => {
                 crate::log!("{}: closed by the user", w.camera);
                 self.close(i);
+                return;
+            }
+            Action::Run(n) => {
+                self.press_action(i, n);
                 return;
             }
             Action::Sound => {
@@ -1192,6 +1213,27 @@ impl App {
             }
         }
         w.shared.dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// Action `n` of window `i`: arms it or sends its request (see `actions::press`). Returns
+    /// its look afterwards (`None` = the window has no such action).
+    fn press_action(&mut self, i: usize, n: usize) -> Option<Look> {
+        let w = &mut self.wins[i];
+        let look = actions::press(&mut w.actions, n, &self.cfg, &w.camera, &self.tx, Instant::now());
+        w.shared.dirty.store(true, Ordering::Relaxed);
+        look
+    }
+
+    /// An action request ended. Tickets are unique, so only the button that sent it takes the
+    /// result; a window closed meanwhile has no button left to take it.
+    fn action_done(&mut self, ticket: u32, ok: bool) {
+        let now = Instant::now();
+        for w in &mut self.wins {
+            if w.actions.iter_mut().flatten().any(|b| b.finished(ticket, ok, now)) {
+                w.shared.dirty.store(true, Ordering::Relaxed);
+                break;
+            }
+        }
     }
 
     /// The decoder of window `i` again, at the window's current size and zoom (after the wheel).
@@ -1292,7 +1334,9 @@ impl App {
         let main = self.is_main(&d.camera, stream.as_deref());
         let view = View { camera: d.camera.clone(), stream: stream.clone(), aspect, caption: caption.clone(), muted: self.muted, main };
         let own: Arc<Mutex<Recorder>> = Arc::default();
-        let shared = match self.out.open_external(id, &view) {
+        let opened = self.out.open_external(id, &view);
+        let external = opened.is_some();
+        let shared = match opened {
             Some(true) => Arc::new(video::Shared::default()),
             Some(false) => {
                 self.layout();
@@ -1327,7 +1371,7 @@ impl App {
         };
         shared.muted.store(self.muted, Ordering::Relaxed);
         crate::log!("{}: window after {} ms", d.camera, t0.elapsed().as_millis());
-        let win = Win {
+        let mut win = Win {
             id,
             camera: d.camera,
             caption,
@@ -1350,7 +1394,13 @@ impl App {
             sound: 0,
             event: t0,
             own,
+            actions: Default::default(),
+            external,
+            action_view: Vec::new(),
         };
+        if !external {
+            actions::refresh(&mut win.actions, &self.cfg, &win.camera);
+        }
         match replace_at {
             Some(i) => self.wins.insert(i, win),
             None => self.wins.push(win),
@@ -1405,6 +1455,7 @@ impl App {
         let caption_h = self.out.caption_height();
         let min_gap = self.out.min_interval();
         let buttons = self.out.buttons();
+        let now = Instant::now();
         for w in &mut self.wins {
             // A restarted decoder takes over at its first live picture (a picture of any kind
             // when the old one has none live, or after 5 s).
@@ -1430,6 +1481,13 @@ impl App {
             if sound != w.sound && w.last_draw.is_some() {
                 w.sound = sound;
                 self.out.set_sound(w.id, sound);
+            }
+            // The action buttons also change by themselves (arming and results expire): shown
+            // within a pass of the loop (≤ 100 ms).
+            let view = action::shown(&w.actions, &actions::labels(&self.cfg, &w.camera), now);
+            if view != w.action_view {
+                w.action_view = view;
+                self.out.set_actions(w.id, &w.action_view);
             }
             if w.last_draw.is_some_and(|t| t.elapsed() < min_gap) || !w.shared.dirty.swap(false, Ordering::Relaxed) {
                 continue;
@@ -1458,6 +1516,7 @@ impl App {
             self.out.set_volume(w.id, w.shared.volume.load(Ordering::Relaxed));
             self.out.set_sound(w.id, w.sound);
             self.out.set_replay(w.id, w.shared.replay.load(Ordering::Relaxed));
+            self.out.set_actions(w.id, &w.action_view);
             w.last_draw = Some(Instant::now());
         }
         // A throttled picture waits for the next frame or the next loop pass (≤ 100 ms).
@@ -1483,9 +1542,14 @@ impl App {
                 w.deadline = w.deadline.max(now + Duration::from_secs(5));
             }
         }
-        // A window under the mouse or pinned stays (desktop windows).
-        let expired: Vec<usize> =
-            (0..self.wins.len()).filter(|&i| now >= self.wins[i].deadline && !self.wins[i].hovered && !self.wins[i].pinned).collect();
+        // A window under the mouse or pinned stays (desktop windows), and so does one whose action
+        // button is armed, sending or showing a result.
+        let expired: Vec<usize> = (0..self.wins.len())
+            .filter(|&i| {
+                let w = &self.wins[i];
+                now >= w.deadline && !w.hovered && !w.pinned && !action::any_busy(&w.actions, now)
+            })
+            .collect();
         for i in expired.into_iter().rev() {
             self.close(i);
         }
@@ -1634,6 +1698,10 @@ impl App {
         i18n::set(i18n::resolve(&cfg.language));
         self.cfg = cfg;
         self.out.configure(&self.cfg);
+        // The action buttons follow the new settings, number by number (the next draw shows them).
+        for w in self.wins.iter_mut().filter(|w| !w.external) {
+            actions::refresh(&mut w.actions, &self.cfg, &w.camera);
+        }
         self.update_hubs();
         // The listener also applies the filters (cameras, objects, zones…).
         self.start_listener();
