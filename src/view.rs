@@ -63,7 +63,7 @@ pub fn choices(cams: &[CameraInfo], cfg: &Config) -> (Vec<(String, String)>, Vec
     // Cameras named in the settings: in the camera filter, and those with an object list or
     // an action button.
     let mut listed: Vec<(&String, &crate::config::CamOverride)> =
-        cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty() || o.action_url.is_some()).collect();
+        cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty() || o.actions.iter().any(|a| a.url.is_some())).collect();
     listed.sort_by_key(|(n, _)| n.to_ascii_lowercase());
     let named = cfg.cameras.iter().map(|c| (c.clone(), c.clone()));
     for (c, title) in named.chain(listed.into_iter().map(|(n, o)| (n.clone(), o.name.clone().unwrap_or_else(|| n.clone())))) {
@@ -380,14 +380,17 @@ mod tests {
         let cfg = Config::from_ini(&crate::config::IniDoc::parse(
             "[camera.gate]
 name = Gate
-action_url = http://h/api/webhook/x
+action1_url = http://h/api/webhook/x
+[camera.yard]
+action4_url = http://h/api/webhook/y
 [camera.drive]
-action_label = Drive
+action1_label = Drive
+action2_confirm = false
 ",
         ));
-        // An action URL keeps the camera editable; a label alone is no button.
+        // Any action URL keeps the camera editable; a label or a confirmation alone is no button.
         let (cameras, _, _) = choices(&[], &cfg);
-        assert_eq!(cameras, [("gate".to_string(), "Gate".to_string())]);
+        assert_eq!(cameras, [("gate".to_string(), "Gate".to_string()), ("yard".to_string(), "yard".to_string())]);
     }
 
     #[test]

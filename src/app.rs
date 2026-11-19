@@ -1501,8 +1501,9 @@ impl App {
     }
 
     /// The camera's action button as a window shows it: (label, ask for confirmation).
+    // R2: all four; for now the first action with a URL.
     fn action_of(&self, camera: &str, preview: bool) -> Option<(String, bool)> {
-        let (_, label, confirm) = self.action_cfg(preview).action_for(camera)?;
+        let (_, _, label, confirm) = self.action_cfg(preview).actions_for(camera).into_iter().next()?;
         Some((action::label_or_default(label), confirm))
     }
 
@@ -1577,11 +1578,12 @@ impl App {
                 crate::log!("action {}: preview, not sent", p.camera);
             } else {
                 // Only here does the URL leave the settings, straight to the request's thread.
-                let url = self.cfg.action_for(&p.camera).map(|(url, _, _)| url.to_string());
+                // R2: all four; for now the first action with a URL, as `action_of` shows.
+                let first = self.cfg.actions_for(&p.camera).into_iter().next().map(|(n, url, _, _)| (n, url.to_string()));
                 let done = move |ok: bool| unsafe {
                     let _ = PostMessageW(HWND(main as _), WM_APP_ACTION, WPARAM(ticket as usize), LPARAM(ok as isize));
                 };
-                if !url.is_some_and(|url| action::spawn(url, p.camera.clone(), done)) {
+                if !first.is_some_and(|(n, url)| action::spawn(url, p.camera.clone(), n, done)) {
                     b.finished(ticket, false, now);
                 }
             }

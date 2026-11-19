@@ -181,24 +181,36 @@ impl StreamPref {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// A `[camera.<name>]` section. Its default has every action's confirmation on (`ActionCfg`).
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CamOverride {
     pub name: Option<String>,
     pub main: Option<String>,
     pub sub: Option<String>,
     /// Objects that open a window on this camera, instead of `[trigger] labels` (empty = those).
     pub labels: Vec<String>,
-    /// Action button on this camera's windows: an HTTP POST to this URL (none = no button).
-    pub action_url: Option<String>,
-    /// The button's caption (none = a default one).
-    pub action_label: Option<String>,
-    /// Two clicks instead of one.
-    pub action_confirm: bool,
+    /// Action buttons on this camera's windows: `actions[n - 1]` is action n
+    /// (`action<n>_url`, `action<n>_label`, `action<n>_confirm`).
+    pub actions: [ActionCfg; ACTIONS],
 }
 
-impl Default for CamOverride {
+/// Action buttons per camera, numbered 1 to `ACTIONS`.
+pub const ACTIONS: usize = 4;
+
+/// One action button of a camera.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActionCfg {
+    /// An HTTP POST to this URL (none = no button).
+    pub url: Option<String>,
+    /// The button's caption (none = a default one).
+    pub label: Option<String>,
+    /// Two clicks instead of one.
+    pub confirm: bool,
+}
+
+impl Default for ActionCfg {
     fn default() -> Self {
-        CamOverride { name: None, main: None, sub: None, labels: Vec::new(), action_url: None, action_label: None, action_confirm: true }
+        ActionCfg { url: None, label: None, confirm: true }
     }
 }
 
@@ -288,9 +300,11 @@ impl Config {
                         main: opt(g(&sec, "main")),
                         sub: opt(g(&sec, "sub")),
                         labels: list(g(&sec, "labels")),
-                        action_url: opt(g(&sec, "action_url")),
-                        action_label: opt(g(&sec, "action_label")),
-                        action_confirm: boolean(g(&sec, "action_confirm"), true),
+                        actions: std::array::from_fn(|i| ActionCfg {
+                            url: opt(g(&sec, &format!("action{}_url", i + 1))),
+                            label: opt(g(&sec, &format!("action{}_label", i + 1))),
+                            confirm: boolean(g(&sec, &format!("action{}_confirm", i + 1)), true),
+                        }),
                     },
                 );
             }
@@ -398,23 +412,25 @@ impl Config {
         }
     }
 
-    /// The camera's action button: (url, label, ask for confirmation), when it has a URL.
-    pub fn action_for(&self, camera: &str) -> Option<(&str, Option<&str>, bool)> {
-        let o = self.camera(camera)?;
-        Some((o.action_url.as_deref()?, o.action_label.as_deref(), o.action_confirm))
+    /// The camera's action buttons, those with a URL in number order: (number 1–4, url, label,
+    /// ask for confirmation).
+    pub fn actions_for(&self, camera: &str) -> Vec<(usize, &str, Option<&str>, bool)> {
+        let Some(o) = self.camera(camera) else { return Vec::new() };
+        o.actions.iter().enumerate().filter_map(|(i, a)| Some((i + 1, a.url.as_deref()?, a.label.as_deref(), a.confirm))).collect()
     }
 
-    /// Sets the camera's action button (no URL = no button).
-    pub fn set_action(&mut self, camera: &str, url: Option<String>, label: Option<String>, confirm: bool) {
+    /// Sets the camera's action `n` (1–4; no URL = no button). Any other `n` is ignored.
+    pub fn set_action(&mut self, camera: &str, n: usize, url: Option<String>, label: Option<String>, confirm: bool) {
+        let Some(i) = n.checked_sub(1).filter(|&i| i < ACTIONS) else { return };
         // Empty or blank = none, as an empty key reads back (other values are kept as given,
         // like `opt` keeps parsed ones).
-        let url = url.filter(|u| !u.trim().is_empty());
-        let label = label.filter(|l| !l.trim().is_empty());
+        let a = ActionCfg { url: url.filter(|u| !u.trim().is_empty()), label: label.filter(|l| !l.trim().is_empty()), confirm };
         match self.overrides.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(camera)) {
-            Some((_, o)) => (o.action_url, o.action_label, o.action_confirm) = (url, label, confirm),
-            None if url.is_some() || label.is_some() || !confirm => {
-                self.overrides
-                    .insert(camera.to_string(), CamOverride { action_url: url, action_label: label, action_confirm: confirm, ..Default::default() });
+            Some((_, o)) => o.actions[i] = a,
+            None if a != ActionCfg::default() => {
+                let mut o = CamOverride::default();
+                o.actions[i] = a;
+                self.overrides.insert(camera.to_string(), o);
             }
             None => {}
         }
@@ -527,16 +543,19 @@ pub fn write_all(c: &Config, d: &mut IniDoc) {
         if !o.labels.is_empty() || d.get(&section, "labels").is_some() {
             d.set(&section, "labels", &o.labels.join(", "));
         }
-        let url = o.action_url.as_deref().unwrap_or_default();
-        if !url.is_empty() || d.get(&section, "action_url").is_some() {
-            d.set(&section, "action_url", &ini_value(url));
-        }
-        let label = o.action_label.as_deref().unwrap_or_default();
-        if !label.is_empty() || d.get(&section, "action_label").is_some() {
-            d.set(&section, "action_label", &ini_value(label));
-        }
-        if !o.action_confirm || d.get(&section, "action_confirm").is_some() {
-            d.set(&section, "action_confirm", flag(o.action_confirm));
+        for (i, a) in o.actions.iter().enumerate() {
+            let key = |name: &str| format!("action{}_{name}", i + 1);
+            let url = a.url.as_deref().unwrap_or_default();
+            if !url.is_empty() || d.get(&section, &key("url")).is_some() {
+                d.set(&section, &key("url"), &ini_value(url));
+            }
+            let label = a.label.as_deref().unwrap_or_default();
+            if !label.is_empty() || d.get(&section, &key("label")).is_some() {
+                d.set(&section, &key("label"), &ini_value(label));
+            }
+            if !a.confirm || d.get(&section, &key("confirm")).is_some() {
+                d.set(&section, &key("confirm"), flag(a.confirm));
+            }
         }
     }
 }
@@ -701,12 +720,16 @@ wind_filter = false
 ; Objects that open a window on this camera, instead of labels in [trigger]
 ; (empty = the same as for all cameras)
 ; labels = person, car, dog
-; Action button on this camera's windows: an HTTP POST to this URL, e.g. a Home Assistant
-; webhook (keep it secret: whoever knows it can run the action)
-; action_url = http://homeassistant.local:8123/api/webhook/<webhook-id>
-; action_label = Gate
+; Up to four action buttons on this camera's windows, action1_* to action4_* (no URL means
+; no button). Each sends an HTTP POST to its URL, e.g. a Home Assistant webhook (keep it
+; secret: whoever knows it can run the action)
+; action1_url = http://homeassistant.local:8123/api/webhook/<webhook-id>
+; action1_label = Gate
 ; Two clicks (the second within 3 s) instead of one
-; action_confirm = true
+; action1_confirm = true
+; action2_url = http://homeassistant.local:8123/api/webhook/<another-webhook-id>
+; action2_label = Light
+; action2_confirm = false
 ";
 
 #[cfg(test)]
@@ -884,48 +907,92 @@ mod tests {
 
     #[test]
     fn camera_action_keys() {
-        // `nie` (Polish "no") is one of the spellings `boolean` accepts.
+        // `nie` (Polish "no") is one of the spellings `boolean` accepts. Action 2 is missing: a gap.
         let c = Config::from_ini(&IniDoc::parse(
-            "[camera.gate]\naction_url = \"http://homeassistant.local:8123/api/webhook/abc#x\"\naction_label = Gate\n\n[camera.yard]\naction_url = http://h/x\naction_confirm = nie\n\n[camera.drive]\naction_label = Drive\n",
+            "[camera.gate]\naction1_url = \"http://homeassistant.local:8123/api/webhook/abc#x\"\naction1_label = Gate\n\
+             action3_url = http://h/light\naction3_confirm = nie\naction4_label = Alone\n\n\
+             [camera.drive]\naction1_label = Drive\n",
         ));
         let g = c.camera("Gate").unwrap();
-        assert_eq!(g.action_url.as_deref(), Some("http://homeassistant.local:8123/api/webhook/abc#x"));
-        assert_eq!(g.action_label.as_deref(), Some("Gate"));
-        assert!(g.action_confirm, "confirmation is on unless switched off");
-        assert_eq!(c.action_for("gate"), Some(("http://homeassistant.local:8123/api/webhook/abc#x", Some("Gate"), true)));
-        assert!(!c.camera("yard").unwrap().action_confirm);
-        assert!(c.action_for("garden").is_none());
+        assert_eq!(g.actions[0].url.as_deref(), Some("http://homeassistant.local:8123/api/webhook/abc#x"));
+        assert_eq!(g.actions[0].label.as_deref(), Some("Gate"));
+        assert!(g.actions[0].confirm, "confirmation is on unless switched off");
+        assert_eq!(g.actions[1], ActionCfg::default());
+        assert!(!g.actions[2].confirm);
+        assert_eq!(
+            c.actions_for("gate"),
+            [(1, "http://homeassistant.local:8123/api/webhook/abc#x", Some("Gate"), true), (3, "http://h/light", None, false)],
+            "only actions with a URL, in number order, keeping their numbers"
+        );
+        assert_eq!(c.actions_for("GATE").len(), 2, "the camera in any case");
+        assert!(c.actions_for("garden").is_empty());
         // A label without a URL: no button.
-        assert!(c.action_for("drive").is_none());
+        assert!(c.actions_for("drive").is_empty());
+    }
+
+    #[test]
+    fn the_old_single_action_keys_mean_nothing() {
+        let c = Config::from_ini(&IniDoc::parse("[camera.gate]\naction_url = http://h/x\naction_label = Gate\naction_confirm = false\n"));
+        assert!(c.actions_for("gate").is_empty());
+        assert_eq!(c.camera("gate").unwrap().actions, <[ActionCfg; ACTIONS]>::default());
     }
 
     #[test]
     fn set_action_treats_blank_values_as_none() {
         let mut c = Config::from_ini(&IniDoc::parse(""));
-        c.set_action("gate", Some("  ".into()), Some("".into()), true);
-        assert_eq!(c.action_for("gate"), None);
-        assert!(c.overrides.is_empty());
+        c.set_action("gate", 2, Some("  ".into()), Some("".into()), true);
+        assert!(c.actions_for("gate").is_empty());
+        assert!(c.overrides.is_empty(), "nothing set: no override");
+        c.set_action("gate", 4, None, None, false);
+        assert!(!c.camera("gate").unwrap().actions[3].confirm, "confirmation switched off is something set");
+    }
+
+    #[test]
+    fn set_action_ignores_numbers_outside_one_to_four() {
+        let mut c = Config::from_ini(&IniDoc::parse("[camera.gate]\naction1_url = http://h/1\n"));
+        let before = c.clone();
+        c.set_action("gate", 0, Some("http://h/0".into()), None, true);
+        c.set_action("gate", 5, Some("http://h/5".into()), None, true);
+        c.set_action("yard", 5, Some("http://h/5".into()), None, true);
+        assert_eq!(c, before);
+    }
+
+    #[test]
+    fn set_action_changes_one_number_and_keeps_the_section_name() {
+        let mut c = Config::from_ini(&IniDoc::parse("[camera.Gate]\nname = Brama\naction1_url = http://h/1\naction1_label = One\n"));
+        c.set_action("gate", 2, Some("http://h/2".into()), Some("Two".into()), false);
+        assert_eq!(c.overrides["Gate"].name.as_deref(), Some("Brama"));
+        assert_eq!(c.actions_for("gate"), [(1, "http://h/1", Some("One"), true), (2, "http://h/2", Some("Two"), false)]);
+        c.set_action("GATE", 1, None, None, true);
+        assert_eq!(c.actions_for("gate"), [(2, "http://h/2", Some("Two"), false)], "action 1 removed, action 2 kept");
     }
 
     #[test]
     fn write_all_writes_camera_actions() {
         let mut doc = IniDoc::parse("[camera.gate]\nname = Gate\n");
         let mut c = Config::from_ini(&doc);
-        c.set_action("gate", Some("http://h/api/webhook/a#b".into()), Some("Gate".into()), false);
-        c.set_action("yard", None, None, true); // nothing set: no section
+        c.set_action("gate", 1, Some("http://h/api/webhook/a#b".into()), Some("Gate".into()), false);
+        c.set_action("gate", 3, Some("http://h/api/webhook/c".into()), None, true);
+        c.set_action("yard", 2, None, None, true); // nothing set: no section
         write_all(&c, &mut doc);
-        let back = Config::from_ini(&doc);
-        assert_eq!(back.camera("gate").unwrap().action_url.as_deref(), Some("http://h/api/webhook/a#b"));
-        assert_eq!(back.camera("gate").unwrap().action_label.as_deref(), Some("Gate"));
-        assert!(!back.camera("gate").unwrap().action_confirm);
+        let back = Config::from_ini(&IniDoc::parse(&doc.to_text()));
+        assert_eq!(back, c, "written and read back");
+        assert_eq!(back.actions_for("gate"), [(1, "http://h/api/webhook/a#b", Some("Gate"), false), (3, "http://h/api/webhook/c", None, true)]);
         assert!(!doc.sections().iter().any(|s| s == "camera.yard"));
+        // Only what is set is written: no keys for action 2 or 4, no default confirmation.
+        for key in ["action2_url", "action2_label", "action2_confirm", "action3_label", "action3_confirm", "action4_url"] {
+            assert_eq!(doc.get("camera.gate", key), None, "{key}");
+        }
+        assert_eq!(doc.get("camera.gate", "action1_confirm").as_deref(), Some("false"));
         // Removing the URL leaves the key empty, not the old value.
         let mut c = back.clone();
-        c.set_action("gate", None, None, true);
+        c.set_action("gate", 1, None, None, true);
         write_all(&c, &mut doc);
-        assert_eq!(doc.get("camera.gate", "action_url").as_deref(), Some(""));
-        assert_eq!(doc.get("camera.gate", "action_label").as_deref(), Some(""));
-        assert_eq!(doc.get("camera.gate", "action_confirm").as_deref(), Some("true"));
+        assert_eq!(doc.get("camera.gate", "action1_url").as_deref(), Some(""));
+        assert_eq!(doc.get("camera.gate", "action1_label").as_deref(), Some(""));
+        assert_eq!(doc.get("camera.gate", "action1_confirm").as_deref(), Some("true"));
+        assert_eq!(doc.get("camera.gate", "action3_url").as_deref(), Some("http://h/api/webhook/c"));
+        assert_eq!(Config::from_ini(&IniDoc::parse(&doc.to_text())).actions_for("gate"), [(3, "http://h/api/webhook/c", None, true)]);
     }
 
     #[test]

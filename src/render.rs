@@ -488,7 +488,7 @@ impl Renderer {
         let _ = layout.GetMetrics(&mut m);
         // It ends left of the top-right controls level with it: the ones the window has, shown or
         // not, so that its width does not change under the mouse.
-        let (_, top, _, bottom) = crate::action::pill_rect(height, 0.0, m.height, scale);
+        let (top, bottom) = crate::action::pill_band(height, m.height, scale);
         let mut controls = vec![close_button_rect(w, dpi)];
         if ov.sound > 0 {
             controls.push(sound_button_rect(w, dpi));
@@ -498,11 +498,12 @@ impl Renderer {
             controls.push(replay_button_rect(w, dpi, ov.sound > 0));
         }
         let right = controls.iter().filter(|c| c.1 < bottom && c.3 > top).map(|c| c.0).min().unwrap_or(w);
-        let max_w = crate::action::pill_text_max(right, scale);
+        // R2: all four pills in one row; for now a row of one.
+        let (l, t, r, b) = *crate::action::pill_row(height, &[m.width], m.height, scale, Some(right)).first()?;
+        let max_w = crate::action::pill_text_room((l, t, r, b), scale);
         let _ = layout.SetMaxWidth(max_w.max(1.0));
         let _ = layout.GetMetrics(&mut m);
         let text_w = m.width.min(max_w);
-        let (l, t, r, b) = crate::action::pill_rect(height, text_w, m.height, scale);
         let h = (b - t) as f32;
         let rr = D2D1_ROUNDED_RECT {
             rect: D2D_RECT_F { left: l as f32, top: t as f32, right: r as f32, bottom: b as f32 },

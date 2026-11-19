@@ -151,7 +151,7 @@ pub static STRINGS: Strings = Strings {
     tip_preview_live: "Opens a real preview window that follows your changes immediately, before you save them.",
     tip_help: "Opens the user guide.",
     tip_support: "Opens the GitHub Sponsors page in the browser. FrigatePiP is free and every feature stays free; sponsoring keeps the work going.",
-    tip_action_camera: "Camera whose windows get the button.",
+    tip_action_camera: "Camera whose windows get the buttons.",
     tip_action_url: "Empty = no button. A Home Assistant automation with a Webhook trigger, e.g. http://homeassistant.local:8123/api/webhook/<id>.",
     tip_action_label: "Text on the button, e.g. Gate or Light. Empty = Action.",
     tip_action_confirm: "The first click arms the button, the second within 3 s runs the action. Keep it on for gates, doors and alarms.",
@@ -202,6 +202,8 @@ pub static STRINGS: Strings = Strings {
     action_bad_url: "Not a valid http:// or https:// address.",
     action_default: "Action",
     action_ask: "{0}?",
+    action_row: "Action {0}",
+    action_confirm_short: "Confirm",
 
     console_keys: "q quit · x close windows · p pause · m sound · r replay · a action · 1–9 show camera",
     console_tmux_running: "running in the background: camera windows open as tmux popups (Ctrl+C stops it).",

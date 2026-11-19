@@ -366,6 +366,13 @@ pub struct Strings {
     pub action_default: &'static str,
     /// The armed button ("Gate?"); {0} = label
     pub action_ask: &'static str,
+    /// An action's row in the settings tab ("Action 2"); {0} = its number. Used once the tab
+    /// shows all four actions.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_row: &'static str,
+    /// The confirmation checkbox in an action's row.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_confirm_short: &'static str,
 
     // ---- Linux console version
     /// Keys shown in the status line.
@@ -505,6 +512,7 @@ mod tests {
                 (en.update_check_failed, s.update_check_failed),
                 (en.update_balloon_title, s.update_balloon_title),
                 (en.action_ask, s.action_ask),
+                (en.action_row, s.action_row),
             ];
             for (a, b) in pairs {
                 for i in 0..4 {

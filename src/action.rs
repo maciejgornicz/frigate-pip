@@ -1,6 +1,6 @@
-//! The action button on a camera window: one HTTP POST to a URL set per camera (e.g. a Home
-//! Assistant webhook). Shared by Windows and Linux: the state machine, the request and the
-//! button's place. The URL is a secret and never reaches the log.
+//! The action buttons on a camera window: up to four per camera, each one HTTP POST to a URL
+//! set per camera (e.g. a Home Assistant webhook). Shared by Windows and Linux: the state
+//! machine, the request and the buttons' places. The URL is a secret and never reaches the log.
 
 use std::io;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -67,6 +67,16 @@ impl Button {
     /// Asks for a confirming second click.
     pub fn confirm(&self) -> bool {
         self.confirm
+    }
+
+    /// Drops an armed first click without sending (another action of the window was pressed,
+    /// and only one may be armed); no effect in any other state.
+    // R2: used once the Windows window shows all four actions.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn disarm(&mut self) {
+        if let State::Armed(_) = self.state {
+            self.state = State::Idle;
+        }
     }
 
     fn start(&mut self, now: Instant) -> u32 {
@@ -148,8 +158,9 @@ pub fn valid_url(url: &str) -> bool {
             && crate::net::Url::parse(u).is_some_and(|p| p.scheme == "http" || p.scheme == "https"))
 }
 
-fn body(camera: &str) -> String {
-    format!("{{\"camera\": {}}}", crate::json::quote(camera))
+/// `{"camera": "<camera>", "action": <n>}`.
+fn body(camera: &str, n: usize) -> String {
+    format!("{{\"camera\": {}, \"action\": {n}}}", crate::json::quote(camera))
 }
 
 /// The error in a few fixed words. The message is looked at but never printed: errors from
@@ -182,59 +193,100 @@ fn describe(e: &io::Error) -> String {
     words.to_string()
 }
 
-/// Sends the request (call it on its own thread). Logs "action <camera>: HTTP 200" or the
-/// error; `true` = HTTP 2xx, i.e. the request was received (not that the gate opened).
-pub fn send(url: &str, camera: &str) -> bool {
+/// Sends the camera's action `n` (call it on its own thread). Logs "action <camera> <n>: HTTP
+/// 200" or the error, never the URL; `true` = HTTP 2xx, i.e. the request was received (not
+/// that the gate opened).
+pub fn send(url: &str, camera: &str, n: usize) -> bool {
     let headers = [("Content-Type", "application/json".to_string())];
-    match crate::net::request("POST", url.trim(), &headers, body(camera).as_bytes(), TIMEOUT, None) {
+    match crate::net::request("POST", url.trim(), &headers, body(camera, n).as_bytes(), TIMEOUT, None) {
         // The body does not matter. `net::request` asks for `Connection: close`, so dropping the
         // response simply closes the connection; reading the body would only delay the result.
         Ok(resp) => {
-            crate::log!("action {camera}: HTTP {}", resp.status);
+            crate::log!("action {camera} {n}: HTTP {}", resp.status);
             (200..300).contains(&resp.status)
         }
         Err(e) => {
-            crate::log!("action {camera}: {}", describe(&e));
+            crate::log!("action {camera} {n}: {}", describe(&e));
             false
         }
     }
 }
 
 /// Runs `send` on its own thread and hands the result to `done`. `false` = the thread could
-/// not start (logged as "action <camera>: cannot start"; `done` is never called): the caller
-/// then calls `Button::finished(ticket, false, now)` itself.
-pub fn spawn(url: String, camera: String, done: impl FnOnce(bool) + Send + 'static) -> bool {
+/// not start (logged as "action <camera> <n>: cannot start"; `done` is never called): the
+/// caller then calls `Button::finished(ticket, false, now)` itself.
+pub fn spawn(url: String, camera: String, n: usize, done: impl FnOnce(bool) + Send + 'static) -> bool {
     let name = camera.clone();
-    match std::thread::Builder::new().name("action".into()).spawn(move || done(send(&url, &camera))) {
+    match std::thread::Builder::new().name("action".into()).spawn(move || done(send(&url, &camera, n))) {
         Ok(_) => true,
         Err(_) => {
-            crate::log!("action {name}: cannot start");
+            crate::log!("action {name} {n}: cannot start");
             false
         }
     }
 }
 
-/// The pill's margin to the window edges (and to a control beside it) and its padding, in
-/// unscaled pixels.
+/// The pills' margin to the window edges (and to a control beside them), their padding and the
+/// gap between two pills, in unscaled pixels.
 const PILL_MARGIN: f32 = 8.0;
 const PILL_PAD_X: f32 = 10.0;
 const PILL_PAD_Y: f32 = 5.0;
+const PILL_GAP: f32 = 6.0;
+/// The least text room a pill keeps when the row is squeezed, in unscaled pixels: a letter or
+/// two with the trimming sign.
+const PILL_MIN_TEXT: f32 = 16.0;
 
 fn px(v: f32, scale: f32) -> i32 {
     (v * scale).round() as i32
 }
 
-/// The pill in the bottom-left corner, in pixels: text size plus padding, 8 px (scaled) margin.
-pub fn pill_rect(height: i32, text_w: f32, text_h: f32, scale: f32) -> (i32, i32, i32, i32) {
-    let (margin, pad_x) = (px(PILL_MARGIN, scale), px(PILL_PAD_X, scale));
-    let h = (text_h + 2.0 * PILL_PAD_Y * scale).round() as i32;
-    (margin, height - margin - h, margin + text_w.round() as i32 + 2 * pad_x, height - margin)
+/// The pills' top and bottom in pixels: one line of text plus padding, a margin above the
+/// window's bottom edge.
+pub fn pill_band(height: i32, text_h: f32, scale: f32) -> (i32, i32) {
+    let margin = px(PILL_MARGIN, scale);
+    (height - margin - (text_h + 2.0 * PILL_PAD_Y * scale).round() as i32, height - margin)
 }
 
-/// The widest text whose pill still ends a margin left of `right` (the window's right edge, or
-/// the leftmost control beside the pill), in pixels.
-pub fn pill_text_max(right: i32, scale: f32) -> f32 {
-    (right - 2 * px(PILL_MARGIN, scale) - 2 * px(PILL_PAD_X, scale)).max(0) as f32
+/// A row of pills from the bottom-left corner, one per text width, left to right with a gap
+/// between them, as (left, top, right, bottom) in pixels. Each pill is its text plus padding.
+/// When that row would pass a margin before `right_limit` (the window's right edge or the
+/// leftmost control level with the row; `None` = no limit), every pill gets an equal share of
+/// the room instead, and its text is trimmed to `pill_text_room`. A shared pill keeps at least
+/// `PILL_MIN_TEXT` of text room: pills that do not fit even so are dropped from the right, so
+/// the result can be shorter than `text_widths` (empty when not even one fits).
+pub fn pill_row(height: i32, text_widths: &[f32], text_h: f32, scale: f32, right_limit: Option<i32>) -> Vec<(i32, i32, i32, i32)> {
+    let (margin, pad_x, gap) = (px(PILL_MARGIN, scale), px(PILL_PAD_X, scale), px(PILL_GAP, scale));
+    let (top, bottom) = pill_band(height, text_h, scale);
+    // Rounded up, so that the text room of a pill that is not shared is never short of its text.
+    let natural: Vec<i32> = text_widths.iter().map(|w| w.max(0.0).ceil() as i32 + 2 * pad_x).collect();
+    let end = margin + natural.iter().sum::<i32>() + gap * (natural.len() as i32 - 1).max(0);
+    let widths = match right_limit.map(|r| r - margin) {
+        Some(limit) if end > limit => {
+            let room = limit - margin;
+            let min = 2 * pad_x + px(PILL_MIN_TEXT, scale).max(1);
+            // n pills of `min` and n - 1 gaps fit when n * (min + gap) <= room + gap.
+            let n = ((room + gap) / (min + gap)).clamp(0, natural.len() as i32);
+            if n == 0 {
+                return Vec::new();
+            }
+            vec![(room - (n - 1) * gap) / n; n as usize]
+        }
+        _ => natural,
+    };
+    let mut x = margin;
+    widths
+        .into_iter()
+        .map(|w| {
+            let pill = (x, top, x + w, bottom);
+            x += w + gap;
+            pill
+        })
+        .collect()
+}
+
+/// The room for the text inside a pill from `pill_row`, in pixels: its width less the padding.
+pub fn pill_text_room(pill: (i32, i32, i32, i32), scale: f32) -> f32 {
+    (pill.2 - pill.0 - 2 * px(PILL_PAD_X, scale)).max(0) as f32
 }
 
 #[cfg(test)]
@@ -370,8 +422,31 @@ mod tests {
     }
 
     #[test]
-    fn the_body_names_the_camera_as_json() {
-        assert_eq!(body("front \"door\""), "{\"camera\": \"front \\\"door\\\"\"}");
+    fn disarm_drops_an_armed_click_only() {
+        let t = Instant::now();
+        let mut b = Button::new(true);
+        b.press(t);
+        b.disarm();
+        assert_eq!(b.look(t), Look::Idle, "disarmed without sending");
+        assert_eq!(b.press(t + ms(800)), None, "the next click arms again");
+        assert_eq!(b.look(t + ms(800)), Look::Armed);
+
+        let mut b = Button::new(false);
+        let ticket = b.press(t).unwrap();
+        b.disarm();
+        assert_eq!(b.look(t), Look::Sending, "a request being sent is not dropped");
+        b.finished(ticket, true, t + ms(100));
+        b.disarm();
+        assert_eq!(b.look(t + ms(100)), Look::Done, "nor its result");
+
+        let mut b = Button::new(true);
+        b.disarm();
+        assert_eq!(b.look(t), Look::Idle, "idle stays idle");
+    }
+
+    #[test]
+    fn the_body_names_the_camera_and_the_action_as_json() {
+        assert_eq!(body("front \"door\"", 3), "{\"camera\": \"front \\\"door\\\"\", \"action\": 3}");
     }
 
     #[test]
@@ -410,19 +485,84 @@ mod tests {
     }
 
     #[test]
-    fn the_pill_sits_in_the_bottom_left_corner() {
-        // (window height, text width, text height, scale) -> (x0, y0, x1, y1)
-        assert_eq!(pill_rect(300, 40.0, 16.0, 1.0), (8, 300 - 8 - 26, 8 + 40 + 2 * 10, 300 - 8));
+    fn one_pill_sits_in_the_bottom_left_corner() {
+        // (window height, text widths, text height, scale, limit) -> [(x0, y0, x1, y1)]
+        let pill = (8, 300 - 8 - 26, 8 + 40 + 2 * 10, 300 - 8);
+        assert_eq!(pill_row(300, &[40.0], 16.0, 1.0, None), [pill]);
+        assert_eq!(pill_row(300, &[40.0], 16.0, 1.0, Some(400)), [pill]);
+        assert_eq!(pill_band(300, 16.0, 1.0), (pill.1, pill.3));
+        assert_eq!(pill_text_room(pill, 1.0), 40.0);
+        assert_eq!(pill_row(300, &[39.2], 16.0, 1.0, None), [pill], "rounded up: the text always fits");
+        assert!(pill_row(300, &[], 16.0, 1.0, Some(400)).is_empty());
     }
 
     #[test]
-    fn the_widest_pill_ends_a_margin_before_the_limit() {
-        for scale in [1.0, 1.5, 2.0] {
-            let right = 200;
-            let (_, _, r, _) = pill_rect(300, pill_text_max(right, scale), 16.0, scale);
-            assert_eq!(r, right - px(PILL_MARGIN, scale), "scale {scale}");
+    fn pills_follow_each_other_with_a_gap() {
+        let (t, b) = (300 - 8 - 26, 300 - 8);
+        let two = [(8, t, 68, b), (74, t, 124, b)];
+        assert_eq!(pill_row(300, &[40.0, 30.0], 16.0, 1.0, Some(400)), two);
+        let four = [(8, t, 68, b), (74, t, 124, b), (130, t, 170, b), (176, t, 206, b)];
+        assert_eq!(pill_row(300, &[40.0, 30.0, 20.0, 10.0], 16.0, 1.0, Some(400)), four);
+        assert_eq!(pill_row(300, &[40.0, 30.0, 20.0], 16.0, 1.0, None), four[..3]);
+        // A row ending exactly a margin before the limit is not squeezed.
+        assert_eq!(pill_row(300, &[40.0, 30.0, 20.0, 10.0], 16.0, 1.0, Some(206 + 8)), four);
+        // At 150 % everything grows: margin 12, padding 15, gap 9.
+        let (t, b) = (450 - 12 - 39, 450 - 12);
+        assert_eq!(pill_row(450, &[60.0, 45.0], 24.0, 1.5, None), [(12, t, 102, b), (111, t, 186, b)]);
+    }
+
+    #[test]
+    fn a_row_too_long_shares_the_room_equally() {
+        // Room: 200 - 8 - 8 = 184; three pills and two gaps of 6: (184 - 12) / 3 = 57 each.
+        let (t, b) = (300 - 8 - 26, 300 - 8);
+        let row = pill_row(300, &[100.0, 20.0, 100.0], 16.0, 1.0, Some(200));
+        assert_eq!(row, [(8, t, 65, b), (71, t, 128, b), (134, t, 191, b)]);
+        assert!(row.iter().all(|&p| pill_text_room(p, 1.0) == 37.0));
+    }
+
+    #[test]
+    fn pills_never_pass_the_limit_or_overlap() {
+        let texts = [120.0, 0.0, 33.3, 250.0];
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let (margin, min) = (px(PILL_MARGIN, scale), px(PILL_MIN_TEXT, scale) as f32);
+            for count in 1..=texts.len() {
+                for limit in (-20..=800).step_by(7) {
+                    let row = pill_row(300, &texts[..count], 16.0, scale, Some(limit));
+                    let case = format!("scale {scale}, {count} pills, limit {limit}: {row:?}");
+                    assert!(row.len() <= count, "{case}");
+                    let squeezed = row.len() < count || row.iter().zip(&texts).any(|(&p, &w)| pill_text_room(p, scale) < w);
+                    for (i, &p) in row.iter().enumerate() {
+                        assert!(p.0 >= margin && p.2 > p.0, "{case}");
+                        assert!(p.2 <= limit - margin, "{case}");
+                        if i > 0 {
+                            assert_eq!(p.0, row[i - 1].2 + px(PILL_GAP, scale), "{case}");
+                        }
+                        if squeezed {
+                            assert!(pill_text_room(p, scale) >= min, "{case}");
+                            assert_eq!(p.2 - p.0, row[0].2 - row[0].0, "shared equally: {case}");
+                        }
+                    }
+                }
+            }
+            assert_eq!(pill_row(300, &texts, 16.0, scale, Some(10_000)).len(), texts.len(), "scale {scale}");
         }
-        assert_eq!(pill_text_max(20, 1.0), 0.0, "no room: no text, never negative");
+    }
+
+    #[test]
+    fn tiny_windows_drop_pills_from_the_right() {
+        // The smallest pill at 100 %: padding 2 * 10 and 16 of text = 36; gap 6.
+        let (t, b) = (300 - 8 - 26, 300 - 8);
+        let texts = [50.0, 50.0, 50.0, 50.0];
+        // Room 78 = two smallest pills and a gap: the third and fourth go.
+        assert_eq!(pill_row(300, &texts, 16.0, 1.0, Some(78 + 16)), [(8, t, 44, b), (50, t, 86, b)]);
+        // Room 77: one pill, as wide as the room.
+        assert_eq!(pill_row(300, &texts, 16.0, 1.0, Some(77 + 16)), [(8, t, 85, b)]);
+        // Room 35: not even one.
+        assert!(pill_row(300, &texts, 16.0, 1.0, Some(35 + 16)).is_empty());
+        assert!(pill_row(300, &texts, 16.0, 1.0, Some(0)).is_empty());
+        assert!(pill_row(300, &texts, 16.0, 1.0, Some(-50)).is_empty());
+        // A short text in a tiny window keeps its own small pill when it fits.
+        assert_eq!(pill_row(300, &[5.0], 16.0, 1.0, Some(41)), [(8, t, 33, b)]);
     }
 
     /// A one-shot local HTTP server answering `status`. The channel gets the request it
@@ -480,14 +620,14 @@ mod tests {
     #[test]
     fn send_posts_json_and_only_2xx_counts() {
         let (url, rx) = serve_once("200 OK");
-        assert!(send(&url, "gate"));
+        assert!(send(&url, "gate", 1));
         let req = received(rx);
         assert!(req.starts_with("POST /api/webhook/x HTTP/1.1\r\n"), "{req}");
-        assert!(req.contains("Content-Type: application/json\r\n") && req.ends_with("\r\n\r\n{\"camera\": \"gate\"}"), "{req}");
+        assert!(req.contains("Content-Type: application/json\r\n") && req.ends_with("\r\n\r\n{\"camera\": \"gate\", \"action\": 1}"), "{req}");
 
         let (url, rx) = serve_once("404 Not Found");
-        assert!(!send(&url, "gate"));
+        assert!(!send(&url, "gate", 4));
         let req = received(rx);
-        assert!(req.starts_with("POST /api/webhook/x HTTP/1.1\r\n") && req.ends_with("{\"camera\": \"gate\"}"), "{req}");
+        assert!(req.starts_with("POST /api/webhook/x HTTP/1.1\r\n") && req.ends_with("{\"camera\": \"gate\", \"action\": 4}"), "{req}");
     }
 }

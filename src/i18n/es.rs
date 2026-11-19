@@ -151,7 +151,7 @@ pub static STRINGS: Strings = Strings {
     tip_preview_live: "Abre una ventana de vista previa real que refleja sus cambios al instante, antes de guardarlos.",
     tip_help: "Abre la guía del usuario.",
     tip_support: "Abre la página de GitHub Sponsors en el navegador. FrigatePiP es gratuito y todas sus funciones seguirán siéndolo; patrocinar mantiene el trabajo en marcha.",
-    tip_action_camera: "Cámara cuyas ventanas tendrán el botón.",
+    tip_action_camera: "Cámara cuyas ventanas tendrán los botones.",
     tip_action_url: "Vacío = sin botón. Una automatización de Home Assistant con un disparador Webhook, p. ej., http://homeassistant.local:8123/api/webhook/<id>.",
     tip_action_label: "Texto del botón, p. ej., Portón o Luz. Vacío = Acción.",
     tip_action_confirm: "El primer clic arma el botón y un segundo clic en menos de 3 s ejecuta la acción. Déjelo activado para portones, puertas y alarmas.",
@@ -202,6 +202,8 @@ pub static STRINGS: Strings = Strings {
     action_bad_url: "No es una dirección http:// o https:// válida.",
     action_default: "Acción",
     action_ask: "¿{0}?",
+    action_row: "Acción {0}",
+    action_confirm_short: "Confirmar",
 
     console_keys: "q salir · x cerrar ventanas · p pausar · m sonido · r repetición · a acción · 1–9 mostrar cámara",
     console_tmux_running: "se ejecuta en segundo plano: las ventanas de las cámaras se abren como ventanas emergentes de tmux (Ctrl+C lo detiene).",
