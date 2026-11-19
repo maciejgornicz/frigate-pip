@@ -134,7 +134,7 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 - At the latest after **at most** seconds, even if the object keeps moving.
 - Never while it is pinned or while the mouse pointer is over it.
 - Never during a replay; afterwards it stays at least 5 more seconds.
-- Never while one of its [action buttons](#65-actions) is armed, sending or showing its result. Like a pinned window, it is not replaced by a new event meanwhile.
+- Never while one of its [action buttons](#65-actions) is armed, sending or showing its result, nor (on Linux) while the choice of the [**a** key](#keys) is open for it. Like a pinned window, it is not replaced by a new event meanwhile.
 
 ### More than one camera
 
@@ -238,11 +238,11 @@ A camera's windows can have up to four **action buttons**, for example **Gate** 
 | **Button label** | Text on the button, e.g. *Gate* or *Light*. Empty = *Action*. |
 | **Confirmation** | Two clicks instead of one: the first arms the button, the second within 3 s runs the action (see [Mouse actions](#mouse-actions)). On by default; keep it on for gates, doors and alarms. |
 
-A URL that is not a valid `http://` or `https://` address gets a red line naming its row, and **OK** and **Apply** save nothing while it is there: the tab shows that camera with the URL selected. (A URL that is already invalid in the settings file does not stop you saving the rest.)
+A URL you typed that is not a valid `http://` or `https://` address gets a red message naming its row, and **OK** and **Apply** save nothing until you correct it: the tab shows that camera with the URL selected. A URL that is already invalid in the settings file gets the message too but does not stop you saving; its button shows ✗.
 
 The buttons sit in one row in the bottom-left corner of the window, in number order. When the row does not fit, short labels keep their width and long ones are shortened; buttons that do not fit at all are left out, from the right. They never cover the buttons in the top-right corner.
 
-**✓ means received, not done.** A button shows ✓ when its URL answered with HTTP 2xx: Home Assistant received the request. It does not tell you that the gate opened — Home Assistant answers 200 even for a webhook it does not know, so a mistyped URL shows ✓ too. Watch the picture, or look at the automation's traces in Home Assistant. ✗ means an error status, no connection or no answer within 5 s; the log says which.
+**✓ means received, not done.** A button shows ✓ when its URL answered with HTTP 2xx: Home Assistant received the request. It does not tell you that the gate opened — Home Assistant answers 200 even for a webhook it does not know or an automation that is turned off, so a mistyped URL shows ✓ too. Watch the picture, or look at the automation's traces in Home Assistant. ✗ means an error status, no connection or no answer: connecting and each wait for the reply give up after 5 s, and the button shows ✗ after 60 s at the latest (a slow name lookup has no limit of its own); the log says which.
 
 **Security.** Whoever knows a button's URL can run its action: the URL is the key to the gate.
 
@@ -253,35 +253,44 @@ The buttons sit in one row in the bottom-left corner of the window, in number or
 **Home Assistant, one automation per button:**
 
 1. In Home Assistant, open *Settings → Automations & scenes* and create a new automation.
-2. Add the trigger **Webhook**. Copy its URL with the copy button next to the webhook id. In the trigger's options keep *Only accessible from the local network* on; the allowed methods must include POST (they do by default).
+2. Add the trigger **Webhook**. Copy its URL with the copy button next to the webhook id — do it while you use Home Assistant through its local address. In the trigger's options keep *Only accessible from the local network* on; the allowed methods must include POST (they do by default).
 3. Add what should happen, for example *Switch: Turn on* (`switch.turn_on`) on the gate relay, or *Light: Toggle* (`light.toggle`). Save the automation.
-4. In FrigatePiP paste the URL into the **URL** of an action, give it a label and click **Apply**.
+4. In FrigatePiP paste the URL into the **URL** of an action, fill in **Button label** and click **Apply**.
 
-**One automation for several buttons:** give the buttons the same URL; the automation tells them apart by `trigger.json.action` (and the camera by `trigger.json.camera`). In YAML:
+**One automation for several buttons:** give each button its own webhook trigger with an id and let `choose` pick by the trigger (*Edit in YAML* in the automation editor):
 
 ```yaml
+mode: queued
 triggers:
   - trigger: webhook
-    webhook_id: <webhook-id>
+    webhook_id: <gate-webhook-id>
     allowed_methods: [POST]
     local_only: true
+    id: gate
+  - trigger: webhook
+    webhook_id: <light-webhook-id>
+    allowed_methods: [POST]
+    local_only: true
+    id: light
 actions:
   - choose:
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 1 }}"
+          - condition: trigger
+            id: gate
         sequence:
           - action: switch.turn_on
             target:
               entity_id: switch.gate
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 2 }}"
+          - condition: trigger
+            id: light
         sequence:
           - action: light.toggle
             target:
               entity_id: light.driveway
 ```
+
+The request's body is also available in templates as `trigger.json.action` and `trigger.json.camera`, useful if you give several buttons one URL.
 
 **The preview never sends.** The preview window (**Show live**, see below) shows the buttons as you type them, before you save, but a click there sends nothing: it shows ✓ and the log says `preview, not sent`. All other windows use only the saved settings.
 
@@ -512,7 +521,7 @@ On a Linux desktop the preview windows work like on Windows: borderless windows 
 - **Start:** applications menu → **FrigatePiP** (installed with apt), or `frigate-pip` in a terminal on the desktop. It runs in the background without a terminal; one copy runs per user. A second start (or `frigate-pip --settings`) opens the settings of the running copy.
 - **With the desktop session:** `frigate-pip --autostart on` (off again: `frigate-pip --autostart off`). To stop it: `frigate-pip --quit`.
 - **Tray icon:** with the same menu as on Windows (see [The tray icon](#4-the-tray-icon)); its colour shows the state: blue — connected, grey — not connected, amber — paused. It appears on KDE Plasma, Xfce, Cinnamon, MATE and Budgie, and on GNOME with the AppIndicator extension (included in Ubuntu).
-- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, the slider under it sets the volume, ⟲ replays the start of the event, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, the action buttons in the bottom-left corner run the camera's [actions](#65-actions), and a window under the mouse does not close. The action buttons need a caption font (`fonts-dejavu-core`); without one the windows have no buttons and the log says so once.
+- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, the slider under it sets the volume, ⟲ replays the start of the event, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, the action buttons in the bottom-left corner run the camera's [actions](#65-actions), and a window under the mouse does not close. The action buttons need a caption font (`fonts-dejavu-core`, or another TrueType font set as `font` in `[console]`); without one the windows have no buttons and the log says so once.
 - **Window options:** `topmost` (with `false` the windows are ordinary windows that others can cover), `sound` (the desktop’s notification sound) and `skip_fullscreen` (nothing while the active window is full-screen) work like on Windows.
 - **Settings:** a click on the icon (or **Settings…** in its menu) opens them in the browser, with the same options, descriptions and connection test as on Windows; the page opens only on this computer. At the first start it opens by itself. They are saved in `~/.config/frigate-pip/config.ini` (described below). The **Actions** section, after **Video & audio**, has the same four rows per camera as the Windows tab (see [Actions](#65-actions)); when a URL you typed is not valid, nothing is saved and the page shows which row is wrong.
 
@@ -527,7 +536,7 @@ In this mode FrigatePiP has no window of its own: it waits for detections in the
 
 - To stop FrigatePiP: `tmux kill-session -t frigate-pip`. To use its keys (pause, show a camera): `tmux attach -t frigate-pip`.
 - The popup appears in the chosen **corner** (`position`) and its size follows the **window width** (`width`). It closes by itself after the usual time (`duration`, `max_duration`), or at once with **q**, **x** or **Esc**. **m** turns its sound off and on. **r** replays the start of the event (from the moment the popup opened). **a** (and a digit) presses the popup camera's action buttons, as in the terminal (see [Keys](#keys)). A popup keeps the settings it started with; settings saved meanwhile apply from the next popup.
-- tmux shows one popup at a time: a detection on another camera replaces the open popup (or is skipped when `replace = false`). While an action button of the popup is armed, sending or showing its result, the popup stays open and a new detection is skipped.
+- tmux shows one popup at a time: a detection on another camera replaces the open popup (or is skipped when `replace = false`). While an action button of the popup is armed, sending or showing its result, the popup stays open: a detection on another camera is skipped, one on the same camera extends the popup.
 - For the full colours of the picture, tmux must pass 24-bit colour on: add `set -as terminal-features ",xterm-256color:RGB"` to `~/.tmux.conf` (use your `$TERM` outside tmux) and restart tmux. FrigatePiP writes this hint into its log when the colours are missing.
 
 ### Keys
@@ -541,8 +550,8 @@ When FrigatePiP runs in a terminal or on a console:
 | **p** | Pause / resume notifications. |
 | **m** | Sound off / on (with `camera_audio = true`) for all windows, also those opened later; the caption then shows *sound off*. |
 | **r** | Replay the start of the event in every window (see [Mouse actions](#mouse-actions)); again: back to live video. |
-| **a** | Presses an [action button](#65-actions) of the newest window whose camera has actions. With one action, **a** presses it (with confirmation: **a**, then **a** again within 3 s). With several, **a** lists them in the caption for 3 s, e.g. *1 Gate · 2 Light*; a digit then picks that action instead of showing a camera, and with confirmation the same digit again runs it. The caption shows the state: *Gate?*, *Gate …*, *Gate ✓* or *Gate ✗*. |
-| **1**–**9** | Show camera 1–9 (in the order of the Frigate configuration). While the choice of **a** is open: the action with that number. |
+| **a** | Presses an [action button](#65-actions) of the newest window whose camera has actions. With one action, **a** presses it (with confirmation: **a**, then **a** again within 3 s). With several, **a** lists them in the caption for 3 s, e.g. *1 Gate · 2 Light*; a digit then picks that action instead of showing a camera, and with confirmation the same digit again runs it. The caption shows the state: *Gate?*, *Gate …*, *Gate ✓* or *Gate ✗*. While the choice is open for a window, that window does not close and is not replaced. |
+| **1**–**9** | Show camera 1–9 (in the order of the Frigate configuration). While the choice of **a** is open and lists that number: that action instead. |
 
 The **a** key and the digits of its choice take effect about 150 ms after you press them. A terminal does not report when a key is released, so FrigatePiP waits to see that the key is not held: a held key counts once and never confirms, and two taps within 150 ms count as nothing. This needs the usual key repeat settings (a repeat faster than every 150 ms, as desktops and the Linux console have by default).
 

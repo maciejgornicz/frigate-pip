@@ -134,7 +134,7 @@ As janelas de pré-visualização nunca recebem o foco do teclado, por isso não
 - O mais tardar após os segundos definidos em **no máximo**, mesmo que o objeto continue a mover-se.
 - Nunca enquanto estiver fixada ou enquanto o ponteiro do rato estiver sobre ela.
 - Nunca durante uma repetição; depois fica aberta pelo menos mais 5 segundos.
-- Nunca enquanto um dos seus [botões de ação](#65-ações) estiver armado, a enviar ou a mostrar o resultado. Tal como uma janela fixada, entretanto também não é substituída por um novo evento.
+- Nunca enquanto um dos seus [botões de ação](#65-ações) estiver armado, a enviar ou a mostrar o resultado, nem (no Linux) enquanto a escolha da tecla [**a**](#teclas) estiver aberta para ela. Tal como uma janela fixada, entretanto também não é substituída por um novo evento.
 
 ### Mais do que uma câmara
 
@@ -238,11 +238,11 @@ As janelas de uma câmara podem ter até quatro **botões de ação**, por exemp
 | **Texto do botão** | Texto no botão, p. ex. *Portão* ou *Luz*. Vazio = *Ação*. |
 | **Confirmação** | Dois cliques em vez de um: o primeiro arma o botão e o segundo, em menos de 3 s, executa a ação (ver [Ações do rato](#ações-do-rato)). Ligada por predefinição; mantenha-a ligada para portões, portas e alarmes. |
 
-Um URL que não seja um endereço `http://` ou `https://` válido faz aparecer um aviso a vermelho que indica a respetiva linha, e **OK** e **Aplicar** não guardam nada enquanto ele lá estiver: o separador mostra então essa câmara com o URL selecionado. (Um URL que já era inválido no ficheiro de configurações não impede que guarde o resto.)
+Um URL escrito que não seja um endereço `http://` ou `https://` válido faz aparecer uma mensagem a vermelho que indica a respetiva linha, e **OK** e **Aplicar** não guardam nada até o corrigir: o separador mostra então essa câmara com o URL selecionado. Um URL que já era inválido no ficheiro de configurações também recebe a mensagem, mas não impede que guarde; o seu botão mostra ✗.
 
 Os botões ficam numa fila no canto inferior esquerdo da janela, pela ordem dos números. Quando a fila não cabe, os textos curtos mantêm a largura e os longos são encurtados; os botões que não cabem de todo são omitidos, a começar pela direita. Nunca tapam os botões do canto superior direito.
 
-**✓ quer dizer recebido, não feito.** Um botão mostra ✓ quando o seu URL respondeu com HTTP 2xx: o Home Assistant recebeu o pedido. Isso não diz que o portão se abriu — o Home Assistant responde 200 mesmo a um webhook que não conhece, por isso um URL mal escrito também mostra ✓. Observe a imagem ou consulte os rastreios (traces) da automatização no Home Assistant. ✗ significa um código de erro, falta de ligação ou nenhuma resposta em 5 s; o registo diz qual.
+**✓ quer dizer recebido, não feito.** Um botão mostra ✓ quando o seu URL respondeu com HTTP 2xx: o Home Assistant recebeu o pedido. Isso não diz que o portão se abriu — o Home Assistant responde 200 mesmo a um webhook que não conhece ou a uma automatização desligada, por isso um URL mal escrito também mostra ✓. Observe a imagem ou consulte os rastreios (traces) da automatização no Home Assistant. ✗ significa um código de erro, falta de ligação ou nenhuma resposta: o estabelecimento da ligação e cada espera pela resposta desistem ao fim de 5 s, e o botão mostra ✗ o mais tardar ao fim de 60 s (uma resolução de nomes lenta não tem limite próprio); o registo diz qual.
 
 **Segurança.** Quem souber o URL de um botão pode executar a sua ação: o URL é a chave do portão.
 
@@ -252,36 +252,45 @@ Os botões ficam numa fila no canto inferior esquerdo da janela, pela ordem dos 
 
 **Home Assistant, uma automatização por botão:**
 
-1. No Home Assistant, abra *Definições → Automatizações e cenas* e crie uma nova automatização.
-2. Adicione o acionador **Webhook**. Copie o seu URL com o botão de copiar ao lado do identificador do webhook. Nas opções do acionador mantenha ligado o acesso apenas a partir da rede local; os métodos permitidos têm de incluir POST (incluem por predefinição).
-3. Adicione o que deve acontecer, por exemplo *Interruptor: Ligar* (`switch.turn_on`) no relé do portão, ou *Luz: Alternar* (`light.toggle`). Guarde a automatização.
-4. No FrigatePiP cole o URL em **URL** de uma ação, dê-lhe um texto e clique em **Aplicar**.
+1. No Home Assistant, abra as automatizações nas definições (na interface em inglês, *Settings → Automations & scenes*) e crie uma nova automatização.
+2. Adicione o acionador **Webhook**. Copie o seu URL com o botão de copiar ao lado do identificador do webhook, enquanto usa o Home Assistant através do seu endereço local. Nas opções do acionador mantenha ligado o acesso apenas a partir da rede local; os métodos permitidos têm de incluir POST (incluem por predefinição).
+3. Adicione o que deve acontecer, por exemplo `switch.turn_on` (*Switch: Turn on*) no relé do portão, ou `light.toggle` (*Light: Toggle*). Guarde a automatização.
+4. No FrigatePiP cole o URL em **URL** de uma ação, preencha **Texto do botão** e clique em **Aplicar**.
 
-**Uma automatização para vários botões:** dê aos botões o mesmo URL; a automatização distingue-os por `trigger.json.action` (e a câmara por `trigger.json.camera`). Em YAML:
+**Uma automatização para vários botões:** dê a cada botão o seu próprio acionador webhook com um `id` e deixe o `choose` escolher pelo acionador (no editor de automatizações, edição em YAML, *Edit in YAML*):
 
 ```yaml
+mode: queued
 triggers:
   - trigger: webhook
-    webhook_id: <webhook-id>
+    webhook_id: <gate-webhook-id>
     allowed_methods: [POST]
     local_only: true
+    id: gate
+  - trigger: webhook
+    webhook_id: <light-webhook-id>
+    allowed_methods: [POST]
+    local_only: true
+    id: light
 actions:
   - choose:
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 1 }}"
+          - condition: trigger
+            id: gate
         sequence:
           - action: switch.turn_on
             target:
               entity_id: switch.gate
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 2 }}"
+          - condition: trigger
+            id: light
         sequence:
           - action: light.toggle
             target:
               entity_id: light.driveway
 ```
+
+O corpo do pedido também está disponível nos modelos (templates) como `trigger.json.action` e `trigger.json.camera`, útil se usar um só URL para vários botões.
 
 **A pré-visualização nunca envia.** A janela de pré-visualização (**Mostrar ao vivo**, ver abaixo) mostra os botões tal como os escreve, antes de guardar, mas um clique nela não envia nada: mostra ✓ e o registo diz `preview, not sent`. Todas as outras janelas usam apenas as configurações guardadas.
 
@@ -512,7 +521,7 @@ Num ambiente de trabalho Linux, as janelas de pré-visualização funcionam como
 - **Iniciar:** menu de aplicações → **FrigatePiP** (instalado com o apt) ou `frigate-pip` num terminal do ambiente de trabalho. Funciona em segundo plano, sem terminal; funciona uma cópia por utilizador. Um segundo arranque (ou `frigate-pip --settings`) abre as configurações da cópia em execução.
 - **Com a sessão do ambiente de trabalho:** `frigate-pip --autostart on` (para desligar: `frigate-pip --autostart off`). Para parar: `frigate-pip --quit`.
 - **Ícone na área de notificação:** com o mesmo menu que no Windows (ver [O ícone na área de notificação](#4-o-ícone-na-área-de-notificação)); a cor mostra o estado: azul — ligado, cinzento — sem ligação, âmbar — em pausa. Aparece no KDE Plasma, Xfce, Cinnamon, MATE e Budgie, e no GNOME com a extensão AppIndicator (incluída no Ubuntu).
-- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, o controlo por baixo ajusta o volume, ⟲ repete o início do evento, arrastar move a janela, a roda redimensiona-a, Ctrl + roda aproxima a imagem em torno do ponteiro, Ctrl + arrastar move a imagem aproximada, um clique fixa-a, um duplo clique abre a câmara no Frigate, os botões de ação no canto inferior esquerdo executam as [ações](#65-ações) da câmara e uma janela sob o ponteiro não se fecha. Os botões de ação precisam de um tipo de letra para as legendas (`fonts-dejavu-core`); sem ele, as janelas não têm botões e o registo indica-o uma vez.
+- **Rato:** como no Windows (ver [Ações do rato](#ações-do-rato)) — × ou o botão direito fecha, o altifalante silencia, o controlo por baixo ajusta o volume, ⟲ repete o início do evento, arrastar move a janela, a roda redimensiona-a, Ctrl + roda aproxima a imagem em torno do ponteiro, Ctrl + arrastar move a imagem aproximada, um clique fixa-a, um duplo clique abre a câmara no Frigate, os botões de ação no canto inferior esquerdo executam as [ações](#65-ações) da câmara e uma janela sob o ponteiro não se fecha. Os botões de ação precisam de um tipo de letra para as legendas (`fonts-dejavu-core`, ou outro tipo de letra TrueType definido como `font` em `[console]`); sem ele, as janelas não têm botões e o registo indica-o uma vez.
 - **Opções das janelas:** `topmost` (com `false`, as janelas são janelas normais que outras podem tapar), `sound` (o som de notificação do ambiente de trabalho) e `skip_fullscreen` (nada enquanto a janela ativa estiver em ecrã inteiro) funcionam como no Windows.
 - **Configurações:** um clique no ícone (ou **Configurações…** no seu menu) abre-as no navegador, com as mesmas opções, descrições e teste de ligação que no Windows; a página só se abre neste computador. No primeiro arranque abre-se sozinha. São guardadas em `~/.config/frigate-pip/config.ini` (descrito abaixo). A secção **Ações**, depois de **Vídeo e áudio**, tem as mesmas quatro linhas por câmara que o separador do Windows (ver [Ações](#65-ações)); se um URL escrito não for válido, nada é guardado e a página mostra qual é a linha errada.
 
@@ -527,7 +536,7 @@ Neste modo, o FrigatePiP não tem janela própria: aguarda deteções em segundo
 
 - Para parar o FrigatePiP: `tmux kill-session -t frigate-pip`. Para usar as suas teclas (pausar, mostrar uma câmara): `tmux attach -t frigate-pip`.
 - O popup aparece no **canto** escolhido (`position`) e o seu tamanho segue a **largura da janela** (`width`). Fecha-se sozinho após o tempo habitual (`duration`, `max_duration`) ou de imediato com **q**, **x** ou **Esc**. **m** desliga e volta a ligar o seu som. **r** repete o início do evento (desde a abertura do popup). **a** (e um algarismo) prime os botões de ação da câmara do popup, como no terminal (ver [Teclas](#teclas)). Um popup mantém as configurações com que abriu; as configurações guardadas entretanto aplicam-se a partir do popup seguinte.
-- O tmux mostra um popup de cada vez: uma deteção noutra câmara substitui o popup aberto (ou é ignorada quando `replace = false`). Enquanto um botão de ação do popup estiver armado, a enviar ou a mostrar o resultado, o popup fica aberto e uma nova deteção é ignorada.
+- O tmux mostra um popup de cada vez: uma deteção noutra câmara substitui o popup aberto (ou é ignorada quando `replace = false`). Enquanto um botão de ação do popup estiver armado, a enviar ou a mostrar o resultado, o popup fica aberto: uma deteção noutra câmara é ignorada e uma deteção na mesma câmara prolonga o popup.
 - Para as cores completas da imagem, o tmux tem de transmitir a cor de 24 bits: adicione `set -as terminal-features ",xterm-256color:RGB"` ao `~/.tmux.conf` (use o seu `$TERM` fora do tmux) e reinicie o tmux. O FrigatePiP escreve esta sugestão no registo quando faltam as cores.
 
 ### Teclas
@@ -541,8 +550,8 @@ Quando o FrigatePiP é executado num terminal ou numa consola:
 | **p** | Pausar / retomar as notificações. |
 | **m** | Desliga / liga o som (com `camera_audio = true`) em todas as janelas, também nas abertas depois; a legenda mostra então *som desligado*. |
 | **r** | Repetir o início do evento em todas as janelas (ver [Ações do rato](#ações-do-rato)); de novo: voltar ao vídeo ao vivo. |
-| **a** | Prime um [botão de ação](#65-ações) da janela mais recente cuja câmara tem ações. Com uma só ação, **a** prime-a (com confirmação: **a** e de novo **a** em menos de 3 s). Com várias, **a** lista-as na legenda durante 3 s, p. ex. *1 Portão · 2 Luz*; um algarismo escolhe então essa ação em vez de mostrar uma câmara e, com confirmação, o mesmo algarismo outra vez executa-a. A legenda mostra o estado: *Portão?*, *Portão …*, *Portão ✓* ou *Portão ✗*. |
-| **1**–**9** | Mostrar a câmara 1–9 (pela ordem da configuração do Frigate). Enquanto a escolha de **a** está aberta: a ação com esse número. |
+| **a** | Prime um [botão de ação](#65-ações) da janela mais recente cuja câmara tem ações. Com uma só ação, **a** prime-a (com confirmação: **a** e de novo **a** em menos de 3 s). Com várias, **a** lista-as na legenda durante 3 s, p. ex. *1 Portão · 2 Luz*; um algarismo escolhe então essa ação em vez de mostrar uma câmara e, com confirmação, o mesmo algarismo outra vez executa-a. A legenda mostra o estado: *Portão?*, *Portão …*, *Portão ✓* ou *Portão ✗*. Enquanto a escolha estiver aberta para uma janela, esta não se fecha nem é substituída. |
+| **1**–**9** | Mostrar a câmara 1–9 (pela ordem da configuração do Frigate). Enquanto a escolha de **a** está aberta e lista esse número: essa ação. |
 
 A tecla **a** e os algarismos da sua escolha têm efeito cerca de 150 ms depois de os premir. Um terminal não indica quando uma tecla é solta, por isso o FrigatePiP espera para confirmar que a tecla não está a ser mantida premida: uma tecla mantida conta uma vez e nunca confirma, e dois toques em menos de 150 ms não contam. Isto requer as definições habituais de repetição do teclado (uma repetição mais rápida do que a cada 150 ms, como os ambientes de trabalho e a consola do Linux têm por predefinição).
 

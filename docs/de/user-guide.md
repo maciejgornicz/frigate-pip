@@ -134,7 +134,7 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 - Spätestens nach der unter **höchstens** eingestellten Zahl von Sekunden, auch wenn sich das Objekt weiter bewegt.
 - Nie, solange es angeheftet ist oder sich der Mauszeiger darüber befindet.
 - Nie während einer Wiederholung; danach bleibt es noch mindestens 5 Sekunden geöffnet.
-- Nie, solange eine seiner [Aktionsschaltflächen](#65-aktionen) scharf ist, sendet oder ihr Ergebnis zeigt. Wie ein angeheftetes Fenster wird es in dieser Zeit auch nicht durch ein neues Ereignis ersetzt.
+- Nie, solange eine seiner [Aktionsschaltflächen](#65-aktionen) scharf ist, sendet oder ihr Ergebnis zeigt, und (unter Linux) nie, solange die Auswahl der Taste [**a**](#tasten) für es offen ist. Wie ein angeheftetes Fenster wird es in dieser Zeit auch nicht durch ein neues Ereignis ersetzt.
 
 ### Mehrere Kameras
 
@@ -238,11 +238,11 @@ Die Fenster einer Kamera können bis zu vier **Aktionsschaltflächen** haben, z.
 | **Beschriftung der Schaltfläche** | Text auf der Schaltfläche, z. B. *Tor* oder *Licht*. Leer = *Aktion*. |
 | **Bestätigung** | Zwei Klicks statt einem: Der erste macht die Schaltfläche scharf, der zweite innerhalb von 3 s führt die Aktion aus (siehe [Mausaktionen](#mausaktionen)). Standardmäßig eingeschaltet; für Tore, Türen und Alarmanlagen eingeschaltet lassen. |
 
-Bei einer URL, die keine gültige `http://`- oder `https://`-Adresse ist, erscheint ein roter Hinweis, der ihre Zeile nennt, und **OK** und **Übernehmen** speichern nichts, solange sie dort steht: Der Reiter zeigt dann diese Kamera mit markierter URL. (Eine URL, die schon in der Einstellungsdatei ungültig ist, hindert Sie nicht daran, den Rest zu speichern.)
+Bei einer eingegebenen URL, die keine gültige `http://`- oder `https://`-Adresse ist, erscheint eine rote Meldung, die ihre Zeile nennt, und **OK** und **Übernehmen** speichern nichts, bis Sie sie korrigiert haben: Der Reiter zeigt dann diese Kamera mit markierter URL. Eine URL, die schon in der Einstellungsdatei ungültig ist, erhält die Meldung ebenfalls, verhindert das Speichern aber nicht; ihre Schaltfläche zeigt ✗.
 
 Die Schaltflächen stehen in einer Reihe unten links im Fenster, in der Reihenfolge ihrer Nummern. Passt die Reihe nicht, behalten kurze Beschriftungen ihre Breite und lange werden gekürzt; Schaltflächen, die gar nicht passen, entfallen, von rechts her. Sie verdecken nie die Schaltflächen oben rechts.
 
-**✓ heißt angekommen, nicht erledigt.** Eine Schaltfläche zeigt ✓, wenn ihre URL mit HTTP 2xx geantwortet hat: Home Assistant hat die Anfrage erhalten. Das sagt nicht, dass sich das Tor geöffnet hat — Home Assistant antwortet auch bei einem unbekannten Webhook mit 200, sodass auch eine vertippte URL ✓ zeigt. Achten Sie auf das Bild oder sehen Sie sich die Traces der Automatisierung in Home Assistant an. ✗ bedeutet einen Fehlerstatus, keine Verbindung oder keine Antwort innerhalb von 5 s; das Protokoll sagt, was davon.
+**✓ heißt angekommen, nicht erledigt.** Eine Schaltfläche zeigt ✓, wenn ihre URL mit HTTP 2xx geantwortet hat: Home Assistant hat die Anfrage erhalten. Das sagt nicht, dass sich das Tor geöffnet hat — Home Assistant antwortet auch bei einem unbekannten Webhook oder einer ausgeschalteten Automatisierung mit 200, sodass auch eine vertippte URL ✓ zeigt. Achten Sie auf das Bild oder sehen Sie sich die Traces der Automatisierung in Home Assistant an. ✗ bedeutet einen Fehlerstatus, keine Verbindung oder keine Antwort: Der Verbindungsaufbau und jedes Warten auf die Antwort geben nach 5 s auf, und spätestens nach 60 s zeigt die Schaltfläche ✗ (eine langsame Namensauflösung hat kein eigenes Limit); das Protokoll sagt, was davon.
 
 **Sicherheit.** Wer die URL einer Schaltfläche kennt, kann ihre Aktion auslösen: Die URL ist der Schlüssel zum Tor.
 
@@ -252,36 +252,45 @@ Die Schaltflächen stehen in einer Reihe unten links im Fenster, in der Reihenfo
 
 **Home Assistant, eine Automatisierung pro Schaltfläche:**
 
-1. Öffnen Sie in Home Assistant *Einstellungen → Automatisierungen & Szenen* und erstellen Sie eine neue Automatisierung.
-2. Fügen Sie den Auslöser **Webhook** hinzu. Kopieren Sie seine URL mit der Kopierschaltfläche neben der Webhook-ID. Lassen Sie in den Optionen des Auslösers den Zugriff nur aus dem lokalen Netz eingeschaltet; die erlaubten Methoden müssen POST enthalten (das tun sie standardmäßig).
-3. Fügen Sie hinzu, was geschehen soll, z. B. *Schalter: Einschalten* (`switch.turn_on`) für das Torrelais oder *Licht: Umschalten* (`light.toggle`). Speichern Sie die Automatisierung.
-4. Fügen Sie in FrigatePiP die URL in das Feld **URL** einer Aktion ein, geben Sie ihr eine Beschriftung und klicken Sie auf **Übernehmen**.
+1. Öffnen Sie in Home Assistant in den Einstellungen die Automatisierungen (in der englischen Oberfläche *Settings → Automations & scenes*) und erstellen Sie eine neue Automatisierung.
+2. Fügen Sie den Auslöser **Webhook** hinzu. Kopieren Sie seine URL mit der Kopierschaltfläche neben der Webhook-ID, und zwar während Sie Home Assistant über seine lokale Adresse verwenden. Lassen Sie in den Optionen des Auslösers den Zugriff nur aus dem lokalen Netz eingeschaltet; die erlaubten Methoden müssen POST enthalten (das tun sie standardmäßig).
+3. Fügen Sie hinzu, was geschehen soll, z. B. `switch.turn_on` (*Switch: Turn on*) für das Torrelais oder `light.toggle` (*Light: Toggle*). Speichern Sie die Automatisierung.
+4. Fügen Sie in FrigatePiP die URL in das Feld **URL** einer Aktion ein, füllen Sie **Beschriftung der Schaltfläche** aus und klicken Sie auf **Übernehmen**.
 
-**Eine Automatisierung für mehrere Schaltflächen:** Geben Sie den Schaltflächen dieselbe URL; die Automatisierung unterscheidet sie an `trigger.json.action` (und die Kamera an `trigger.json.camera`). In YAML:
+**Eine Automatisierung für mehrere Schaltflächen:** Geben Sie jeder Schaltfläche einen eigenen Webhook-Auslöser mit einer `id` und lassen Sie `choose` nach dem Auslöser wählen (im Automatisierungseditor in YAML bearbeiten, *Edit in YAML*):
 
 ```yaml
+mode: queued
 triggers:
   - trigger: webhook
-    webhook_id: <webhook-id>
+    webhook_id: <gate-webhook-id>
     allowed_methods: [POST]
     local_only: true
+    id: gate
+  - trigger: webhook
+    webhook_id: <light-webhook-id>
+    allowed_methods: [POST]
+    local_only: true
+    id: light
 actions:
   - choose:
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 1 }}"
+          - condition: trigger
+            id: gate
         sequence:
           - action: switch.turn_on
             target:
               entity_id: switch.gate
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 2 }}"
+          - condition: trigger
+            id: light
         sequence:
           - action: light.toggle
             target:
               entity_id: light.driveway
 ```
+
+Der Inhalt der Anfrage steht in Templates auch als `trigger.json.action` und `trigger.json.camera` bereit – nützlich, wenn mehrere Schaltflächen dieselbe URL verwenden.
 
 **Die Vorschau sendet nie.** Das Vorschaufenster (**Live anzeigen**, siehe unten) zeigt die Schaltflächen so, wie Sie sie eingeben, noch vor dem Speichern, aber ein Klick darin sendet nichts: Es zeigt ✓, und das Protokoll meldet `preview, not sent`. Alle anderen Fenster verwenden nur die gespeicherten Einstellungen.
 
@@ -512,7 +521,7 @@ Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rah
 - **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie. Ein zweiter Start (oder `frigate-pip --settings`) öffnet die Einstellungen der laufenden Kopie.
 - **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
 - **Symbol im Infobereich:** mit demselben Menü wie unter Windows (siehe [Das Tray-Symbol](#4-das-tray-symbol)); seine Farbe zeigt den Zustand: blau — verbunden, grau — nicht verbunden, orange — pausiert. Es erscheint unter KDE Plasma, Xfce, Cinnamon, MATE und Budgie sowie unter GNOME mit der Erweiterung AppIndicator (in Ubuntu enthalten).
-- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, ⟲ wiederholt den Beginn des Ereignisses, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, die Aktionsschaltflächen unten links führen die [Aktionen](#65-aktionen) der Kamera aus, und ein Fenster unter der Maus schließt sich nicht. Die Aktionsschaltflächen brauchen eine Schriftart für Beschriftungen (`fonts-dejavu-core`); ohne sie haben die Fenster keine Schaltflächen, und das Protokoll meldet es einmal.
+- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, ⟲ wiederholt den Beginn des Ereignisses, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, die Aktionsschaltflächen unten links führen die [Aktionen](#65-aktionen) der Kamera aus, und ein Fenster unter der Maus schließt sich nicht. Die Aktionsschaltflächen brauchen eine Schriftart für Beschriftungen (`fonts-dejavu-core` oder eine andere TrueType-Schrift, die als `font` in `[console]` eingetragen ist); ohne sie haben die Fenster keine Schaltflächen, und das Protokoll meldet es einmal.
 - **Fensteroptionen:** `topmost` (bei `false` sind die Fenster gewöhnliche Fenster, die andere verdecken können), `sound` (der Benachrichtigungston des Desktops) und `skip_fullscreen` (nichts, solange das aktive Fenster im Vollbild ist) wirken wie unter Windows.
 - **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben). Der Abschnitt **Aktionen** nach **Video & Audio** hat dieselben vier Zeilen pro Kamera wie der Reiter unter Windows (siehe [Aktionen](#65-aktionen)); ist eine eingegebene URL ungültig, wird nichts gespeichert, und die Seite zeigt, welche Zeile falsch ist.
 
@@ -527,7 +536,7 @@ In diesem Modus hat FrigatePiP kein eigenes Fenster: Es wartet im Hintergrund au
 
 - Zum Beenden von FrigatePiP: `tmux kill-session -t frigate-pip`. Um seine Tasten zu verwenden (Pause, Kamera anzeigen): `tmux attach -t frigate-pip`.
 - Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein. **r** wiederholt den Beginn des Ereignisses (ab dem Öffnen des Popups). **a** (und eine Ziffer) drückt die Aktionsschaltflächen der Kamera des Popups, wie im Terminal (siehe [Tasten](#tasten)). Ein Popup behält die Einstellungen, mit denen es geöffnet wurde; inzwischen gespeicherte Einstellungen gelten ab dem nächsten Popup.
-- tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen). Solange eine Aktionsschaltfläche des Popups scharf ist, sendet oder ihr Ergebnis zeigt, bleibt das Popup offen, und eine neue Erkennung wird übersprungen.
+- tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen). Solange eine Aktionsschaltfläche des Popups scharf ist, sendet oder ihr Ergebnis zeigt, bleibt das Popup offen: Eine Erkennung auf einer anderen Kamera wird übersprungen, eine auf derselben Kamera verlängert das Popup.
 - Für die vollen Farben des Bildes muss tmux 24-Bit-Farbe weitergeben: Fügen Sie `set -as terminal-features ",xterm-256color:RGB"` zu `~/.tmux.conf` hinzu (verwenden Sie dabei Ihren `$TERM` außerhalb von tmux) und starten Sie tmux neu. FrigatePiP schreibt diesen Hinweis in sein Protokoll, wenn die Farben fehlen.
 
 ### Tasten
@@ -541,8 +550,8 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 | **p** | Benachrichtigungen pausieren / fortsetzen. |
 | **m** | Ton aus / ein (bei `camera_audio = true`) für alle Fenster, auch später geöffnete; die Beschriftung zeigt dann *Ton aus*. |
 | **r** | Den Beginn des Ereignisses in allen Fenstern wiederholen (siehe [Mausaktionen](#mausaktionen)); erneut: zurück zum Livevideo. |
-| **a** | Drückt eine [Aktionsschaltfläche](#65-aktionen) des neuesten Fensters, dessen Kamera Aktionen hat. Bei einer Aktion drückt **a** sie (mit Bestätigung: **a** und innerhalb von 3 s noch einmal **a**). Bei mehreren listet **a** sie 3 s lang in der Beschriftung auf, z. B. *1 Tor · 2 Licht*; eine Ziffer wählt dann diese Aktion, statt eine Kamera anzuzeigen, und mit Bestätigung führt dieselbe Ziffer sie beim zweiten Mal aus. Die Beschriftung zeigt den Zustand: *Tor?*, *Tor …*, *Tor ✓* oder *Tor ✗*. |
-| **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). Solange die Auswahl von **a** offen ist: die Aktion mit dieser Nummer. |
+| **a** | Drückt eine [Aktionsschaltfläche](#65-aktionen) des neuesten Fensters, dessen Kamera Aktionen hat. Bei einer Aktion drückt **a** sie (mit Bestätigung: **a** und innerhalb von 3 s noch einmal **a**). Bei mehreren listet **a** sie 3 s lang in der Beschriftung auf, z. B. *1 Tor · 2 Licht*; eine Ziffer wählt dann diese Aktion, statt eine Kamera anzuzeigen, und mit Bestätigung führt dieselbe Ziffer sie beim zweiten Mal aus. Die Beschriftung zeigt den Zustand: *Tor?*, *Tor …*, *Tor ✓* oder *Tor ✗*. Solange die Auswahl für ein Fenster offen ist, schließt es sich nicht und wird nicht ersetzt. |
+| **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). Solange die Auswahl von **a** offen ist und diese Nummer auflistet: diese Aktion. |
 
 Die Taste **a** und die Ziffern ihrer Auswahl wirken etwa 150 ms nach dem Drücken. Ein Terminal meldet nicht, wann eine Taste losgelassen wird; FrigatePiP wartet daher ab, ob die Taste gehalten wird: Eine gehaltene Taste zählt einmal und bestätigt nie, und zwei Anschläge innerhalb von 150 ms zählen gar nicht. Das setzt die üblichen Einstellungen der Tastenwiederholung voraus (eine Wiederholung schneller als alle 150 ms, wie Desktops und die Linux-Konsole sie standardmäßig haben).
 

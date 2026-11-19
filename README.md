@@ -96,7 +96,7 @@ Every [release](https://github.com/maciejgornicz/frigate-pip/releases/latest) al
 | `--output terminal` (default in a terminal without a desktop) | inside the terminal window FrigatePiP runs in | no — it occupies the terminal |
 | `--output tmux` | as tmux popups over your work in tmux — only while you work inside tmux | yes: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, then work in tmux (`tmux`) |
 
-Keys in the terminal or on the console: **q** quit, **x** close windows, **p** pause, **m** sound off / on, **r** replay the start of the event, **a** press an action button, **1–9** show a camera; a tmux popup closes with **q**, **x** or **Esc** (**m** mutes it, **r** replays it). `frigate-pip --list` shows your cameras with their objects and zones — the names for the filters in `config.ini`.
+Keys in the terminal or on the console: **q** quit, **x** close windows, **p** pause, **m** sound off / on, **r** replay the start of the event, **a** press an action button, **1–9** show a camera; a tmux popup closes with **q**, **x** or **Esc** (**m** mutes it, **r** replays it, **a** presses its action buttons). `frigate-pip --list` shows your cameras with their objects and zones — the names for the filters in `config.ini`.
 
 Running it as a systemd service, all options and troubleshooting: [user guide → Linux version](docs/en/user-guide.md#12-linux-version).
 
@@ -137,7 +137,7 @@ action2_label = Light
 action2_confirm = false
 ```
 
-The same can be set in the **Actions** tab of the settings window (on Linux, the **Actions** section of the settings page). By default the first click arms a button and a second one within 3 s runs it; `action2_confirm = false` makes the light a single click. ✓ on a button means Home Assistant received the request, not that the gate opened. Whoever knows a webhook URL can run its action, so keep the webhook local-only (Home Assistant's default) with a random id. On Linux without a mouse, the key **a** presses the buttons.
+The same can be set in the **Actions** tab of the settings window (on Linux, the **Actions** section of the settings page). By default the first click arms a button and a second one within 3 s runs it; `action2_confirm = false` makes the light a single click. ✓ on a button means Home Assistant received the request, not that the gate opened. Whoever knows a webhook URL can run its action, so keep the webhook local-only (Home Assistant's default) with a random id. On Linux desktop windows the buttons need a caption font (`fonts-dejavu-core`, or another TrueType font set as `font` in `[console]`); without a mouse, the key **a** presses them.
 
 Details and a step-by-step Home Assistant setup: [user guide → Actions](docs/en/user-guide.md#65-actions).
 

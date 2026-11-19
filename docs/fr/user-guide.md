@@ -134,7 +134,7 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 - Au plus tard après le nombre de secondes défini dans **au plus**, même si l’objet continue de bouger.
 - Jamais tant qu’elle est épinglée ou que le pointeur de la souris se trouve dessus.
 - Jamais pendant une relecture ; ensuite, elle reste encore ouverte au moins 5 secondes.
-- Jamais tant que l’un de ses [boutons d’action](#65-actions) est armé, en cours d’envoi ou affiche son résultat. Comme une fenêtre épinglée, elle n’est pas non plus remplacée entre-temps par un nouvel événement.
+- Jamais tant que l’un de ses [boutons d’action](#65-actions) est armé, en cours d’envoi ou affiche son résultat, ni (sous Linux) tant que le choix de la touche [**a**](#touches) est ouvert pour elle. Comme une fenêtre épinglée, elle n’est pas non plus remplacée entre-temps par un nouvel événement.
 
 ### Plusieurs caméras
 
@@ -238,11 +238,11 @@ Les fenêtres d’une caméra peuvent avoir jusqu’à quatre **boutons d’acti
 | **Texte du bouton** | Texte du bouton, p. ex. *Portail* ou *Lumière*. Vide = *Action*. |
 | **Confirmation** | Deux clics au lieu d’un : le premier arme le bouton, le second dans les 3 s déclenche l’action (voir [Actions de la souris](#actions-de-la-souris)). Activée par défaut ; laissez-la activée pour les portails, les portes et les alarmes. |
 
-Une URL qui n’est pas une adresse `http://` ou `https://` valide fait apparaître un message rouge indiquant sa ligne, et **OK** et **Appliquer** n’enregistrent rien tant qu’elle s’y trouve : l’onglet affiche alors cette caméra avec l’URL sélectionnée. (Une URL déjà invalide dans le fichier de paramètres ne vous empêche pas d’enregistrer le reste.)
+Une URL saisie qui n’est pas une adresse `http://` ou `https://` valide fait apparaître un message rouge indiquant sa ligne, et **OK** et **Appliquer** n’enregistrent rien tant que vous ne l’avez pas corrigée : l’onglet affiche alors cette caméra avec l’URL sélectionnée. Une URL déjà invalide dans le fichier de paramètres reçoit aussi le message, mais n’empêche pas l’enregistrement ; son bouton affiche ✗.
 
 Les boutons se trouvent sur une rangée dans le coin inférieur gauche de la fenêtre, dans l’ordre de leurs numéros. Si la rangée ne tient pas, les textes courts gardent leur largeur et les longs sont raccourcis ; les boutons qui ne tiennent pas du tout sont omis, en partant de la droite. Ils ne recouvrent jamais les boutons du coin supérieur droit.
 
-**✓ veut dire reçu, pas fait.** Un bouton affiche ✓ quand son URL a répondu par HTTP 2xx : Home Assistant a reçu la requête. Cela ne dit pas que le portail s’est ouvert — Home Assistant répond 200 même pour un webhook qu’il ne connaît pas, donc une URL mal saisie affiche aussi ✓. Regardez l’image, ou consultez les traces de l’automatisation dans Home Assistant. ✗ signifie un code d’erreur, pas de connexion ou pas de réponse dans les 5 s ; le journal précise lequel.
+**✓ veut dire reçu, pas fait.** Un bouton affiche ✓ quand son URL a répondu par HTTP 2xx : Home Assistant a reçu la requête. Cela ne dit pas que le portail s’est ouvert — Home Assistant répond 200 même pour un webhook qu’il ne connaît pas ou une automatisation désactivée, donc une URL mal saisie affiche aussi ✓. Regardez l’image, ou consultez les traces de l’automatisation dans Home Assistant. ✗ signifie un code d’erreur, pas de connexion ou pas de réponse : l’établissement de la connexion et chaque attente de la réponse abandonnent au bout de 5 s, et le bouton affiche ✗ au plus tard au bout de 60 s (une résolution de nom lente n’a pas de limite propre) ; le journal précise lequel.
 
 **Sécurité.** Quiconque connaît l’URL d’un bouton peut déclencher son action : l’URL est la clé du portail.
 
@@ -252,36 +252,45 @@ Les boutons se trouvent sur une rangée dans le coin inférieur gauche de la fen
 
 **Home Assistant, une automatisation par bouton :**
 
-1. Dans Home Assistant, ouvrez *Paramètres → Automatisations et scènes* et créez une nouvelle automatisation.
-2. Ajoutez le déclencheur **Webhook**. Copiez son URL avec le bouton de copie à côté de l’identifiant du webhook. Dans les options du déclencheur, laissez activé l’accès uniquement depuis le réseau local ; les méthodes autorisées doivent inclure POST (c’est le cas par défaut).
-3. Ajoutez ce qui doit se passer, par exemple *Interrupteur : Activer* (`switch.turn_on`) sur le relais du portail, ou *Lumière : Basculer* (`light.toggle`). Enregistrez l’automatisation.
-4. Dans FrigatePiP, collez l’URL dans **URL** d’une action, donnez-lui un texte et cliquez sur **Appliquer**.
+1. Dans Home Assistant, ouvrez les automatisations dans les paramètres (dans l’interface anglaise, *Settings → Automations & scenes*) et créez une nouvelle automatisation.
+2. Ajoutez le déclencheur **Webhook**. Copiez son URL avec le bouton de copie à côté de l’identifiant du webhook, pendant que vous utilisez Home Assistant par son adresse locale. Dans les options du déclencheur, laissez activé l’accès uniquement depuis le réseau local ; les méthodes autorisées doivent inclure POST (c’est le cas par défaut).
+3. Ajoutez ce qui doit se passer, par exemple `switch.turn_on` (*Switch: Turn on*) sur le relais du portail, ou `light.toggle` (*Light: Toggle*). Enregistrez l’automatisation.
+4. Dans FrigatePiP, collez l’URL dans **URL** d’une action, remplissez **Texte du bouton** et cliquez sur **Appliquer**.
 
-**Une automatisation pour plusieurs boutons :** donnez aux boutons la même URL ; l’automatisation les distingue grâce à `trigger.json.action` (et la caméra grâce à `trigger.json.camera`). En YAML :
+**Une automatisation pour plusieurs boutons :** donnez à chaque bouton son propre déclencheur webhook avec un `id` et laissez `choose` choisir selon le déclencheur (dans l’éditeur d’automatisations, modification en YAML, *Edit in YAML*) :
 
 ```yaml
+mode: queued
 triggers:
   - trigger: webhook
-    webhook_id: <webhook-id>
+    webhook_id: <gate-webhook-id>
     allowed_methods: [POST]
     local_only: true
+    id: gate
+  - trigger: webhook
+    webhook_id: <light-webhook-id>
+    allowed_methods: [POST]
+    local_only: true
+    id: light
 actions:
   - choose:
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 1 }}"
+          - condition: trigger
+            id: gate
         sequence:
           - action: switch.turn_on
             target:
               entity_id: switch.gate
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.action == 2 }}"
+          - condition: trigger
+            id: light
         sequence:
           - action: light.toggle
             target:
               entity_id: light.driveway
 ```
+
+Le corps de la requête est aussi disponible dans les modèles (templates) sous la forme `trigger.json.action` et `trigger.json.camera`, utile si vous donnez une seule URL à plusieurs boutons.
 
 **L’aperçu n’envoie jamais rien.** La fenêtre d’aperçu (**Afficher en direct**, voir plus bas) montre les boutons tels que vous les saisissez, avant l’enregistrement, mais un clic dans cette fenêtre n’envoie rien : elle affiche ✓ et le journal indique `preview, not sent`. Toutes les autres fenêtres n’utilisent que les paramètres enregistrés.
 
@@ -512,7 +521,7 @@ Sur un bureau Linux, les fenêtres d’aperçu fonctionnent comme sous Windows 
 - **Lancement :** menu des applications → **FrigatePiP** (installé avec apt), ou `frigate-pip` dans un terminal du bureau. Il s’exécute en arrière-plan sans terminal ; une seule copie s’exécute par utilisateur. Un second lancement (ou `frigate-pip --settings`) ouvre les paramètres de la copie en cours d’exécution.
 - **Avec la session du bureau :** `frigate-pip --autostart on` (pour désactiver : `frigate-pip --autostart off`). Pour l’arrêter : `frigate-pip --quit`.
 - **Icône dans la zone de notification :** avec le même menu que sous Windows (voir [Icône de la zone de notification](#4-icône-de-la-zone-de-notification)) ; sa couleur indique l’état : bleu — connecté, gris — non connecté, orange — en pause. Elle apparaît sous KDE Plasma, Xfce, Cinnamon, MATE et Budgie, ainsi que sous GNOME avec l’extension AppIndicator (incluse dans Ubuntu).
-- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, le curseur en dessous règle le volume, ⟲ rejoue le début de l’événement, un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, les boutons d’action du coin inférieur gauche déclenchent les [actions](#65-actions) de la caméra, et une fenêtre sous la souris ne se ferme pas. Les boutons d’action ont besoin d’une police pour les légendes (`fonts-dejavu-core`) ; sans elle, les fenêtres n’ont pas de boutons et le journal le signale une fois.
+- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, le curseur en dessous règle le volume, ⟲ rejoue le début de l’événement, un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, les boutons d’action du coin inférieur gauche déclenchent les [actions](#65-actions) de la caméra, et une fenêtre sous la souris ne se ferme pas. Les boutons d’action ont besoin d’une police pour les légendes (`fonts-dejavu-core`, ou une autre police TrueType indiquée comme `font` dans `[console]`) ; sans elle, les fenêtres n’ont pas de boutons et le journal le signale une fois.
 - **Options des fenêtres :** `topmost` (avec `false`, les fenêtres sont des fenêtres ordinaires que d’autres peuvent recouvrir), `sound` (le son de notification du bureau) et `skip_fullscreen` (rien tant que la fenêtre active est en plein écran) fonctionnent comme sous Windows.
 - **Paramètres :** un clic sur l’icône (ou **Paramètres…** dans son menu) les ouvre dans le navigateur, avec les mêmes options, descriptions et le même test de connexion que sous Windows ; la page ne s’ouvre que sur cet ordinateur. Au premier lancement, elle s’ouvre d’elle-même. Ils sont enregistrés dans `~/.config/frigate-pip/config.ini` (décrit plus bas). La section **Actions**, après **Vidéo et audio**, a les mêmes quatre lignes par caméra que l’onglet de Windows (voir [Actions](#65-actions)) ; si une URL saisie n’est pas valide, rien n’est enregistré et la page indique quelle ligne est fautive.
 
@@ -527,7 +536,7 @@ Dans ce mode, FrigatePiP n’a pas de fenêtre propre : il attend les détectio
 
 - Pour arrêter FrigatePiP : `tmux kill-session -t frigate-pip`. Pour utiliser ses touches (pause, affichage d’une caméra) : `tmux attach -t frigate-pip`.
 - La popup apparaît dans le **coin** choisi (`position`) et sa taille suit la **largeur de la fenêtre** (`width`). Elle se ferme d’elle-même après le délai habituel (`duration`, `max_duration`), ou immédiatement avec **q**, **x** ou **Échap**. **m** coupe et rétablit son son. **r** rejoue le début de l’événement (depuis l’ouverture de la popup). **a** (et un chiffre) appuie sur les boutons d’action de la caméra de la popup, comme dans le terminal (voir [Touches](#touches)). Une popup garde les paramètres avec lesquels elle s’est ouverte ; les paramètres enregistrés entre-temps s’appliquent à partir de la popup suivante.
-- tmux n’affiche qu’une popup à la fois : une détection sur une autre caméra remplace la popup ouverte (ou est ignorée si `replace = false`). Tant qu’un bouton d’action de la popup est armé, en cours d’envoi ou affiche son résultat, la popup reste ouverte et une nouvelle détection est ignorée.
+- tmux n’affiche qu’une popup à la fois : une détection sur une autre caméra remplace la popup ouverte (ou est ignorée si `replace = false`). Tant qu’un bouton d’action de la popup est armé, en cours d’envoi ou affiche son résultat, la popup reste ouverte : une détection sur une autre caméra est ignorée, une détection sur la même caméra prolonge la popup.
 - Pour obtenir toutes les couleurs de l’image, tmux doit transmettre les couleurs 24 bits : ajoutez `set -as terminal-features ",xterm-256color:RGB"` à `~/.tmux.conf` (en indiquant la valeur de votre `$TERM` hors de tmux) et redémarrez tmux. FrigatePiP inscrit cette indication dans son journal lorsque les couleurs manquent.
 
 ### Touches
@@ -541,8 +550,8 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 | **p** | Suspendre / reprendre les notifications. |
 | **m** | Coupe / rétablit le son (avec `camera_audio = true`) dans toutes les fenêtres, y compris celles ouvertes ensuite ; la légende affiche alors *son coupé*. |
 | **r** | Rejouer le début de l’événement dans toutes les fenêtres (voir [Actions de la souris](#actions-de-la-souris)) ; à nouveau : retour à la vidéo en direct. |
-| **a** | Appuie sur un [bouton d’action](#65-actions) de la fenêtre la plus récente dont la caméra a des actions. Avec une seule action, **a** l’actionne (avec confirmation : **a**, puis à nouveau **a** dans les 3 s). Avec plusieurs, **a** les énumère dans la légende pendant 3 s, p. ex. *1 Portail · 2 Lumière* ; un chiffre choisit alors cette action au lieu d’afficher une caméra et, avec confirmation, le même chiffre une seconde fois la déclenche. La légende affiche l’état : *Portail ?*, *Portail …*, *Portail ✓* ou *Portail ✗*. |
-| **1**–**9** | Afficher la caméra 1 à 9 (dans l’ordre de la configuration de Frigate). Tant que le choix de **a** est ouvert : l’action portant ce numéro. |
+| **a** | Appuie sur un [bouton d’action](#65-actions) de la fenêtre la plus récente dont la caméra a des actions. Avec une seule action, **a** l’actionne (avec confirmation : **a**, puis à nouveau **a** dans les 3 s). Avec plusieurs, **a** les énumère dans la légende pendant 3 s, p. ex. *1 Portail · 2 Lumière* ; un chiffre choisit alors cette action au lieu d’afficher une caméra et, avec confirmation, le même chiffre une seconde fois la déclenche. La légende affiche l’état : *Portail ?*, *Portail …*, *Portail ✓* ou *Portail ✗*. Tant que le choix est ouvert pour une fenêtre, celle-ci ne se ferme pas et n’est pas remplacée. |
+| **1**–**9** | Afficher la caméra 1 à 9 (dans l’ordre de la configuration de Frigate). Tant que le choix de **a** est ouvert et énumère ce numéro : cette action. |
 
 La touche **a** et les chiffres de son choix prennent effet environ 150 ms après l’appui. Un terminal ne signale pas le relâchement d’une touche ; FrigatePiP attend donc de voir que la touche n’est pas maintenue : une touche maintenue compte une fois et ne confirme jamais, et deux frappes à moins de 150 ms d’intervalle ne comptent pas. Cela suppose les réglages habituels de répétition des touches (une répétition plus rapide que toutes les 150 ms, comme le prévoient par défaut les bureaux et la console Linux).
 
