@@ -1708,8 +1708,9 @@ impl App {
     /// with two gates one key never opens both. One action is pressed at once, several open the
     /// choice (see `actions::Picker`).
     fn key_a(&mut self) {
-        let has_actions = |w: &Win| w.rect.is_some() && w.actions.iter().any(Option::is_some);
-        let Some(i) = (0..self.wins.len()).rev().find(|&i| has_actions(&self.wins[i])) else { return };
+        let wins: Vec<(u64, bool, bool)> = self.wins.iter().map(|w| (w.id, w.actions.iter().any(Option::is_some), w.rect.is_some())).collect();
+        let Some(id) = actions::a_target(&wins) else { return };
+        let Some(i) = self.wins.iter().position(|w| w.id == id) else { return };
         let numbers = actions::numbers(&self.wins[i].actions);
         if let Some(n) = self.picker.key_a(self.wins[i].id, &numbers, Instant::now()) {
             self.press_action(i, n);
@@ -1717,7 +1718,8 @@ impl App {
     }
 
     /// Digit `d` while the `a` key's choice is open: presses that action. `false` = the digit
-    /// is not for the choice (it shows a camera).
+    /// is not for the choice (it shows a camera), also when the listed action has gone meanwhile
+    /// (the settings were saved without it).
     fn choose_action(&mut self, d: usize) -> bool {
         let now = Instant::now();
         let Some((id, n)) = self.picker.digit(d, now) else { return false };
@@ -1725,8 +1727,8 @@ impl App {
             self.picker.close();
             return false;
         };
-        let look = self.press_action(i, n);
-        self.picker.pressed(look == Some(Look::Armed), now);
+        let Some(look) = self.press_action(i, n) else { return false };
+        self.picker.pressed(look == Look::Armed, now);
         true
     }
 

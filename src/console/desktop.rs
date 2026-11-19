@@ -407,7 +407,8 @@ impl Output for Desktop {
         if let Some(w) = self.wins.get_mut(&id) {
             if w.actions != actions {
                 w.actions = actions.to_vec();
-                // An action that went is no longer clickable, even before the next paint.
+                // An action that went is no longer clickable, even before the next paint. Not
+                // `action::live_rects`: this side has the shown actions, not the `Buttons`.
                 w.pills.retain(|(n, _)| actions.iter().any(|a| a.n == *n));
                 self.paint(id);
             }

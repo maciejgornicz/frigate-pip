@@ -32,6 +32,13 @@ pub fn numbers(buttons: &Buttons) -> Vec<usize> {
     (1..=ACTIONS).filter(|&n| buttons[n - 1].is_some()).collect()
 }
 
+/// The window the `a` key is for, from (id, has actions, on the screen) of every window: the
+/// newest one on the screen that has actions. Ids grow with every new window, while the list
+/// order does not tell the age (a replaced window takes the old one's place).
+pub fn a_target(wins: &[(u64, bool, bool)]) -> Option<u64> {
+    wins.iter().filter(|(_, actions, shown)| *actions && *shown).map(|(id, _, _)| *id).max()
+}
+
 /// Presses action `n` of a window showing `camera`: arms it or sends its request, whose result
 /// comes back as `Ev::ActionDone`. Returns the action's look afterwards (`None` = no such
 /// action). A request that cannot start counts as failed at once.
@@ -158,6 +165,15 @@ mod tests {
         assert_eq!(with_actions("", &both, false), "Gate … · Light ✗");
         assert_eq!(with_actions("", &idle, false), "");
         assert_eq!(with_actions(cap, &[], true), cap);
+    }
+
+    #[test]
+    fn a_is_for_the_newest_window_with_actions() {
+        // Window 9 replaced the first one and sits in its place: still the newest.
+        assert_eq!(a_target(&[(9, true, true), (4, true, true), (7, false, true)]), Some(9));
+        assert_eq!(a_target(&[(9, true, false), (4, true, true)]), Some(4), "not on the screen");
+        assert_eq!(a_target(&[(9, false, true), (4, false, true)]), None);
+        assert_eq!(a_target(&[]), None);
     }
 
     #[test]
