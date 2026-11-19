@@ -5,6 +5,7 @@
 
 #[macro_use]
 mod util;
+mod action;
 mod audio;
 mod client;
 mod config;

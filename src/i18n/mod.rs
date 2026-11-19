@@ -168,6 +168,9 @@ pub struct Strings {
     pub tab_detection: &'static str,
     pub tab_window: &'static str,
     pub tab_video: &'static str,
+    // Until the settings window uses it (Linux allows dead code for the whole crate).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub tab_actions: &'static str,
     pub frigate_url: &'static str,
     pub frigate_login: &'static str,
     pub source: &'static str,
@@ -287,6 +290,15 @@ pub struct Strings {
     pub tip_preview_live: &'static str,
     pub tip_help: &'static str,
     pub tip_support: &'static str,
+    // Action tooltips; the allows: until the settings window uses them.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub tip_action_camera: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub tip_action_url: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub tip_action_label: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub tip_action_confirm: &'static str,
 
     // ---- connection test
     /// {0} = version, {1} = ms
@@ -349,6 +361,24 @@ pub struct Strings {
 
     /// Caption during a replay of the event start ("Replay −12 s").
     pub replay: &'static str,
+
+    // ---- action button: the settings tab (until the settings window uses it) and the button on the window
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_camera: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_url: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_label: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_confirm: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_note: &'static str,
+    #[cfg_attr(windows, allow(dead_code))]
+    pub action_bad_url: &'static str,
+    /// The button's text when the camera has no label.
+    pub action_default: &'static str,
+    /// The armed button ("Gate?"); {0} = label
+    pub action_ask: &'static str,
 
     // ---- Linux console version
     /// Keys shown in the status line.
@@ -487,6 +517,7 @@ mod tests {
                 (en.update_failed, s.update_failed),
                 (en.update_check_failed, s.update_check_failed),
                 (en.update_balloon_title, s.update_balloon_title),
+                (en.action_ask, s.action_ask),
             ];
             for (a, b) in pairs {
                 for i in 0..4 {

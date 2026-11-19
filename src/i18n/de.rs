@@ -33,6 +33,7 @@ pub static STRINGS: Strings = Strings {
     tab_detection: "Erkennung",
     tab_window: "Vorschaufenster",
     tab_video: "Video & Audio",
+    tab_actions: "Aktionen",
     frigate_url: "Frigate-Adresse",
     frigate_login: "Frigate-Benutzer / Passwort",
     source: "Ereignisquelle",
@@ -150,6 +151,10 @@ pub static STRINGS: Strings = Strings {
     tip_preview_live: "Öffnet ein echtes Vorschaufenster, das Ihre Änderungen sofort anzeigt, noch bevor Sie sie speichern.",
     tip_help: "Öffnet das Benutzerhandbuch.",
     tip_support: "Öffnet die GitHub-Sponsors-Seite im Browser. FrigatePiP ist kostenlos und jede Funktion bleibt es; eine Förderung hält die Arbeit am Laufen.",
+    tip_action_camera: "Kamera, deren Fenster die Schaltfläche erhalten.",
+    tip_action_url: "Leer = keine Schaltfläche. Eine Home-Assistant-Automatisierung mit einem Webhook-Auslöser, z. B. http://homeassistant.local:8123/api/webhook/<id>.",
+    tip_action_label: "Text auf der Schaltfläche, z. B. Tor oder Licht. Leer = Aktion.",
+    tip_action_confirm: "Der erste Klick macht die Schaltfläche scharf, der zweite innerhalb von 3 s führt die Aktion aus. Für Tore, Türen und Alarmanlagen eingeschaltet lassen.",
 
     test_frigate_ok: "✔ Frigate {0} — {1} ms",
     test_frigate_fail: "✖ Frigate unter {0}: {1}",
@@ -188,7 +193,17 @@ pub static STRINGS: Strings = Strings {
     tip_update: "Sucht sofort nach einer neuen Version oder lädt die gefundene herunter und installiert sie. Die Einstellungen bleiben erhalten.",
 
     replay: "Wiederholung",
-    console_keys: "q beenden · x Fenster schließen · p pausieren · m Ton · r Wiederholung · 1–9 Kamera zeigen",
+
+    action_camera: "Kamera",
+    action_url: "URL",
+    action_label: "Beschriftung der Schaltfläche",
+    action_confirm: "Bestätigung verlangen (zwei Klicks)",
+    action_note: "Die Schaltfläche sendet ein HTTP-POST an diese URL, z. B. an einen Home-Assistant-Webhook. Wer die URL kennt, kann die Aktion auslösen: Lassen Sie den Webhook nur im lokalen Netz erreichbar. ✓ bedeutet, dass die Anfrage angekommen ist, nicht, dass sich das Tor geöffnet hat.",
+    action_bad_url: "Die URL muss mit http:// oder https:// beginnen.",
+    action_default: "Aktion",
+    action_ask: "{0}?",
+
+    console_keys: "q beenden · x Fenster schließen · p pausieren · m Ton · r Wiederholung · a Aktion · 1–9 Kamera zeigen",
     console_tmux_running: "läuft im Hintergrund: Kamerafenster öffnen sich als tmux-Popups (Strg+C beendet).",
     console_sound_off: "Ton aus",
     console_list_title: "Kameras in Frigate ({0}): {1}",

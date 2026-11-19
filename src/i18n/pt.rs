@@ -33,6 +33,7 @@ pub static STRINGS: Strings = Strings {
     tab_detection: "Deteção",
     tab_window: "Janela de pré-visualização",
     tab_video: "Vídeo e áudio",
+    tab_actions: "Ações",
     frigate_url: "Endereço do Frigate",
     frigate_login: "Utilizador / senha do Frigate",
     source: "Origem dos eventos",
@@ -150,6 +151,10 @@ pub static STRINGS: Strings = Strings {
     tip_preview_live: "Abre uma janela de pré-visualização real que reflete as alterações de imediato, antes de as guardar.",
     tip_help: "Abre o guia do utilizador.",
     tip_support: "Abre a página do GitHub Sponsors no navegador. O FrigatePiP é gratuito e todas as funções continuam a sê-lo; patrocinar mantém o trabalho a andar.",
+    tip_action_camera: "Câmara cujas janelas recebem o botão.",
+    tip_action_url: "Vazio = sem botão. Uma automatização do Home Assistant com um acionador Webhook, p. ex. http://homeassistant.local:8123/api/webhook/<id>.",
+    tip_action_label: "Texto no botão, p. ex. Portão ou Luz. Vazio = Ação.",
+    tip_action_confirm: "O primeiro clique arma o botão e um segundo clique em menos de 3 s executa a ação. Mantenha ligado para portões, portas e alarmes.",
 
     test_frigate_ok: "✔ Frigate {0} — {1} ms",
     test_frigate_fail: "✖ Frigate em {0}: {1}",
@@ -188,7 +193,17 @@ pub static STRINGS: Strings = Strings {
     tip_update: "Procura já uma versão nova, ou transfere e instala a versão encontrada. As configurações são mantidas.",
 
     replay: "Repetição",
-    console_keys: "q sair · x fechar janelas · p pausar · m som · r repetição · 1–9 mostrar câmara",
+
+    action_camera: "Câmara",
+    action_url: "URL",
+    action_label: "Texto do botão",
+    action_confirm: "Pedir confirmação (dois cliques)",
+    action_note: "O botão envia um HTTP POST para este URL, p. ex. um webhook do Home Assistant. Quem souber o URL pode executar a ação: deixe o webhook acessível apenas na rede local. ✓ significa que o pedido foi recebido, não que o portão se abriu.",
+    action_bad_url: "O URL tem de começar por http:// ou https://.",
+    action_default: "Ação",
+    action_ask: "{0}?",
+
+    console_keys: "q sair · x fechar janelas · p pausar · m som · r repetição · a ação · 1–9 mostrar câmara",
     console_tmux_running: "está a ser executado em segundo plano: as janelas das câmaras abrem como popups do tmux (Ctrl+C termina).",
     console_sound_off: "som desligado",
     console_list_title: "Câmaras no Frigate ({0}): {1}",
