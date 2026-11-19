@@ -261,6 +261,12 @@ mod tests {
         std::fs::write(busy_path(&lock), b"").unwrap();
         assert!(viewer_busy(&lock), "running and busy");
         drop(viewer);
+        // A child that another test forks at this moment holds a copy of the descriptor until
+        // it execs, so the lock may outlive the drop for an instant: wait for it.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while viewer_busy(&lock) && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         assert!(!viewer_busy(&lock), "the viewer is gone: its busy file keeps nothing open");
         let _ = std::fs::remove_dir_all(&dir);
     }

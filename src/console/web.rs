@@ -1224,6 +1224,8 @@ assert.strictEqual(other.style.display, undefined);
     fn connection_test_leaves_out_the_actions() {
         i18n::set(Lang::En);
         let html = page(&Config::from_ini(&IniDoc::parse("")), &Info { cameras: vec![cam("front", &[])], ..Default::default() }, None, &[]);
+        // The Test button must build its query with testQuery, not from the whole form.
+        assert!(html.contains(r#"fetch("test?" + testQuery(form))"#), "the Test button uses testQuery");
         let script = html.split("// test-query:begin").nth(1).and_then(|r| r.split("// test-query:end").next()).expect("script in the page");
         let setup = r#"
 const assert = require("assert");
