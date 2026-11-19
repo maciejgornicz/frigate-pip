@@ -399,7 +399,6 @@ impl Config {
     }
 
     /// The camera's action button: (url, label, ask for confirmation), when it has a URL.
-    #[allow(dead_code)] // until the action button uses it
     pub fn action_for(&self, camera: &str) -> Option<(&str, Option<&str>, bool)> {
         let o = self.camera(camera)?;
         Some((o.action_url.as_deref()?, o.action_label.as_deref(), o.action_confirm))

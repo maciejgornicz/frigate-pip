@@ -2,10 +2,8 @@
 //! Assistant webhook). Shared by Windows and Linux: the state machine, the request and the
 //! button's place. The URL is a secret and never reaches the log.
 
-// Until the window code uses it (Linux already allows dead code for the whole crate).
-#![cfg_attr(windows, allow(dead_code))]
-
 use std::io;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 const ARMED_FOR: Duration = Duration::from_secs(3);
@@ -17,6 +15,9 @@ pub const TIMEOUT: Duration = Duration::from_secs(5);
 /// button (and the window) busy forever. `TIMEOUT` applies to each connect and read and DNS
 /// has none, so a request can legitimately take much longer than 5 s.
 const SENDING_MAX: Duration = Duration::from_secs(60);
+/// Tickets are unique across all buttons, so a result can be offered to every window's button
+/// and only the one that sent the request takes it (a closed window's handle may be reused).
+static NEXT_TICKET: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Look {
@@ -39,7 +40,7 @@ enum State {
 pub struct Button {
     confirm: bool,
     state: State,
-    /// The current request's ticket; bumped by every send and by `reset`, so a late result
+    /// The current request's ticket; a new one for every send and `reset`, so a late result
     /// of an older request is dropped.
     ticket: u32,
 }
@@ -63,8 +64,13 @@ impl Button {
         }
     }
 
+    /// Asks for a confirming second click.
+    pub fn confirm(&self) -> bool {
+        self.confirm
+    }
+
     fn start(&mut self, now: Instant) -> u32 {
-        self.ticket = self.ticket.wrapping_add(1);
+        self.ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
         self.state = State::Sending(now);
         self.ticket
     }
@@ -80,7 +86,7 @@ impl Button {
     /// Back to idle without sending (e.g. the settings preview changed the action); the result
     /// of a request still running is dropped. A change to `confirm` needs a new `Button`.
     pub fn reset(&mut self) {
-        self.ticket = self.ticket.wrapping_add(1);
+        self.ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
         self.state = State::Idle;
     }
 
@@ -142,6 +148,7 @@ pub fn label_or_default(label: Option<&str>) -> String {
 
 /// An `http://` or `https://` address `net::request` can use, with no space or control
 /// character inside (it goes into the request line as it is); empty (no button) is valid too.
+#[cfg_attr(windows, allow(dead_code))] // until the settings window checks it
 pub fn valid_url(url: &str) -> bool {
     let u = url.trim();
     u.is_empty()
@@ -296,6 +303,19 @@ mod tests {
         let ticket = b.press(t).unwrap();
         b.finished(ticket.wrapping_add(1), true, t + ms(100));
         assert_eq!(b.look(t + ms(100)), Look::Sending);
+    }
+
+    #[test]
+    fn tickets_differ_between_buttons() {
+        let t = Instant::now();
+        let (mut a, mut b) = (Button::new(false), Button::new(false));
+        let ta = a.press(t).unwrap();
+        let tb = b.press(t).unwrap();
+        assert_ne!(ta, tb);
+        b.finished(ta, true, t + ms(100));
+        assert_eq!(b.look(t + ms(100)), Look::Sending, "another button's result is ignored");
+        a.finished(ta, true, t + ms(100));
+        assert_eq!(a.look(t + ms(100)), Look::Done);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! UI thread: tray icon, menu, PiP windows.
 
+use crate::action;
 use crate::config::{self, Config, Corner, IniDoc, LiveMode};
 use crate::filter::Detection;
 use crate::frigate::{self, CameraInfo, Notice};
@@ -39,6 +40,9 @@ const WM_APP_RELOAD: u32 = WM_APP + 3;
 pub const WM_APP_QUIT: u32 = WM_APP + 4;
 pub const WM_APP_SETTINGS: u32 = WM_APP + 5;
 const WM_APP_UPDATE: u32 = WM_APP + 6;
+/// An action request ended: WPARAM = its ticket, LPARAM = 1 if it got HTTP 2xx. Posted to the
+/// main window, which lives as long as the app (a popup's handle may be gone and reused).
+const WM_APP_ACTION: u32 = WM_APP + 7;
 pub const COPYDATA_TEST: usize = 0x4650_5450;
 
 const TIMER_DEADLINE: usize = 1;
@@ -46,6 +50,8 @@ const TIMER_FORCE_CLOSE: usize = 2;
 const TIMER_RESUME: usize = 3;
 const TIMER_TEST: usize = 4;
 const TIMER_UPDATE: usize = 5;
+/// On a popup: the action button's look changes by itself (arming, result or request expires).
+const TIMER_ACTION: usize = 6;
 
 const CMD_TEST: u32 = 1000;
 const CMD_PAUSE_15: u32 = 1100;
@@ -112,6 +118,8 @@ struct Popup {
     shared: Arc<Shared>,
     /// Preview from the settings window: not counted toward the limit and never replaced.
     preview: bool,
+    /// The action button, when the camera has an action URL.
+    action: Option<action::Button>,
 }
 
 struct Mon {
@@ -456,6 +464,10 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             with_app(|a| a.on_update_event(*ev));
             LRESULT(0)
         }
+        WM_APP_ACTION => {
+            with_app(|a| a.action_done(wp.0 as u32, lp.0 != 0));
+            LRESULT(0)
+        }
         WM_COPYDATA => {
             let cds = &*(lp.0 as *const COPYDATASTRUCT);
             if cds.dwData == COPYDATA_TEST && !cds.lpData.is_null() {
@@ -536,13 +548,15 @@ const HT_SOUND: u32 = HTOBJECT;
 const HT_VOLUME: u32 = HTBORDER;
 /// Hit-test code of the replay button, likewise (a popup has no menu to open).
 const HT_REPLAY: u32 = HTMENU;
+/// Hit-test code of the action button, likewise (a popup has no scroll bar).
+const HT_ACTION: u32 = HTHSCROLL;
 
 unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_NCHITTEST => {
             // The close button in the top-right corner, the sound button left of it and the
-            // volume slider under that (only with camera audio), then the replay button; the
-            // rest of the window drags it.
+            // volume slider under that (only with camera audio), then the replay button, then the
+            // action button in the bottom-left corner; the rest of the window drags it.
             let mut pt = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
             let _ = ScreenToClient(hwnd, &mut pt);
             let mut rc = RECT::default();
@@ -551,6 +565,7 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             let inside = |(l, t, r, b): (i32, i32, i32, i32)| pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
             let sound = with_app(|a| a.has_sound(hwnd)) == Some(true);
             let replay = with_app(|a| a.has_replay(hwnd)) == Some(true);
+            let action = with_app(|a| a.action_rect(hwnd)).flatten();
             let hit = if inside(crate::render::close_button_rect(rc.right, dpi)) {
                 HTCLOSE
             } else if sound && inside(crate::render::sound_button_rect(rc.right, dpi)) {
@@ -559,6 +574,8 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
                 HT_VOLUME
             } else if replay && inside(crate::render::replay_button_rect(rc.right, dpi, sound)) {
                 HT_REPLAY
+            } else if action.is_some_and(inside) {
+                HT_ACTION
             } else {
                 HTCAPTION
             };
@@ -577,8 +594,21 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             with_app(|a| a.toggle_replay(hwnd));
             LRESULT(0)
         }
+        // Never pins, drags or opens Frigate; the second half of a double-click is just another
+        // press (the button ignores it).
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HT_ACTION => {
+            with_app(|a| a.press_action(hwnd));
+            LRESULT(0)
+        }
         // The release on a button is ours too (the default handling has nothing to do there).
-        WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND | HT_REPLAY) => LRESULT(0),
+        WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND | HT_REPLAY | HT_ACTION) => LRESULT(0),
+        // A hand over the action button rather than whatever the default gives a scroll bar.
+        WM_SETCURSOR if (lp.0 & 0xFFFF) as u32 == HT_ACTION => {
+            if let Ok(c) = LoadCursorW(None, IDC_HAND) {
+                SetCursor(c);
+            }
+            LRESULT(1)
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         // With Ctrl a zoomed picture moves instead of the window; that is no click, however
         // quickly the drags follow each other.
@@ -1015,6 +1045,7 @@ impl App {
             aspect,
             shared: shared.clone(),
             preview: false,
+            action: self.action_of(&camera).map(|(_, _, confirm)| action::Button::new(confirm)),
         };
         match &place {
             Some(p) => {
@@ -1028,6 +1059,7 @@ impl App {
             None => self.popups.push(popup),
         }
         self.layout();
+        self.sync_action(hwnd);
         unsafe {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             SetTimer(hwnd, TIMER_DEADLINE, dur.as_millis() as u32, None);
@@ -1169,6 +1201,7 @@ impl App {
             }
         }
         self.layout();
+        self.refresh_actions();
         let video = |c: &Config| (c.live, c.stream, c.auto_main_width, c.camera_audio, c.wind_filter);
         if video(&v) != video(old) && self.popups.iter().any(|p| p.preview && !p.closing) {
             self.preview_on();
@@ -1313,6 +1346,7 @@ impl App {
         p.shared.cancel.cancel();
         unsafe {
             let _ = KillTimer(p.hwnd, TIMER_DEADLINE);
+            let _ = KillTimer(p.hwnd, TIMER_ACTION);
             let _ = ShowWindow(p.hwnd, SW_HIDE);
             SetTimer(p.hwnd, TIMER_FORCE_CLOSE, 3000, None);
         }
@@ -1356,6 +1390,7 @@ impl App {
     fn popup_timer(&mut self, hwnd: HWND, id: usize) {
         match id {
             TIMER_FORCE_CLOSE => self.player_done(hwnd),
+            TIMER_ACTION => self.sync_action(hwnd),
             TIMER_DEADLINE => {
                 let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd) else {
                     unsafe {
@@ -1369,7 +1404,9 @@ impl App {
                 if replaying {
                     p.deadline = p.deadline.max(Instant::now() + Duration::from_secs(5));
                 }
-                if p.hovered || p.drag.is_some() || p.pinned || p.preview || replaying {
+                // Nor does it close while its action button is armed, sending or showing the result.
+                let action_busy = p.action.as_ref().is_some_and(|b| b.busy(Instant::now()));
+                if p.hovered || p.drag.is_some() || p.pinned || p.preview || replaying || action_busy {
                     unsafe {
                         SetTimer(hwnd, TIMER_DEADLINE, 1000, None);
                     }
@@ -1432,6 +1469,101 @@ impl App {
         p.shared.press_replay();
         p.deadline = p.deadline.max(Instant::now() + Duration::from_secs(5));
         Self::arm(p);
+    }
+
+    /// The camera's action button in the display settings (the settings window's draft, so the
+    /// preview follows it): (URL, label to show, ask for confirmation).
+    fn action_of(&self, camera: &str) -> Option<(String, String, bool)> {
+        let (url, label, confirm) = self.vcfg().action_for(camera)?;
+        Some((url.to_string(), action::label_or_default(label), confirm))
+    }
+
+    /// Where the window's action button is (client pixels), if it has one and it was drawn.
+    fn action_rect(&mut self, hwnd: HWND) -> Option<(i32, i32, i32, i32)> {
+        self.find(hwnd).filter(|p| p.action.is_some()).and_then(|p| p.shared.action_rect())
+    }
+
+    /// Shows the action button as it is now, and wakes up when it changes by itself.
+    fn sync_action(&mut self, hwnd: HWND) {
+        let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd) else {
+            unsafe {
+                let _ = KillTimer(hwnd, TIMER_ACTION);
+            }
+            return;
+        };
+        let label = self.action_of(&self.popups[i].camera).map(|(_, label, _)| label);
+        let p = &self.popups[i];
+        let now = Instant::now();
+        p.shared.set_action(p.action.as_ref().zip(label).map(|(b, label)| (action::text(&label, b.look(now)), b.look(now))));
+        let next = p.action.as_ref().filter(|_| !p.closing).and_then(|b| b.next_change(now));
+        unsafe {
+            match next {
+                // A millisecond late rather than early, so that the look has changed by then.
+                Some(at) => {
+                    let ms = at.saturating_duration_since(now).as_millis().min(u32::MAX as u128 / 2) as u32 + 1;
+                    SetTimer(hwnd, TIMER_ACTION, ms, None);
+                }
+                None => {
+                    let _ = KillTimer(hwnd, TIMER_ACTION);
+                }
+            }
+        }
+    }
+
+    /// The display settings changed: windows get, lose or keep their action button (a new
+    /// label or URL keeps it; a new confirmation setting starts it over).
+    fn refresh_actions(&mut self) {
+        for i in 0..self.popups.len() {
+            let want = self.action_of(&self.popups[i].camera).map(|(_, _, confirm)| confirm);
+            let p = &mut self.popups[i];
+            match (want, &p.action) {
+                (None, _) => p.action = None,
+                (Some(confirm), Some(b)) if b.confirm() == confirm => {}
+                (Some(confirm), _) => p.action = Some(action::Button::new(confirm)),
+            }
+            let hwnd = p.hwnd;
+            self.sync_action(hwnd);
+        }
+    }
+
+    /// A click on the action button: arms it or sends the request (never from the preview).
+    fn press_action(&mut self, hwnd: HWND) {
+        let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd && !p.closing) else { return };
+        let Some((url, _, _)) = self.action_of(&self.popups[i].camera) else { return };
+        let main = self.hwnd.0 as isize;
+        let p = &mut self.popups[i];
+        let Some(b) = p.action.as_mut() else { return };
+        let now = Instant::now();
+        if let Some(ticket) = b.press(now) {
+            if p.preview {
+                b.reset();
+                crate::log!("action {}: preview, not sent", p.camera);
+            } else {
+                let done = move |ok: bool| unsafe {
+                    let _ = PostMessageW(HWND(main as _), WM_APP_ACTION, WPARAM(ticket as usize), LPARAM(ok as isize));
+                };
+                if !action::spawn(url, p.camera.clone(), done) {
+                    b.finished(ticket, false, now);
+                }
+            }
+        }
+        self.sync_action(hwnd);
+    }
+
+    /// An action request ended. Tickets are unique, so only the button that sent it takes the
+    /// result; a window closed meanwhile has no button left to take it (its message is dropped).
+    fn action_done(&mut self, ticket: u32, ok: bool) {
+        let now = Instant::now();
+        let mut hwnds = Vec::new();
+        for p in &mut self.popups {
+            if let Some(b) = p.action.as_mut() {
+                b.finished(ticket, ok, now);
+                hwnds.push(p.hwnd);
+            }
+        }
+        for hwnd in hwnds {
+            self.sync_action(hwnd);
+        }
     }
 
     /// Sound button: mutes / unmutes this window.
@@ -1629,6 +1761,8 @@ impl App {
             }
         }
         self.layout();
+        // E.g. an action URL added to the settings file by hand.
+        self.refresh_actions();
         self.tray(NIM_MODIFY);
     }
 

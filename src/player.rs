@@ -118,6 +118,20 @@ impl Shared {
     pub fn request_redraw(&self) {
         self.dirty.store(true, Ordering::Relaxed);
     }
+
+    /// The action button to draw (`None` = none); redraws only when it changed.
+    pub fn set_action(&self, v: Option<(String, Look)>) {
+        let mut cur = self.action.lock().unwrap();
+        if *cur != v {
+            *cur = v;
+            self.request_redraw();
+        }
+    }
+
+    /// Where the action button was last drawn (client pixels), if it was.
+    pub fn action_rect(&self) -> Option<(i32, i32, i32, i32)> {
+        *self.action_rect.lock().unwrap()
+    }
 }
 
 pub struct Params {
