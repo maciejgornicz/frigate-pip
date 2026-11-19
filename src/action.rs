@@ -250,10 +250,12 @@ pub fn pill_band(height: i32, text_h: f32, scale: f32) -> (i32, i32) {
 /// A row of pills from the bottom-left corner, one per text width, left to right with a gap
 /// between them, as (left, top, right, bottom) in pixels. Each pill is its text plus padding.
 /// When that row would pass a margin before `right_limit` (the window's right edge or the
-/// leftmost control level with the row; `None` = no limit), every pill gets an equal share of
-/// the room instead, and its text is trimmed to `pill_text_room`. A shared pill keeps at least
-/// `PILL_MIN_TEXT` of text room: pills that do not fit even so are dropped from the right, so
-/// the result can be shorter than `text_widths` (empty when not even one fits).
+/// leftmost control level with the row; `None` = no limit), the room is shared fairly
+/// ("water-filling"): a pill no wider than an equal share keeps its own width, and the longer
+/// pills split what is left equally, their texts trimmed to `pill_text_room`. A trimmed pill
+/// keeps at least `PILL_MIN_TEXT` of text room; a pill narrower than that needs only its own
+/// width. Pills that do not fit even so are dropped from the right, so the result can be
+/// shorter than `text_widths` (empty when not even one fits). A row that fits is never changed.
 pub fn pill_row(height: i32, text_widths: &[f32], text_h: f32, scale: f32, right_limit: Option<i32>) -> Vec<(i32, i32, i32, i32)> {
     let (margin, pad_x, gap) = (px(PILL_MARGIN, scale), px(PILL_PAD_X, scale), px(PILL_GAP, scale));
     let (top, bottom) = pill_band(height, text_h, scale);
@@ -263,13 +265,37 @@ pub fn pill_row(height: i32, text_widths: &[f32], text_h: f32, scale: f32, right
     let widths = match right_limit.map(|r| r - margin) {
         Some(limit) if end > limit => {
             let room = limit - margin;
-            let min = 2 * pad_x + px(PILL_MIN_TEXT, scale).max(1);
-            // n pills of `min` and n - 1 gaps fit when n * (min + gap) <= room + gap.
-            let n = ((room + gap) / (min + gap)).clamp(0, natural.len() as i32);
-            if n == 0 {
+            let least = 2 * pad_x + px(PILL_MIN_TEXT, scale).max(1);
+            // The longest run from the left whose pills fit at their smallest, with the gaps.
+            let mut used = -gap;
+            let mut widths: Vec<i32> = natural
+                .iter()
+                .take_while(|&&w| {
+                    used += w.min(least) + gap;
+                    used <= room
+                })
+                .copied()
+                .collect();
+            if widths.is_empty() {
                 return Vec::new();
             }
-            vec![(room - (n - 1) * gap) / n; n as usize]
+            // Water-filling: pills that fit in an equal share keep their width and leave the
+            // share to the others, until the rest are all wider than it. The share only grows,
+            // and it never falls below `least`, since the smallest pills fit.
+            let mut avail = room - (widths.len() as i32 - 1) * gap;
+            let mut long: Vec<usize> = (0..widths.len()).collect();
+            loop {
+                let share = avail / long.len().max(1) as i32;
+                let (fit, rest): (Vec<usize>, Vec<usize>) = long.iter().partition(|&&i| widths[i] <= share);
+                avail -= fit.iter().map(|&i| widths[i]).sum::<i32>();
+                long = rest;
+                if fit.is_empty() || long.is_empty() {
+                    for &i in &long {
+                        widths[i] = share;
+                    }
+                    break widths;
+                }
+            }
         }
         _ => natural,
     };
@@ -512,39 +538,80 @@ mod tests {
     }
 
     #[test]
-    fn a_row_too_long_shares_the_room_equally() {
+    fn long_pills_share_equally() {
         // Room: 200 - 8 - 8 = 184; three pills and two gaps of 6: (184 - 12) / 3 = 57 each.
         let (t, b) = (300 - 8 - 26, 300 - 8);
-        let row = pill_row(300, &[100.0, 20.0, 100.0], 16.0, 1.0, Some(200));
+        let row = pill_row(300, &[100.0, 100.0, 100.0], 16.0, 1.0, Some(200));
         assert_eq!(row, [(8, t, 65, b), (71, t, 128, b), (134, t, 191, b)]);
         assert!(row.iter().all(|&p| pill_text_room(p, 1.0) == 37.0));
     }
 
     #[test]
+    fn a_short_pill_keeps_its_width_and_leaves_the_rest_to_the_long_ones() {
+        // Share 172 / 3 = 57: the 40 wide pill keeps its width; the others split 132 into 66.
+        let (t, b) = (300 - 8 - 26, 300 - 8);
+        let row = pill_row(300, &[100.0, 20.0, 100.0], 16.0, 1.0, Some(200));
+        assert_eq!(row, [(8, t, 74, b), (80, t, 120, b), (126, t, 192, b)]);
+        assert_eq!(pill_text_room(row[1], 1.0), 20.0, "not trimmed");
+        // Water-filling over several rounds: share 172 / 3 = 57 fixes the 30 wide pill, then
+        // 142 / 2 = 71 fixes the 70 wide one, and the last pill gets the 72 left.
+        let row = pill_row(300, &[10.0, 50.0, 200.0], 16.0, 1.0, Some(200));
+        assert_eq!(row, [(8, t, 38, b), (44, t, 114, b), (120, t, 192, b)]);
+    }
+
+    #[test]
+    fn pills_narrower_than_the_minimum_are_not_dropped_while_they_fit() {
+        let (t, b) = (300 - 8 - 26, 300 - 8);
+        // Room 100: four pills of 25 and three gaps need 118; three need 87 and keep their width.
+        assert_eq!(pill_row(300, &[5.0; 4], 16.0, 1.0, Some(116)), [(8, t, 33, b), (39, t, 64, b), (70, t, 95, b)]);
+        // Room 30: the 25 wide pill fits; the long one would need at least 36 more.
+        assert_eq!(pill_row(300, &[5.0, 50.0], 16.0, 1.0, Some(30 + 16)), [(8, t, 33, b)]);
+    }
+
+    #[test]
     fn pills_never_pass_the_limit_or_overlap() {
-        let texts = [120.0, 0.0, 33.3, 250.0];
+        let sets: [&[f32]; 3] = [&[120.0, 0.0, 33.3, 250.0], &[5.0, 5.0, 5.0, 5.0], &[5.0, 50.0, 5.0, 200.0]];
         for scale in [1.0, 1.25, 1.5, 2.0] {
-            let (margin, min) = (px(PILL_MARGIN, scale), px(PILL_MIN_TEXT, scale) as f32);
-            for count in 1..=texts.len() {
-                for limit in (-20..=800).step_by(7) {
-                    let row = pill_row(300, &texts[..count], 16.0, scale, Some(limit));
-                    let case = format!("scale {scale}, {count} pills, limit {limit}: {row:?}");
-                    assert!(row.len() <= count, "{case}");
-                    let squeezed = row.len() < count || row.iter().zip(&texts).any(|(&p, &w)| pill_text_room(p, scale) < w);
-                    for (i, &p) in row.iter().enumerate() {
-                        assert!(p.0 >= margin && p.2 > p.0, "{case}");
-                        assert!(p.2 <= limit - margin, "{case}");
-                        if i > 0 {
-                            assert_eq!(p.0, row[i - 1].2 + px(PILL_GAP, scale), "{case}");
+            let (margin, gap) = (px(PILL_MARGIN, scale), px(PILL_GAP, scale));
+            let least = 2 * px(PILL_PAD_X, scale) + px(PILL_MIN_TEXT, scale);
+            for texts in sets {
+                for count in 1..=texts.len() {
+                    let texts = &texts[..count];
+                    let free = pill_row(300, texts, 16.0, scale, None);
+                    let natural: Vec<i32> = free.iter().map(|p| p.2 - p.0).collect();
+                    for limit in (-20..=800).step_by(3) {
+                        let row = pill_row(300, texts, 16.0, scale, Some(limit));
+                        let case = format!("scale {scale}, texts {texts:?}, limit {limit}: {row:?}");
+                        let room = limit - 2 * margin;
+                        if free.last().unwrap().2 <= limit - margin {
+                            assert_eq!(row, free, "a row that fits is not changed: {case}");
                         }
-                        if squeezed {
-                            assert!(pill_text_room(p, scale) >= min, "{case}");
-                            assert_eq!(p.2 - p.0, row[0].2 - row[0].0, "shared equally: {case}");
+                        assert!(row.len() <= count, "{case}");
+                        if row.len() < count {
+                            let smallest: i32 = natural[..=row.len()].iter().map(|&w| w.min(least) + gap).sum::<i32>() - gap;
+                            assert!(smallest > room, "dropped only when the next pill cannot fit: {case}");
+                        }
+                        let widths: Vec<i32> = row.iter().map(|p| p.2 - p.0).collect();
+                        let trimmed: Vec<i32> = widths.iter().zip(&natural).filter(|(w, n)| w < n).map(|(&w, _)| w).collect();
+                        for (i, &p) in row.iter().enumerate() {
+                            assert!(p.0 >= margin && p.2 <= limit - margin, "{case}");
+                            if i > 0 {
+                                assert_eq!(p.0, row[i - 1].2 + gap, "exact gaps, no overlap: {case}");
+                            }
+                            assert!(widths[i] <= natural[i], "never wider than its own width: {case}");
+                            assert!(widths[i] >= natural[i].min(least), "at least the minimum: {case}");
+                            if let Some(&share) = trimmed.first() {
+                                assert!(widths[i] <= share, "a pill that keeps its width fits in the share: {case}");
+                            }
+                        }
+                        if let Some(&share) = trimmed.first() {
+                            assert!(trimmed.iter().all(|&w| w == share), "trimmed pills are equal: {case}");
+                            let used = row.last().unwrap().2 - margin;
+                            assert!(room - used < trimmed.len() as i32, "the room is used up: {case}");
                         }
                     }
                 }
             }
-            assert_eq!(pill_row(300, &texts, 16.0, scale, Some(10_000)).len(), texts.len(), "scale {scale}");
         }
     }
 
@@ -555,8 +622,9 @@ mod tests {
         let texts = [50.0, 50.0, 50.0, 50.0];
         // Room 78 = two smallest pills and a gap: the third and fourth go.
         assert_eq!(pill_row(300, &texts, 16.0, 1.0, Some(78 + 16)), [(8, t, 44, b), (50, t, 86, b)]);
-        // Room 77: one pill, as wide as the room.
-        assert_eq!(pill_row(300, &texts, 16.0, 1.0, Some(77 + 16)), [(8, t, 85, b)]);
+        // Room 77: one pill, at its own width of 70; room 60: one pill, trimmed to the room.
+        assert_eq!(pill_row(300, &texts, 16.0, 1.0, Some(77 + 16)), [(8, t, 78, b)]);
+        assert_eq!(pill_row(300, &texts, 16.0, 1.0, Some(60 + 16)), [(8, t, 68, b)]);
         // Room 35: not even one.
         assert!(pill_row(300, &texts, 16.0, 1.0, Some(35 + 16)).is_empty());
         assert!(pill_row(300, &texts, 16.0, 1.0, Some(0)).is_empty());
