@@ -307,8 +307,16 @@ pub struct Config {
     pub overrides: HashMap<String, CamOverride>,
 }
 
+/// A comma-separated list. Items may be quoted by hand (`"front", "back"`): one quote at either
+/// end of an item is dropped. `clean_value` has already taken the outer pair, leaving
+/// `front", "back`, so the quotes need not come in pairs here.
 fn list(v: Option<String>) -> Vec<String> {
-    v.map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default()
+    let unquote = |x: &str| {
+        let x = x.trim();
+        let x = x.strip_prefix('"').unwrap_or(x);
+        x.strip_suffix('"').unwrap_or(x).trim().to_string()
+    };
+    v.map(|s| s.split(',').map(unquote).filter(|x| !x.is_empty()).collect()).unwrap_or_default()
 }
 
 fn boolean(v: Option<String>, default: bool) -> bool {
@@ -453,7 +461,7 @@ impl Config {
     }
 
     /// The camera's action buttons as its windows show them: those with a URL, in number order.
-    /// The URLs stay here; only `action_url` hands one out, to send the request.
+    /// Windows get URLs only through `action_url`, to send the request.
     pub fn actions_for(&self, camera: &str) -> Vec<ActionView<'_>> {
         let Some(o) = self.camera(camera) else { return Vec::new() };
         (1..=ACTIONS)
@@ -828,6 +836,23 @@ mod tests {
         d.set("video", "stream", "main");
         assert_eq!(d.get("video", "stream").as_deref(), Some("main"));
         assert!(d.lines.contains(&"[video]".to_string()));
+    }
+
+    #[test]
+    fn quoted_list_items_read_as_plain_items() {
+        let c = Config::from_ini(&IniDoc::parse(
+            "[trigger]
+labels = \"person\", \"car\"
+cameras = \"front\", \"back\"
+zones = \"drive\" ; comment
+[camera.gate]
+labels = \"dog\",cat, \"\"
+",
+        ));
+        assert_eq!(c.labels, ["person", "car"]);
+        assert_eq!(c.cameras, ["front", "back"]);
+        assert_eq!(c.zones, ["drive"]);
+        assert_eq!(c.own_labels("gate"), Some(&["dog".to_string(), "cat".to_string()][..]), "an empty quoted item is no item");
     }
 
     #[test]
