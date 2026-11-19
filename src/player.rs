@@ -1,6 +1,6 @@
 //! PiP window thread: an instant snapshot, then live video.
 
-use crate::action::{self, Look};
+use crate::action::{self, Shown};
 use crate::audio::{AudioMsg, AudioTrack, Sound};
 use crate::client::Frigate;
 use crate::config::LiveMode;
@@ -56,8 +56,10 @@ pub struct Shared {
     replay: AtomicU8,
     /// The replay button was pressed; the player starts or stops the replay.
     replay_pressed: AtomicBool,
-    /// The action buttons: (number, text, look), set by the UI thread; empty = none.
-    actions: Mutex<Vec<(usize, String, Look)>>,
+    /// The action buttons, set by the UI thread; empty = none.
+    actions: Mutex<Vec<Shown>>,
+    /// The action button under the mouse (its number), 0 = none.
+    hot_action: AtomicU8,
     /// Where the renderer drew the action buttons: (number, client pixels), for the UI
     /// thread's hit-test.
     action_rects: Mutex<Vec<action::Placed>>,
@@ -76,6 +78,7 @@ impl Shared {
             replay: AtomicU8::new(0),
             replay_pressed: AtomicBool::new(false),
             actions: Mutex::new(Vec::new()),
+            hot_action: AtomicU8::new(0),
             action_rects: Mutex::new(Vec::new()),
         })
     }
@@ -121,11 +124,19 @@ impl Shared {
     }
 
     /// The action buttons to draw (empty = none); redraws only when they changed.
-    pub fn set_actions(&self, v: Vec<(usize, String, Look)>) {
+    pub fn set_actions(&self, v: Vec<Shown>) {
         let mut cur = self.actions.lock().unwrap();
         if *cur != v {
             *cur = v;
             self.request_redraw();
+        }
+    }
+
+    /// Lights the action button `n` under the mouse (0 = none).
+    pub fn set_hot_action(&self, n: usize) {
+        let n = u8::try_from(n).unwrap_or(0);
+        if self.hot_action.swap(n, Ordering::Relaxed) != n {
+            self.dirty.store(true, Ordering::Relaxed);
         }
     }
 
@@ -426,6 +437,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
             },
             replay: shared.replay(),
             actions,
+            hot_action: shared.hot_action.load(Ordering::Relaxed).into(),
             volume: shared.sound.volume.load(Ordering::Relaxed),
             zoom: shared.zoom(),
         }

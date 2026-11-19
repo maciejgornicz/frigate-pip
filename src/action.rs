@@ -84,11 +84,13 @@ impl Button {
     }
 
     /// The request with `ticket` has ended: `ok` = HTTP 2xx. Ignored unless that request is
-    /// still the one being sent (not replaced or past `SENDING_MAX`).
-    pub fn finished(&mut self, ticket: u32, ok: bool, now: Instant) {
-        if ticket == self.ticket && matches!(self.current(now), State::Sending(_)) {
+    /// still the one being sent (not replaced or past `SENDING_MAX`); `true` = taken.
+    pub fn finished(&mut self, ticket: u32, ok: bool, now: Instant) -> bool {
+        let mine = ticket == self.ticket && matches!(self.current(now), State::Sending(_));
+        if mine {
             self.state = State::Result(ok, now);
         }
+        mine
     }
 
     /// Armed, sending or showing a result: the window must not close.
@@ -134,13 +136,37 @@ impl Button {
 /// A window's action buttons by number: `[n - 1]` is action `n`; `None` = it has no URL.
 pub type Buttons = [Option<Button>; crate::config::ACTIONS];
 
-/// Matches a window's buttons to its actions, given as (number, ask for confirmation), only
-/// those with a URL: a button goes when its action loses its URL, a new one comes when an
-/// action appears or its confirmation setting changes, and one whose action only got another
-/// label or URL is kept (with whatever it is doing).
-pub fn refresh(buttons: &mut Buttons, actions: &[(usize, bool)]) {
-    for (i, b) in buttons.iter_mut().enumerate() {
-        match (actions.iter().find(|a| a.0 == i + 1).map(|a| a.1), &*b) {
+/// A rectangle in pixels: (left, top, right, bottom); right and bottom are outside.
+pub type Rect = (i32, i32, i32, i32);
+
+/// Where an action's pill was drawn: (number, rectangle).
+pub type Placed = (usize, Rect);
+
+/// One action button as a window draws it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shown {
+    /// The action's number, 1 to `ACTIONS`.
+    pub n: usize,
+    pub text: String,
+    pub look: Look,
+}
+
+/// Action `n`'s button, if `n` is a valid number and the action has one.
+fn slot(buttons: &Buttons, n: usize) -> Option<&Button> {
+    buttons.get(n.checked_sub(1)?)?.as_ref()
+}
+
+fn slot_mut(buttons: &mut Buttons, n: usize) -> Option<&mut Button> {
+    buttons.get_mut(n.checked_sub(1)?)?.as_mut()
+}
+
+/// Matches a window's buttons to its actions: `confirm[n - 1]` is action `n`'s confirmation
+/// setting, `None` when it has no URL. A button goes when its action loses its URL, a new one
+/// comes when an action appears or its confirmation setting changes, and one whose action only
+/// got another label or URL is kept (with whatever it is doing).
+pub fn refresh(buttons: &mut Buttons, confirm: &[Option<bool>; crate::config::ACTIONS]) {
+    for (b, want) in buttons.iter_mut().zip(confirm) {
+        match (*want, &*b) {
             (None, _) => *b = None,
             (Some(confirm), Some(old)) if old.confirm() == confirm => {}
             (Some(confirm), _) => *b = Some(Button::new(confirm)),
@@ -148,17 +174,23 @@ pub fn refresh(buttons: &mut Buttons, actions: &[(usize, bool)]) {
     }
 }
 
-/// A click on action `n`: an armed first click of any other action of the window is dropped
-/// (only one may be armed), then `n` is pressed. `Some(ticket)` = send action `n` now, as
-/// `Button::press`; `None` also when `n` has no button.
+/// A click on action `n`. When it does something (arms `n` or sends it), an armed first click
+/// of any other action of the window is dropped: only one may be armed. A click that does
+/// nothing (`n` has no button, is sending or showing a result, or this is the second half of a
+/// double-click) leaves the others alone. `Some(ticket)` = send action `n` now, as
+/// `Button::press`.
 pub fn press(buttons: &mut Buttons, n: usize, now: Instant) -> Option<u32> {
-    let i = n.checked_sub(1).filter(|&i| buttons.get(i).is_some_and(Option::is_some))?;
-    for (k, b) in buttons.iter_mut().enumerate() {
-        if let (true, Some(b)) = (k != i, b) {
-            b.disarm();
+    let b = slot_mut(buttons, n)?;
+    let before = b.look(now);
+    let ticket = b.press(now);
+    if ticket.is_some() || b.look(now) != before {
+        for (k, other) in buttons.iter_mut().enumerate() {
+            if let (true, Some(other)) = (k != n - 1, other) {
+                other.disarm();
+            }
         }
     }
-    buttons[i].as_mut()?.press(now)
+    ticket
 }
 
 /// Any of the buttons is armed, sending or showing a result: the window must not close.
@@ -171,11 +203,26 @@ pub fn next_change(buttons: &Buttons, now: Instant) -> Option<Instant> {
     buttons.iter().flatten().filter_map(|b| b.next_change(now)).min()
 }
 
-/// Where an action's pill was drawn: (number, (left, top, right, bottom) in pixels).
-pub type Placed = (usize, (i32, i32, i32, i32));
+/// What a window draws for its actions, given as (number, label) in number order: one
+/// `Shown` per action that has a button, with the text for its look at `now`.
+pub fn shown(buttons: &Buttons, actions: &[(usize, String)], now: Instant) -> Vec<Shown> {
+    actions
+        .iter()
+        .filter_map(|(n, label)| {
+            let look = slot(buttons, *n)?.look(now);
+            Some(Shown { n: *n, text: text(label, look), look })
+        })
+        .collect()
+}
 
-/// The action whose pill holds the point, given where the pills were drawn as (number, (left,
-/// top, right, bottom)); right and bottom are outside.
+/// The drawn pills that still have a button: one drawn just before its action went is not
+/// clickable.
+pub fn live_rects(buttons: &Buttons, mut drawn: Vec<Placed>) -> Vec<Placed> {
+    drawn.retain(|(n, _)| slot(buttons, *n).is_some());
+    drawn
+}
+
+/// The action whose pill holds the point, given where the pills were drawn.
 pub fn hit(pills: &[Placed], x: i32, y: i32) -> Option<usize> {
     pills.iter().find(|(_, (l, t, r, b))| x >= *l && x < *r && y >= *t && y < *b).map(|(n, _)| *n)
 }
@@ -308,7 +355,7 @@ const PILL_TEXT_CAP: f32 = 100_000.0;
 /// only its own width. Pills that do not fit even so are dropped from the right, so the result
 /// can be shorter than `text_widths` (empty when not even one fits). A row that fits is never
 /// changed.
-pub fn pill_row(height: i32, text_widths: &[f32], text_h: f32, scale: f32, right_limit: Option<i32>) -> Vec<(i32, i32, i32, i32)> {
+pub fn pill_row(height: i32, text_widths: &[f32], text_h: f32, scale: f32, right_limit: Option<i32>) -> Vec<Rect> {
     let (margin, pad_x, gap) = (px(PILL_MARGIN, scale), px(PILL_PAD_X, scale), px(PILL_GAP, scale));
     let (top, bottom) = pill_band(height, text_h, scale);
     // Rounded up, so that the text room of a pill that is not shared is never short of its
@@ -378,7 +425,7 @@ fn fair_widths(natural: &[i32], room: i32, gap: i32) -> Vec<i32> {
 }
 
 /// The room for the text inside a pill from `pill_row`, in pixels: its width less the padding.
-pub fn pill_text_room(pill: (i32, i32, i32, i32), scale: f32) -> f32 {
+pub fn pill_text_room(pill: Rect, scale: f32) -> f32 {
     (pill.2 - pill.0 - 2 * px(PILL_PAD_X, scale)).max(0) as f32
 }
 
@@ -462,12 +509,22 @@ mod tests {
     }
 
     #[test]
+    fn finished_says_whether_the_result_was_taken() {
+        let t = Instant::now();
+        let mut b = Button::new(false);
+        let ticket = b.press(t).unwrap();
+        assert!(!b.finished(ticket.wrapping_add(1), true, t + ms(10)), "another ticket");
+        assert!(b.finished(ticket, true, t + ms(20)));
+        assert!(!b.finished(ticket, true, t + ms(30)), "already taken");
+    }
+
+    #[test]
     fn refresh_works_per_action_number() {
         let t = Instant::now();
         let mut b = buttons([Some(true), None, Some(false), Some(true)]);
         press(&mut b, 1, t);
         press(&mut b, 4, t + ms(10));
-        refresh(&mut b, &[(1, true), (2, false), (4, false)]);
+        refresh(&mut b, &[Some(true), Some(false), None, Some(false)]);
         assert_eq!(b[0].as_ref().map(|b| b.look(t + ms(10))), Some(Look::Idle), "1: kept, but no longer armed (4 was pressed)");
         assert!(b[1].as_ref().is_some_and(|b| !b.confirm()), "2: appeared");
         assert!(b[2].is_none(), "3: lost its URL");
@@ -475,7 +532,7 @@ mod tests {
 
         let mut b = buttons([Some(true), Some(true), None, None]);
         press(&mut b, 2, t);
-        refresh(&mut b, &[(2, true)]);
+        refresh(&mut b, &[None, Some(true), None, None]);
         assert!(b[0].is_none());
         assert_eq!(b[1].as_ref().unwrap().look(t), Look::Armed, "kept with its state: nothing moves to another number");
     }
@@ -498,6 +555,41 @@ mod tests {
         assert_eq!(b[2].as_ref().unwrap().look(t + ms(1200)), Look::Done, "results are left alone");
         assert_eq!(press(&mut b, 0, t), None);
         assert_eq!(press(&mut b, 9, t), None);
+    }
+
+    #[test]
+    fn a_click_that_does_nothing_disarms_nothing() {
+        let t = Instant::now();
+        let mut b = buttons([Some(true), Some(false), Some(true), None]);
+        let ticket = press(&mut b, 2, t).expect("2 sends");
+        press(&mut b, 1, t + ms(100));
+        assert_eq!(press(&mut b, 2, t + ms(200)), None, "2 is sending: the click does nothing…");
+        assert_eq!(b[0].as_ref().unwrap().look(t + ms(200)), Look::Armed, "…so 1 stays armed");
+        b[1].as_mut().unwrap().finished(ticket, true, t + ms(300));
+        assert_eq!(press(&mut b, 2, t + ms(400)), None, "2 shows its result: nothing again");
+        assert_eq!(b[0].as_ref().unwrap().look(t + ms(400)), Look::Armed);
+        press(&mut b, 3, t + ms(500));
+        assert_eq!(b[0].as_ref().unwrap().look(t + ms(500)), Look::Idle, "arming 3 disarms 1");
+        assert_eq!(press(&mut b, 3, t + ms(600)), None, "the second half of a double-click on 3…");
+        assert_eq!(b[2].as_ref().unwrap().look(t + ms(600)), Look::Armed, "…keeps 3 armed");
+    }
+
+    #[test]
+    fn shown_lists_the_actions_with_a_button_by_number() {
+        let t = Instant::now();
+        let mut b = buttons([Some(false), None, Some(true), None]);
+        press(&mut b, 1, t);
+        let actions = [(1, "Gate".to_string()), (2, "Lost".to_string()), (3, "Lights".to_string())];
+        let want = [Shown { n: 1, text: text("Gate", Look::Sending), look: Look::Sending }, Shown { n: 3, text: "Lights".into(), look: Look::Idle }];
+        assert_eq!(shown(&b, &actions, t), want, "2 has no button (yet)");
+        assert_eq!(shown(&b, &[], t), []);
+    }
+
+    #[test]
+    fn only_drawn_pills_with_a_button_count() {
+        let b = buttons([Some(false), None, Some(true), None]);
+        let drawn = vec![(1, (8, 100, 60, 126)), (2, (66, 100, 120, 126)), (3, (126, 100, 180, 126)), (0, (0, 0, 1, 1)), (9, (0, 0, 1, 1))];
+        assert_eq!(live_rects(&b, drawn), [(1, (8, 100, 60, 126)), (3, (126, 100, 180, 126))]);
     }
 
     #[test]

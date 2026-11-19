@@ -1,7 +1,7 @@
 //! PiP window rendering: D3D11 swapchain, VideoProcessor for GPU frames,
 //! Direct2D for JPEG images / software frames, and a DirectWrite overlay.
 
-use crate::action::{self, Look};
+use crate::action::{self, Look, Shown};
 use crate::decoder::{nv12_to_bgra, Frame};
 use crate::view::Zoom;
 use std::mem::ManuallyDrop;
@@ -24,16 +24,16 @@ pub struct Overlay {
     pub text: String,
     pub live: bool,
     /// Close button: 0 = hidden, 1 = shown (mouse over the window), 2 = highlighted (mouse over the button),
-    /// 3 = shown with the sound button highlighted (mouse over that one), 4 = likewise the replay button,
-    /// 4 + n = likewise action button n (1 to 4).
+    /// 3 = shown with the sound button highlighted (mouse over that one), 4 = likewise the replay button.
     pub close: u8,
     /// Sound button: 0 = no camera audio (no button), 1 = sound on, 2 = muted.
     pub sound: u8,
     /// Replay button: 0 = nothing to replay (no button), 1 = shown with the others, 2 = replaying (it stays).
     pub replay: u8,
-    /// Action buttons: (number, text, look) in number order; empty = the camera has none.
-    /// Always shown.
-    pub actions: Vec<(usize, String, Look)>,
+    /// Action buttons in number order; empty = the camera has none. Always shown.
+    pub actions: Vec<Shown>,
+    /// The action button under the mouse (its number), 0 = none.
+    pub hot_action: usize,
     /// Volume in percent (volume slider).
     pub volume: u8,
     /// The part of the picture that is shown (Ctrl + mouse wheel).
@@ -484,7 +484,7 @@ impl Renderer {
         let scale = dpi.max(96) as f32 / 96.0;
         let trimming = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };
         let mut pills = Vec::new();
-        for (n, text, look) in &ov.actions {
+        for Shown { n, text, look } in &ov.actions {
             let text = HSTRING::from(text.as_str());
             let Ok(layout) = self.dwrite.CreateTextLayout(text.as_wide(), &self.font, w as f32, self.font_px * 2.0) else { continue };
             let _ = layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -512,7 +512,7 @@ impl Renderer {
         pills
             .into_iter()
             .zip(rects)
-            .map(|((n, look, layout, m), rect)| (n, self.draw_pill(&layout, m, rect, look, ov.close as usize == 4 + n, scale)))
+            .map(|((n, look, layout, m), rect)| (n, self.draw_pill(&layout, m, rect, look, ov.hot_action == n, scale)))
             .collect()
     }
 
@@ -521,11 +521,11 @@ impl Renderer {
         &self,
         layout: &IDWriteTextLayout,
         mut m: DWRITE_TEXT_METRICS,
-        rect: (i32, i32, i32, i32),
+        rect: action::Rect,
         look: Look,
         hot: bool,
         scale: f32,
-    ) -> (i32, i32, i32, i32) {
+    ) -> action::Rect {
         let (l, t, r, b) = rect;
         let max_w = crate::action::pill_text_room(rect, scale);
         let _ = layout.SetMaxWidth(max_w.max(1.0));

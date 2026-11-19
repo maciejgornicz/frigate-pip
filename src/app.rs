@@ -533,6 +533,12 @@ fn window_rect(hwnd: HWND) -> RECT {
     r
 }
 
+/// The screen point a mouse message carries in its LPARAM (signed: other monitors can be left
+/// of or above the primary one).
+fn lparam_point(lp: LPARAM) -> POINT {
+    POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 }
+}
+
 fn cursor_pos() -> POINT {
     let mut pt = POINT::default();
     unsafe {
@@ -557,7 +563,7 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             // The close button in the top-right corner, the sound button left of it and the
             // volume slider under that (only with camera audio), then the replay button, then the
             // action buttons along the bottom-left; the rest of the window drags it.
-            let mut pt = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
+            let mut pt = lparam_point(lp);
             let _ = ScreenToClient(hwnd, &mut pt);
             let mut rc = RECT::default();
             let _ = GetClientRect(hwnd, &mut rc);
@@ -597,8 +603,7 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
         // Never pins, drags or opens Frigate; the second half of a double-click is just another
         // press (the button ignores it).
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HT_ACTION => {
-            let at = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
-            with_app(|a| a.press_action(hwnd, at));
+            with_app(|a| a.press_action(hwnd, lparam_point(lp)));
             LRESULT(0)
         }
         // The release on a button is ours too (the default handling has nothing to do there).
@@ -657,11 +662,11 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             LRESULT(0)
         }
         WM_NCMOUSEMOVE => {
-            with_app(|a| a.hover(hwnd, true, wp.0 as u32));
+            with_app(|a| a.hover(hwnd, true, wp.0 as u32, lparam_point(lp)));
             DefWindowProcW(hwnd, msg, wp, lp)
         }
         WM_NCMOUSELEAVE => {
-            with_app(|a| a.hover(hwnd, false, HTNOWHERE));
+            with_app(|a| a.hover(hwnd, false, HTNOWHERE, POINT::default()));
             LRESULT(0)
         }
         WM_MOUSEWHEEL => {
@@ -1060,7 +1065,7 @@ impl App {
             None => self.popups.push(popup),
         }
         self.layout();
-        self.refresh_action(hwnd);
+        self.refresh_window_actions(hwnd);
         unsafe {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             SetTimer(hwnd, TIMER_DEADLINE, dur.as_millis() as u32, None);
@@ -1211,7 +1216,7 @@ impl App {
             }
         }
         self.layout();
-        self.refresh_actions();
+        self.refresh_all_actions();
         let video = |c: &Config| (c.live, c.stream, c.auto_main_width, c.camera_audio, c.wind_filter);
         if video(&v) != video(old) && self.popups.iter().any(|p| p.preview && !p.closing) {
             self.preview_on();
@@ -1265,7 +1270,7 @@ impl App {
                 p.pinned = true;
             }
             // The preview's action buttons follow the draft.
-            self.refresh_action(h);
+            self.refresh_window_actions(h);
         }
     }
 
@@ -1409,7 +1414,7 @@ impl App {
     fn popup_timer(&mut self, hwnd: HWND, id: usize) {
         match id {
             TIMER_FORCE_CLOSE => self.player_done(hwnd),
-            TIMER_ACTION => self.sync_action(hwnd),
+            TIMER_ACTION => self.sync_window_actions(hwnd),
             TIMER_DEADLINE => {
                 let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd) else {
                     unsafe {
@@ -1439,9 +1444,10 @@ impl App {
         }
     }
 
-    /// Mouse over the window (`on`); `hit` = the part under it (`HTCLOSE`, `HT_SOUND`).
-    fn hover(&mut self, hwnd: HWND, on: bool, hit: u32) {
-        let pill = if hit == HT_ACTION { self.action_at(hwnd, cursor_pos()) } else { None };
+    /// Mouse over the window (`on`) at `at` (screen pixels); `hit` = the part under it
+    /// (`HTCLOSE`, `HT_SOUND`).
+    fn hover(&mut self, hwnd: HWND, on: bool, hit: u32, at: POINT) {
+        let pill = if on && hit == HT_ACTION { self.action_at(hwnd, at) } else { None };
         let Some(p) = self.find(hwnd) else { return };
         // During a drag the window has the mouse to itself, wherever it goes.
         if !on && p.drag.is_some() {
@@ -1452,9 +1458,9 @@ impl App {
             (true, HTCLOSE) => 2,
             (true, HT_SOUND) => 3,
             (true, HT_REPLAY) => 4,
-            (true, HT_ACTION) => pill.map_or(1, |n| 4 + n as u8),
             (true, _) => 1,
         });
+        p.shared.set_hot_action(pill.unwrap_or(0));
         if on && !p.hovered {
             p.hovered = true;
             let mut tme = TRACKMOUSEEVENT {
@@ -1513,9 +1519,7 @@ impl App {
     /// that were drawn.
     fn action_rects(&mut self, hwnd: HWND) -> Vec<action::Placed> {
         let Some(p) = self.find(hwnd) else { return Vec::new() };
-        let mut rects = p.shared.action_rects();
-        rects.retain(|(n, _)| p.actions.get(n.wrapping_sub(1)).is_some_and(Option::is_some));
-        rects
+        action::live_rects(&p.actions, p.shared.action_rects())
     }
 
     /// The action button at `at` (screen pixels), if any.
@@ -1527,25 +1531,19 @@ impl App {
         action::hit(&self.action_rects(hwnd), pt.x, pt.y)
     }
 
-    /// Shows the action buttons as they are now, and wakes up when one changes by itself.
-    fn sync_action(&mut self, hwnd: HWND) {
+    /// Shows the window's action buttons as they are now, and wakes up when one changes by itself.
+    fn sync_window_actions(&mut self, hwnd: HWND) {
         let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd) else {
             unsafe {
                 let _ = KillTimer(hwnd, TIMER_ACTION);
             }
             return;
         };
-        let actions = self.actions_of(&self.popups[i].camera, self.popups[i].preview);
+        let labels: Vec<(usize, String)> =
+            self.actions_of(&self.popups[i].camera, self.popups[i].preview).into_iter().map(|(n, label, _)| (n, label)).collect();
         let p = &self.popups[i];
         let now = Instant::now();
-        let shown = actions
-            .into_iter()
-            .filter_map(|(n, label, _)| {
-                let look = p.actions.get(n - 1)?.as_ref()?.look(now);
-                Some((n, action::text(&label, look), look))
-            })
-            .collect();
-        p.shared.set_actions(shown);
+        p.shared.set_actions(action::shown(&p.actions, &labels, now));
         let next = if p.closing { None } else { action::next_change(&p.actions, now) };
         unsafe {
             match next {
@@ -1562,25 +1560,27 @@ impl App {
     }
 
     /// The window's action buttons follow its settings, number by number (see `action::refresh`).
-    fn refresh_action(&mut self, hwnd: HWND) {
+    fn refresh_window_actions(&mut self, hwnd: HWND) {
         let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd) else { return };
-        let want: Vec<(usize, bool)> =
-            self.actions_of(&self.popups[i].camera, self.popups[i].preview).into_iter().map(|(n, _, confirm)| (n, confirm)).collect();
-        action::refresh(&mut self.popups[i].actions, &want);
-        self.sync_action(hwnd);
+        let mut confirm = [None; config::ACTIONS];
+        for (n, _, c) in self.actions_of(&self.popups[i].camera, self.popups[i].preview) {
+            confirm[n - 1] = Some(c);
+        }
+        action::refresh(&mut self.popups[i].actions, &confirm);
+        self.sync_window_actions(hwnd);
     }
 
     /// The draft or saved settings changed: every window's action buttons follow its settings.
-    fn refresh_actions(&mut self) {
+    fn refresh_all_actions(&mut self) {
         let hwnds: Vec<HWND> = self.popups.iter().map(|p| p.hwnd).collect();
         for hwnd in hwnds {
-            self.refresh_action(hwnd);
+            self.refresh_window_actions(hwnd);
         }
     }
 
-    /// A click at `at` (screen pixels) on an action button: arms it or sends its request, after
-    /// dropping any other armed button of the window. The preview never sends; it shows "done"
-    /// as if it had, so that the click is seen to work.
+    /// A click at `at` (screen pixels) on an action button: arms it or sends its request (see
+    /// `action::press`). The preview never sends; it shows "done" as if it had, so that the
+    /// click is seen to work.
     fn press_action(&mut self, hwnd: HWND, at: POINT) {
         let main = self.hwnd.0 as isize;
         let Some(n) = self.action_at(hwnd, at) else { return };
@@ -1588,7 +1588,8 @@ impl App {
         let p = &mut self.popups[i];
         let now = Instant::now();
         if let Some(ticket) = action::press(&mut p.actions, n, now) {
-            let Some(b) = p.actions.get_mut(n - 1).and_then(Option::as_mut) else { return };
+            // `press` only sends a button that exists, and `n` came from a drawn pill (1 to ACTIONS).
+            let Some(b) = p.actions[n - 1].as_mut() else { return };
             if p.preview {
                 b.finished(ticket, true, now);
                 crate::log!("action {} {n}: preview, not sent", p.camera);
@@ -1603,22 +1604,17 @@ impl App {
                 }
             }
         }
-        self.sync_action(hwnd);
+        self.sync_window_actions(hwnd);
     }
 
     /// An action request ended. Tickets are unique, so only the button that sent it takes the
-    /// result; a window closed meanwhile has no button left to take it (its message is dropped).
+    /// result, and only its window is redrawn; a window closed meanwhile has no button left to
+    /// take it (its message is dropped).
     fn action_done(&mut self, ticket: u32, ok: bool) {
         let now = Instant::now();
-        let mut hwnds = Vec::new();
-        for p in &mut self.popups {
-            if p.actions.iter().any(Option::is_some) {
-                p.actions.iter_mut().flatten().for_each(|b| b.finished(ticket, ok, now));
-                hwnds.push(p.hwnd);
-            }
-        }
-        for hwnd in hwnds {
-            self.sync_action(hwnd);
+        let owner = self.popups.iter_mut().find_map(|p| p.actions.iter_mut().flatten().any(|b| b.finished(ticket, ok, now)).then_some(p.hwnd));
+        if let Some(hwnd) = owner {
+            self.sync_window_actions(hwnd);
         }
     }
 
@@ -1733,8 +1729,9 @@ impl App {
             crate::log!("{}: volume {} %", p.camera, p.shared.sound.volume.load(Ordering::Relaxed));
         }
         p.hovered = false;
-        let inside = unsafe { PtInRect(&window_rect(hwnd), cursor_pos()).as_bool() };
-        self.hover(hwnd, inside, if inside { HTCAPTION } else { HTNOWHERE });
+        let at = cursor_pos();
+        let inside = unsafe { PtInRect(&window_rect(hwnd), at).as_bool() };
+        self.hover(hwnd, inside, if inside { HTCAPTION } else { HTNOWHERE }, at);
     }
 
     fn set_aspect(&mut self, hwnd: HWND, w: u32, h: u32) {
@@ -1818,7 +1815,7 @@ impl App {
         }
         self.layout();
         // E.g. an action URL added to the settings file by hand.
-        self.refresh_actions();
+        self.refresh_all_actions();
         self.tray(NIM_MODIFY);
     }
 
