@@ -1,6 +1,7 @@
 //! PiP window rendering: D3D11 swapchain, VideoProcessor for GPU frames,
 //! Direct2D for JPEG images / software frames, and a DirectWrite overlay.
 
+use crate::action::Look;
 use crate::decoder::{nv12_to_bgra, Frame};
 use crate::view::Zoom;
 use std::mem::ManuallyDrop;
@@ -29,6 +30,8 @@ pub struct Overlay {
     pub sound: u8,
     /// Replay button: 0 = nothing to replay (no button), 1 = shown with the others, 2 = replaying (it stays).
     pub replay: u8,
+    /// Action button: its text and look; `None` = the camera has none. Always shown.
+    pub action: Option<(String, Look)>,
     /// Volume in percent (volume slider).
     pub volume: u8,
     /// The part of the picture that is shown (Ctrl + mouse wheel).
@@ -93,6 +96,10 @@ pub struct Renderer {
     grey: ID2D1SolidColorBrush,
     /// Lightens a button under the mouse.
     light: ID2D1SolidColorBrush,
+    amber: ID2D1SolidColorBrush,
+    green: ID2D1SolidColorBrush,
+    /// Where the action button was last drawn (client pixels), if it was.
+    pub action_rect: Option<(i32, i32, i32, i32)>,
     wic: IWICImagingFactory,
     size: (u32, u32),
     vp: Option<Vp>,
@@ -243,6 +250,8 @@ impl Renderer {
             let red = brush(color(0.94, 0.27, 0.27, 1.0))?;
             let grey = brush(color(0.75, 0.75, 0.75, 1.0))?;
             let light = brush(color(1.0, 1.0, 1.0, 0.3))?;
+            let amber = brush(color(0.96, 0.62, 0.04, 1.0))?;
+            let green = brush(color(0.13, 0.70, 0.33, 1.0))?;
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
@@ -284,6 +293,9 @@ impl Renderer {
                 red,
                 grey,
                 light,
+                amber,
+                green,
+                action_rect: None,
                 wic,
                 size,
                 vp: None,
@@ -413,14 +425,15 @@ impl Renderer {
                     );
                 }
             }
-            self.draw_overlay(ov);
+            self.action_rect = self.draw_overlay(ov);
             self.d2d.EndDraw(None, None)?;
             self.swapchain.Present(1, DXGI_PRESENT(0)).ok()?;
         }
         Ok(())
     }
 
-    unsafe fn draw_overlay(&self, ov: &Overlay) {
+    /// Returns where the action button went (client pixels), if the window has one.
+    unsafe fn draw_overlay(&self, ov: &Overlay) -> Option<(i32, i32, i32, i32)> {
         self.d2d.SetTransform(&Matrix3x2::identity());
         let dpi = GetDpiForWindow(self.hwnd);
         let button = (ov.close > 0).then(|| close_button_rect(self.size.0 as i32, dpi));
@@ -453,6 +466,40 @@ impl Renderer {
                 self.draw_volume(slider, ov.volume);
             }
         }
+        // Always shown, not only under the mouse.
+        let scale = dpi.max(96) as f32 / 96.0;
+        ov.action.as_ref().and_then(|(text, look)| self.draw_action(self.size.1 as i32, text, *look, scale))
+    }
+
+    /// The action button: a pill in the bottom-left corner, coloured by its look. Returns its rect.
+    unsafe fn draw_action(&self, height: i32, text: &str, look: Look, scale: f32) -> Option<(i32, i32, i32, i32)> {
+        let wide: Vec<u16> = HSTRING::from(text).as_wide().to_vec();
+        // Room for the margins and padding of `action::pill_rect` on both sides.
+        let max_w = (self.size.0 as f32 - 36.0 * scale).max(10.0);
+        let layout = self.dwrite.CreateTextLayout(&wide, &self.font, max_w, self.font_px * 2.0).ok()?;
+        let _ = layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        let trimming = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };
+        let _ = layout.SetTrimming(&trimming, None);
+        let mut m = DWRITE_TEXT_METRICS::default();
+        let _ = layout.GetMetrics(&mut m);
+        let text_w = m.width.min(max_w);
+        let (l, t, r, b) = crate::action::pill_rect(height, text_w, m.height, scale);
+        let h = (b - t) as f32;
+        let rr = D2D1_ROUNDED_RECT {
+            rect: D2D_RECT_F { left: l as f32, top: t as f32, right: r as f32, bottom: b as f32 },
+            radiusX: h / 2.0,
+            radiusY: h / 2.0,
+        };
+        let fill = match look {
+            Look::Idle => &self.shade,
+            Look::Armed | Look::Failed => &self.red,
+            Look::Sending => &self.amber,
+            Look::Done => &self.green,
+        };
+        self.d2d.FillRoundedRectangle(&rr, fill);
+        let origin = D2D_POINT_2F { x: (l + r) as f32 / 2.0 - text_w / 2.0 - m.left, y: (t + b) as f32 / 2.0 - m.height / 2.0 - m.top };
+        self.d2d.DrawTextLayout(origin, &layout, &self.white, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        Some((l, t, r, b))
     }
 
     /// A dark bar with the track and the knob at `volume` percent.

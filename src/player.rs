@@ -1,5 +1,6 @@
 //! PiP window thread: an instant snapshot, then live video.
 
+use crate::action::Look;
 use crate::audio::{AudioMsg, AudioTrack, Sound};
 use crate::client::Frigate;
 use crate::config::LiveMode;
@@ -55,6 +56,10 @@ pub struct Shared {
     replay: AtomicU8,
     /// The replay button was pressed; the player starts or stops the replay.
     replay_pressed: AtomicBool,
+    /// The action button's text and look (set by the UI thread); `None` = no button.
+    action: Mutex<Option<(String, Look)>>,
+    /// Where the renderer drew the action button (client pixels), for the UI thread's hit-test.
+    action_rect: Mutex<Option<(i32, i32, i32, i32)>>,
 }
 
 impl Shared {
@@ -69,6 +74,8 @@ impl Shared {
             zoom: Mutex::new(Zoom::FULL),
             replay: AtomicU8::new(0),
             replay_pressed: AtomicBool::new(false),
+            action: Mutex::new(None),
+            action_rect: Mutex::new(None),
         })
     }
 
@@ -402,6 +409,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 (true, true) => 2,
             },
             replay: shared.replay(),
+            action: shared.action.lock().unwrap().clone(),
             volume: shared.sound.volume.load(Ordering::Relaxed),
             zoom: shared.zoom(),
         }
@@ -628,6 +636,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         } else if shared.dirty.swap(false, Ordering::Relaxed) || r.check_resize().unwrap_or(false) {
             let _ = r.redraw(&overlay_text((shown.is_some() || mjpeg_active) && replay.is_none(), behind));
         }
+        *shared.action_rect.lock().unwrap() = r.action_rect;
 
         if shown.is_none() && !mjpeg_active && !snapshot_inflight && last_snapshot.elapsed() > Duration::from_millis(400) {
             snapshot_inflight = true;
