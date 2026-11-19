@@ -362,6 +362,12 @@ impl Default for ActionDraft {
     }
 }
 
+/// The URL of the camera's action 1 in `c`.
+// R3: all four actions of a camera; for now action 1.
+fn saved_url<'a>(c: &'a Config, camera: &str) -> Option<&'a str> {
+    c.camera(camera)?.action(1)?.url.as_deref()
+}
+
 /// Action buttons as set in the window: one for each camera of the camera list.
 // R3: all four actions of a camera; for now action 1.
 #[derive(Clone, Debug, PartialEq)]
@@ -373,12 +379,8 @@ impl Actions {
     fn from_config(c: &Config, cameras: &[(String, String)]) -> Actions {
         let per_cam = cameras
             .iter()
-            .map(|(n, _)| match c.camera(n) {
-                Some(o) => ActionDraft {
-                    url: o.actions[0].url.clone().unwrap_or_default(),
-                    label: o.actions[0].label.clone().unwrap_or_default(),
-                    confirm: o.actions[0].confirm,
-                },
+            .map(|(n, _)| match c.camera(n).and_then(|o| o.action(1)) {
+                Some(a) => ActionDraft { url: a.url.clone().unwrap_or_default(), label: a.label.clone().unwrap_or_default(), confirm: a.confirm },
                 None => ActionDraft::default(),
             })
             .collect();
@@ -388,8 +390,7 @@ impl Actions {
     /// Into the settings. A URL that is not valid leaves the camera's URL in `c` as it is.
     fn apply(&self, c: &mut Config, cameras: &[(String, String)]) {
         for ((n, _), a) in cameras.iter().zip(&self.per_cam) {
-            let url =
-                if valid_url(&a.url) { a.url.trim().to_string() } else { c.camera(n).and_then(|o| o.actions[0].url.clone()).unwrap_or_default() };
+            let url = if valid_url(&a.url) { a.url.trim().to_string() } else { saved_url(c, n).unwrap_or_default().to_string() };
             c.set_action(n, 1, Some(url), Some(a.label.trim().to_string()), a.confirm);
         }
     }
@@ -397,9 +398,7 @@ impl Actions {
     /// The first camera whose URL is not valid and not the one in `saved` (a value already in
     /// the file is the user's own business; it does not block saving the rest).
     fn first_bad(&self, saved: &Config, cameras: &[(String, String)]) -> Option<usize> {
-        cameras.iter().zip(&self.per_cam).position(|((n, _), a)| {
-            !valid_url(&a.url) && saved.camera(n).and_then(|o| o.actions[0].url.as_deref()).map(str::trim) != Some(a.url.trim())
-        })
+        cameras.iter().zip(&self.per_cam).position(|((n, _), a)| !valid_url(&a.url) && saved_url(saved, n).map(str::trim) != Some(a.url.trim()))
     }
 
     /// Where the camera shown at `shown` in `old` is in `new` (by name, in any case); `None`
@@ -1345,7 +1344,7 @@ impl Drop for Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::IniDoc;
+    use crate::config::{ActionView, IniDoc};
 
     fn names(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -1443,7 +1442,7 @@ mod tests {
         a.apply(&mut c, &cams());
         assert!(c.actions_for("gate").is_empty());
         // The label stays for when a URL comes back.
-        assert_eq!(c.camera("gate").unwrap().actions[0].label.as_deref(), Some("Gate"));
+        assert_eq!(c.camera("gate").unwrap().action(1).unwrap().label.as_deref(), Some("Gate"));
     }
 
     #[test]
@@ -1456,7 +1455,8 @@ mod tests {
         crate::config::write_all(&c, &mut doc);
         assert!(!doc.sections().iter().any(|s| s == "camera.gate"), "{}", doc.to_text());
         let back = Config::from_ini(&doc);
-        assert_eq!(back.actions_for("yard"), [(1, "http://h/api/webhook/y", Some("Light"), true)], "trimmed");
+        assert_eq!(back.action_url("yard", 1), Some("http://h/api/webhook/y"), "trimmed");
+        assert_eq!(back.actions_for("yard"), [ActionView { n: 1, label: Some("Light"), confirm: true }], "trimmed");
         assert_eq!(doc.get("camera.yard", "action1_confirm"), None, "the default is not written");
     }
 
@@ -1467,7 +1467,8 @@ mod tests {
         let mut c = saved.clone();
         a.apply(&mut c, &cams());
         // The old URL stays (none for yard); the camera's other values are taken.
-        assert_eq!(c.actions_for("gate"), [(1, "http://h/old", Some("Gate"), true)]);
+        assert_eq!(c.action_url("gate", 1), Some("http://h/old"));
+        assert_eq!(c.actions_for("gate"), [ActionView { n: 1, label: Some("Gate"), confirm: true }]);
         assert!(c.actions_for("yard").is_empty());
     }
 

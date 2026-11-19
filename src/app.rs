@@ -1503,8 +1503,8 @@ impl App {
     /// The camera's action button as a window shows it: (label, ask for confirmation).
     // R2: all four; for now the first action with a URL.
     fn action_of(&self, camera: &str, preview: bool) -> Option<(String, bool)> {
-        let (_, _, label, confirm) = self.action_cfg(preview).actions_for(camera).into_iter().next()?;
-        Some((action::label_or_default(label), confirm))
+        let a = *self.action_cfg(preview).actions_for(camera).first()?;
+        Some((action::label_or_default(a.label), a.confirm))
     }
 
     /// Where the window's action button is (client pixels), if it has one and it was drawn.
@@ -1579,7 +1579,8 @@ impl App {
             } else {
                 // Only here does the URL leave the settings, straight to the request's thread.
                 // R2: all four; for now the first action with a URL, as `action_of` shows.
-                let first = self.cfg.actions_for(&p.camera).into_iter().next().map(|(n, url, _, _)| (n, url.to_string()));
+                let n = self.cfg.actions_for(&p.camera).first().map(|a| a.n);
+                let first = n.and_then(|n| Some((n, self.cfg.action_url(&p.camera, n)?.to_string())));
                 let done = move |ok: bool| unsafe {
                     let _ = PostMessageW(HWND(main as _), WM_APP_ACTION, WPARAM(ticket as usize), LPARAM(ok as isize));
                 };

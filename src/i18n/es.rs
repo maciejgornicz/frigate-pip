@@ -203,7 +203,7 @@ pub static STRINGS: Strings = Strings {
     action_default: "Acción",
     action_ask: "¿{0}?",
     action_row: "Acción {0}",
-    action_confirm_short: "Confirmar",
+    action_confirm_short: "Confirmación",
 
     console_keys: "q salir · x cerrar ventanas · p pausar · m sonido · r repetición · a acción · 1–9 mostrar cámara",
     console_tmux_running: "se ejecuta en segundo plano: las ventanas de las cámaras se abren como ventanas emergentes de tmux (Ctrl+C lo detiene).",

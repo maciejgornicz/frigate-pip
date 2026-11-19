@@ -366,11 +366,12 @@ pub struct Strings {
     pub action_default: &'static str,
     /// The armed button ("Gate?"); {0} = label
     pub action_ask: &'static str,
-    /// An action's row in the settings tab ("Action 2"); {0} = its number. Used once the tab
-    /// shows all four actions.
+    /// An action's row in the settings tab ("Action 2"); {0} = its number.
+    // R3: used once the tab shows all four actions; then drop the allow.
     #[cfg_attr(windows, allow(dead_code))]
     pub action_row: &'static str,
-    /// The confirmation checkbox in an action's row.
+    /// The confirmation checkbox in an action's row (a noun: "Confirmation").
+    // R3: used once the tab shows all four actions; then drop the allow.
     #[cfg_attr(windows, allow(dead_code))]
     pub action_confirm_short: &'static str,
 
