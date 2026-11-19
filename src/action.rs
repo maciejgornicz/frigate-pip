@@ -141,7 +141,6 @@ pub fn label_or_default(label: Option<&str>) -> String {
 
 /// An `http://` or `https://` address `net::request` can use, with no space or control
 /// character inside (it goes into the request line as it is); empty (no button) is valid too.
-#[cfg_attr(windows, allow(dead_code))] // until the settings window checks it
 pub fn valid_url(url: &str) -> bool {
     let u = url.trim();
     u.is_empty()

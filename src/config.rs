@@ -405,7 +405,6 @@ impl Config {
     }
 
     /// Sets the camera's action button (no URL = no button).
-    #[allow(dead_code)] // until the settings window uses it
     pub fn set_action(&mut self, camera: &str, url: Option<String>, label: Option<String>, confirm: bool) {
         // Empty or blank = none, as an empty key reads back (other values are kept as given,
         // like `opt` keeps parsed ones).

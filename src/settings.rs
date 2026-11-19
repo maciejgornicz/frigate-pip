@@ -3,6 +3,7 @@
 //! The window only reads and writes its controls; the logic (preview, saving,
 //! testing) is handled by `App` on the UI thread.
 
+use crate::action::valid_url;
 use crate::config::{Config, Corner, LiveMode, Source, StreamPref, TriggerMode};
 use crate::frigate::CameraInfo;
 use crate::i18n::{self, Lang};
@@ -75,6 +76,13 @@ pub const ID_APPLY: i32 = 502;
 pub const ID_TAB: i32 = 503;
 pub const ID_HELP: i32 = 504;
 pub const ID_SUPPORT: i32 = 505;
+/// Whose action button the action controls show.
+pub const ID_ACTION_FOR: i32 = 600;
+pub const ID_ACTION_URL: i32 = 601;
+pub const ID_ACTION_LABEL: i32 = 602;
+pub const ID_ACTION_CONFIRM: i32 = 603;
+/// Why the URL above is not saved (empty while it is valid).
+pub const ID_ACTION_ERR: i32 = 604;
 
 const TBM_GETPOS: u32 = WM_USER;
 const SS_NOPREFIX: u32 = 0x80;
@@ -125,6 +133,10 @@ pub struct Settings {
     shown: Vec<String>,
     /// Texts of the scope combo (a camera with its own list has " *").
     scope_texts: Vec<String>,
+    /// The action buttons, as they were when the action controls last showed another camera.
+    actions: Actions,
+    /// The camera shown in the action controls (an index into `cameras`).
+    action_cam: usize,
 }
 
 fn wide(s: &str) -> HSTRING {
@@ -324,6 +336,54 @@ impl Objects {
     }
 }
 
+/// Action buttons as set in the window: (URL, label, ask for confirmation) of each camera of
+/// the camera list, as typed. A URL that `action::valid_url` refuses stays here but is not saved.
+#[derive(Clone, Debug, PartialEq)]
+struct Actions {
+    per_cam: Vec<(String, String, bool)>,
+}
+
+impl Actions {
+    fn from_config(c: &Config, cameras: &[(String, String)]) -> Actions {
+        let per_cam = cameras
+            .iter()
+            .map(|(n, _)| match c.camera(n) {
+                Some(o) => (o.action_url.clone().unwrap_or_default(), o.action_label.clone().unwrap_or_default(), o.action_confirm),
+                None => (String::new(), String::new(), true),
+            })
+            .collect();
+        Actions { per_cam }
+    }
+
+    /// Into the settings. A URL that is not valid leaves the camera's URL in `c` as it is.
+    fn apply(&self, c: &mut Config, cameras: &[(String, String)]) {
+        for ((n, _), (url, label, confirm)) in cameras.iter().zip(&self.per_cam) {
+            let url = if valid_url(url) { url.trim().to_string() } else { c.camera(n).and_then(|o| o.action_url.clone()).unwrap_or_default() };
+            c.set_action(n, Some(url), Some(label.trim().to_string()), *confirm);
+        }
+    }
+
+    /// The first camera whose URL is not valid and not the one in `saved` (a value already in
+    /// the file is the user's own business; it does not block saving the rest).
+    fn first_bad(&self, saved: &Config, cameras: &[(String, String)]) -> Option<usize> {
+        cameras.iter().zip(&self.per_cam).position(|((n, _), (url, _, _))| {
+            !valid_url(url) && saved.camera(n).and_then(|o| o.action_url.as_deref()).map(str::trim) != Some(url.trim())
+        })
+    }
+
+    /// For a new camera list: the values typed for a camera follow it, new cameras get theirs
+    /// from `c`.
+    fn for_cameras(&self, old: &[(String, String)], new: &[(String, String)], c: &Config) -> Actions {
+        let mut a = Actions::from_config(c, new);
+        for ((n, _), v) in new.iter().zip(&mut a.per_cam) {
+            if let Some(typed) = old.iter().position(|(o, _)| o.eq_ignore_ascii_case(n)).and_then(|i| self.per_cam.get(i)) {
+                *v = typed.clone();
+            }
+        }
+        a
+    }
+}
+
 fn on_pane(h: HWND) -> HWND {
     unsafe {
         SetWindowLongPtrW(h, GWLP_USERDATA, ON_PANE);
@@ -388,6 +448,7 @@ impl Settings {
             let cameras: Vec<(String, String)> = init.cameras.iter().map(|c| (c.name.clone(), c.title.clone())).collect();
             let (cameras_all, labels, zones) = choices(init.cameras, cfg);
             let objects = Objects::from_config(cfg, &cameras_all);
+            let actions = Actions::from_config(cfg, &cameras_all);
 
             let mut s = Settings {
                 hwnd,
@@ -405,6 +466,8 @@ impl Settings {
                 scope: 0,
                 shown: Vec::new(),
                 scope_texts: Vec::new(),
+                actions,
+                action_cam: 0,
             };
             s.build(cfg, init.autostart, &init.monitors, &cameras);
             if let Some(color) = sample_pane(s.tab) {
@@ -570,7 +633,7 @@ impl Settings {
         let t = i18n::t();
         unsafe {
             self.tab = self.add(None, WC_TABCONTROLW, "", WS_VISIBLE.0 | WS_CLIPSIBLINGS.0 | WS_TABSTOP.0, 0, ID_TAB, 12, 12, WIDTH - 24, 516);
-            for (i, name) in [t.tab_connection, t.tab_detection, t.tab_window, t.tab_video].iter().enumerate() {
+            for (i, name) in [t.tab_connection, t.tab_detection, t.tab_window, t.tab_video, t.tab_actions].iter().enumerate() {
                 // "&" would underline the next letter.
                 let mut buf: Vec<u16> = name.replace('&', "&&").encode_utf16().chain(std::iter::once(0)).collect();
                 let item = TCITEMW { mask: TCIF_TEXT, pszText: PWSTR(buf.as_mut_ptr()), ..Default::default() };
@@ -599,6 +662,9 @@ impl Settings {
             t.live,
             t.stream,
             t.auto_main_width,
+            t.action_camera,
+            t.action_url,
+            t.action_label,
         ];
         let lx = 28;
         let lw = captions.iter().map(|s| self.text_w(s)).max().unwrap_or(0).clamp(150, 250) + 4;
@@ -783,6 +849,24 @@ impl Settings {
         self.set_id_of_last(ID_VOLUME_LBL);
         self.tip(&[l, e], t.tip_camera_volume);
 
+        // ---- Actions: one camera's button at a time
+        let p = 4;
+        let l = self.label(p, t.action_camera, lx, 52, lw);
+        let e = self.combo(Some(p), ID_ACTION_FOR, &self.action_titles(), 0, cx, 52, cw);
+        self.tip(&[l, e], t.tip_action_camera);
+        let (url, label, confirm) = self.actions.per_cam.first().cloned().unwrap_or_else(|| (String::new(), String::new(), true));
+        let l = self.label(p, t.action_url, lx, 84, lw);
+        let e = self.edit(p, ID_ACTION_URL, &url, cx, 84, cw, 0);
+        self.tip(&[l, e], t.tip_action_url);
+        self.label(p, "", cx, 108, cw);
+        self.set_id_of_last(ID_ACTION_ERR);
+        let l = self.label(p, t.action_label, lx, 136, lw);
+        let e = self.edit(p, ID_ACTION_LABEL, &label, cx, 136, cw.min(240), 0);
+        self.tip(&[l, e], t.tip_action_label);
+        let e = self.check(Some(p), ID_ACTION_CONFIRM, t.action_confirm, confirm, lx, 170, full);
+        self.tip(&[e], t.tip_action_confirm);
+        self.note(p, t.action_note, lx, 204, full, 64);
+
         // ---- bottom of the window: preview on the left, buttons on the right
         let buttons = [(IDOK.0, t.ok, true), (IDCANCEL.0, t.cancel, false), (ID_APPLY, t.apply, false), (ID_HELP, t.help, false)];
         let widths: Vec<i32> = buttons.iter().map(|(_, text, _)| (self.text_w(text) + 24).max(72)).collect();
@@ -836,7 +920,9 @@ impl Settings {
         if cameras == self.cameras && labels == self.labels && zones == self.zones && self.real_cameras == cams.len() {
             return;
         }
-        self.cameras = cameras;
+        let typed = self.actions_now();
+        let shown = self.cameras.get(self.action_cam).map(|(n, _)| n.clone());
+        let old = std::mem::replace(&mut self.cameras, cameras);
         self.labels = labels;
         self.zones = zones;
         self.real_cameras = cams.len();
@@ -858,6 +944,18 @@ impl Settings {
             }
             let _ = SendMessageW(combo, CB_SETCURSEL, WPARAM(0), LPARAM(0));
         }
+        // The action controls keep their camera if it is still listed.
+        self.actions = typed.for_cameras(&old, &self.cameras, &draft);
+        self.action_cam = shown.and_then(|s| self.cameras.iter().position(|(n, _)| n.eq_ignore_ascii_case(&s))).unwrap_or(0);
+        let combo = self.item(ID_ACTION_FOR);
+        unsafe {
+            let _ = SendMessageW(combo, CB_RESETCONTENT, WPARAM(0), LPARAM(0));
+            for title in &self.action_titles() {
+                let _ = SendMessageW(combo, CB_ADDSTRING, WPARAM(0), LPARAM(wide(title).as_ptr() as isize));
+            }
+            let _ = SendMessageW(combo, CB_SETCURSEL, WPARAM(self.action_cam), LPARAM(0));
+        }
+        self.show_action();
     }
 
     fn set_id_of_last(&mut self, id: i32) {
@@ -973,6 +1071,63 @@ impl Settings {
         }
     }
 
+    /// Texts of the action camera combo.
+    fn action_titles(&self) -> Vec<String> {
+        if self.cameras.is_empty() {
+            vec![i18n::t().menu_no_cameras.into()]
+        } else {
+            self.cameras.iter().map(|(_, title)| title.clone()).collect()
+        }
+    }
+
+    /// The action buttons with the shown camera's values as the controls have them now.
+    fn actions_now(&self) -> Actions {
+        let mut a = self.actions.clone();
+        if let Some(v) = a.per_cam.get_mut(self.action_cam) {
+            *v = (self.text(ID_ACTION_URL), self.text(ID_ACTION_LABEL), self.checked(ID_ACTION_CONFIRM));
+        }
+        a
+    }
+
+    /// The action controls show another camera.
+    pub fn switch_action_camera(&mut self) {
+        let new = self.sel(ID_ACTION_FOR);
+        if new == self.action_cam {
+            return;
+        }
+        self.actions = self.actions_now();
+        self.action_cam = new;
+        self.show_action();
+    }
+
+    /// Fills the action controls from the shown camera's values.
+    fn show_action(&self) {
+        let (url, label, confirm) = self.actions.per_cam.get(self.action_cam).cloned().unwrap_or_else(|| (String::new(), String::new(), true));
+        unsafe {
+            let _ = SetWindowTextW(self.item(ID_ACTION_URL), &wide(&url));
+            let _ = SetWindowTextW(self.item(ID_ACTION_LABEL), &wide(&label));
+        }
+        self.set_checked(ID_ACTION_CONFIRM, confirm);
+        self.update_enabled();
+    }
+
+    /// Before saving: a URL typed for any camera that is not valid stops it. The Actions tab
+    /// then shows that camera, the reason and the URL selected; `false` = do not save.
+    pub fn check_actions(&mut self, saved: &Config) -> bool {
+        let Some(bad) = self.actions_now().first_bad(saved, &self.cameras) else { return true };
+        self.set_page(4);
+        unsafe {
+            let _ = SendMessageW(self.item(ID_ACTION_FOR), CB_SETCURSEL, WPARAM(bad), LPARAM(0));
+        }
+        self.switch_action_camera();
+        let url = self.item(ID_ACTION_URL);
+        unsafe {
+            let _ = SetFocus(url);
+            let _ = SendMessageW(url, EM_SETSEL, WPARAM(0), LPARAM(-1));
+        }
+        false
+    }
+
     pub fn preview_camera(&self) -> Option<usize> {
         (self.real_cameras > 0).then(|| self.sel(ID_PREV_CAM))
     }
@@ -1005,6 +1160,8 @@ impl Settings {
         c.zones = self.zones.iter().zip(self.list_checks(ID_ZONES, self.zones.len())).filter(|(_, b)| *b).map(|(z, _)| z.clone()).collect();
         c.ignore_stationary = self.checked(ID_STATIONARY);
         c.min_score = self.pos(ID_MINSCORE) as f32 / 100.0;
+        // The action controls show one camera; the others are as they were when last shown.
+        self.actions_now().apply(&mut c, &self.cameras);
 
         let mon = self.sel(ID_MONITOR);
         c.monitor = if mon == 0 || mon > self.monitors { "primary".into() } else { mon.to_string() };
@@ -1068,6 +1225,16 @@ impl Settings {
                 let _ = EnableWindow(self.item(id), mqtt);
             }
             let _ = EnableWindow(self.item(ID_AUTOW), auto);
+            // Without cameras there is nothing to set an action for.
+            for id in [ID_ACTION_FOR, ID_ACTION_URL, ID_ACTION_LABEL, ID_ACTION_CONFIRM] {
+                let _ = EnableWindow(self.item(id), !self.cameras.is_empty());
+            }
+        }
+        let err = if valid_url(&self.text(ID_ACTION_URL)) { "" } else { i18n::t().action_bad_url };
+        if self.text(ID_ACTION_ERR) != err {
+            unsafe {
+                let _ = SetWindowTextW(self.item(ID_ACTION_ERR), &wide(err));
+            }
         }
     }
 
@@ -1201,5 +1368,77 @@ mod tests {
         let o = o.with_checks(0, &names(&["person", "car"]), &labels());
         o.apply(&mut c, &cams());
         assert_eq!(c.labels, names(&["person", "car"]));
+    }
+
+    fn act(url: &str, label: &str, confirm: bool) -> (String, String, bool) {
+        (url.to_string(), label.to_string(), confirm)
+    }
+
+    #[test]
+    fn actions_roundtrip_through_the_store() {
+        let c = Config::from_ini(&IniDoc::parse(
+            "[camera.Gate]\naction_url = http://h/api/webhook/a\naction_label = Open\naction_confirm = false\n[camera.yard]\nlabels = dog\n",
+        ));
+        let a = Actions::from_config(&c, &cams());
+        // The section's name in any case; a camera without values: no URL, confirmation on.
+        assert_eq!(a.per_cam, [act("http://h/api/webhook/a", "Open", false), act("", "", true)]);
+        let mut back = c.clone();
+        a.apply(&mut back, &cams());
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn empty_url_removes_the_button() {
+        let mut c = Config::from_ini(&IniDoc::parse("[camera.gate]\naction_url = http://h/x\naction_label = Gate\n"));
+        let mut a = Actions::from_config(&c, &cams());
+        a.per_cam[0].0 = "  ".into();
+        a.apply(&mut c, &cams());
+        assert_eq!(c.action_for("gate"), None);
+        // The label stays for when a URL comes back.
+        assert_eq!(c.camera("gate").unwrap().action_label.as_deref(), Some("Gate"));
+    }
+
+    #[test]
+    fn a_camera_without_values_gets_no_section() {
+        let mut doc = IniDoc::parse("[trigger]\nlabels = person\n");
+        let mut c = Config::from_ini(&doc);
+        let mut a = Actions::from_config(&c, &cams());
+        a.per_cam[1] = act(" http://h/api/webhook/y ", " Light ", true);
+        a.apply(&mut c, &cams());
+        crate::config::write_all(&c, &mut doc);
+        assert!(!doc.sections().iter().any(|s| s == "camera.gate"), "{}", doc.to_text());
+        let back = Config::from_ini(&doc);
+        assert_eq!(back.action_for("yard"), Some(("http://h/api/webhook/y", Some("Light"), true)), "trimmed");
+        assert_eq!(doc.get("camera.yard", "action_confirm"), None, "the default is not written");
+    }
+
+    #[test]
+    fn an_invalid_url_is_not_saved() {
+        let saved = Config::from_ini(&IniDoc::parse("[camera.gate]\naction_url = http://h/old\n"));
+        let mut a = Actions::from_config(&saved, &cams());
+        a.per_cam[0] = act("homeassistant.local/api/webhook/x", "Gate", true);
+        a.per_cam[1] = act("ftp://h/x", "", true);
+        let mut c = saved.clone();
+        a.apply(&mut c, &cams());
+        // The old URL stays (none for yard); the rest of the camera's values are taken.
+        assert_eq!(c.action_for("gate"), Some(("http://h/old", Some("Gate"), true)));
+        assert_eq!(c.action_for("yard"), None);
+        assert_eq!(a.first_bad(&saved, &cams()), Some(0));
+        a.per_cam[0].0 = "https://h/new".into();
+        assert_eq!(a.first_bad(&saved, &cams()), Some(1));
+        a.per_cam[1].0.clear();
+        assert_eq!(a.first_bad(&saved, &cams()), None);
+        // A bad URL already in the file does not stop saving the rest.
+        let odd = Config::from_ini(&IniDoc::parse("[camera.gate]\naction_url = http://h/a b\n"));
+        assert_eq!(Actions::from_config(&odd, &cams()).first_bad(&odd, &cams()), None);
+    }
+
+    #[test]
+    fn typed_actions_follow_their_camera_into_a_new_list() {
+        let c = Config::from_ini(&IniDoc::parse("[camera.drive]\naction_url = http://h/d\n"));
+        let typed = Actions { per_cam: vec![act("http://h/g", "Gate", false), act("bad url", "", true)] };
+        let new = vec![("drive".to_string(), "Drive".to_string()), ("Yard".to_string(), "Yard".to_string())];
+        let a = typed.for_cameras(&cams(), &new, &c);
+        assert_eq!(a.per_cam, [act("http://h/d", "", true), act("bad url", "", true)]);
     }
 }

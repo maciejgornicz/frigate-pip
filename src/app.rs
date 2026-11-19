@@ -1121,11 +1121,14 @@ impl App {
         let Some(s) = &self.settings else { return };
         match id {
             x if x == IDOK.0 => {
-                self.apply_settings();
-                self.close_settings();
+                if self.apply_settings() {
+                    self.close_settings();
+                }
             }
             x if x == IDCANCEL.0 => self.close_settings(),
-            settings::ID_APPLY => self.apply_settings(),
+            settings::ID_APPLY => {
+                self.apply_settings();
+            }
             settings::ID_HELP => open_url(&settings::help_url()),
             settings::ID_SUPPORT => open_url(crate::util::SPONSOR_URL),
             settings::ID_UPDATE => {
@@ -1152,6 +1155,12 @@ impl App {
             settings::ID_LABELS_FOR if code == CBN_SELCHANGE => {
                 if let Some(s) = self.settings.as_mut() {
                     s.switch_scope();
+                }
+                self.settings_changed();
+            }
+            settings::ID_ACTION_FOR if code == CBN_SELCHANGE => {
+                if let Some(s) = self.settings.as_mut() {
+                    s.switch_action_camera();
                 }
                 self.settings_changed();
             }
@@ -1208,8 +1217,13 @@ impl App {
         }
     }
 
-    fn apply_settings(&mut self) {
-        let Some(s) = &self.settings else { return };
+    /// Saves the settings window's values; `false` = nothing saved (an action URL is not valid:
+    /// the window shows which).
+    fn apply_settings(&mut self) -> bool {
+        let Some(s) = self.settings.as_mut() else { return false };
+        if !s.check_actions(&self.cfg) {
+            return false;
+        }
         let (draft, autostart) = s.read(&self.cfg);
         if autostart != is_autostart() {
             set_autostart(autostart);
@@ -1221,6 +1235,7 @@ impl App {
         self.view = None;
         self.apply(draft);
         self.refresh_view(&old);
+        true
     }
 
     /// Closes the settings window; the unsaved draft no longer applies.

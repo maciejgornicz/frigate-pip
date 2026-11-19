@@ -60,8 +60,10 @@ pub fn choose_stream(cfg: &Config, info: Option<&CameraInfo>, camera: &str, phys
 /// plus those from the settings (so nothing is lost while Frigate is unreachable).
 pub fn choices(cams: &[CameraInfo], cfg: &Config) -> (Vec<(String, String)>, Vec<String>, Vec<String>) {
     let mut cameras: Vec<(String, String)> = cams.iter().map(|c| (c.name.clone(), c.title.clone())).collect();
-    // Cameras named in the settings: in the camera filter, and those with an object list.
-    let mut listed: Vec<(&String, &crate::config::CamOverride)> = cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty()).collect();
+    // Cameras named in the settings: in the camera filter, and those with an object list or
+    // an action button.
+    let mut listed: Vec<(&String, &crate::config::CamOverride)> =
+        cfg.overrides.iter().filter(|(_, o)| !o.labels.is_empty() || o.action_url.is_some()).collect();
     listed.sort_by_key(|(n, _)| n.to_ascii_lowercase());
     let named = cfg.cameras.iter().map(|c| (c.clone(), c.clone()));
     for (c, title) in named.chain(listed.into_iter().map(|(n, o)| (n.clone(), o.name.clone().unwrap_or_else(|| n.clone())))) {
@@ -371,6 +373,21 @@ mod tests {
         let gate = CameraInfo { name: "gate".into(), title: "Gate".into(), main: None, sub: None, aspect: 1.78, labels: vec![], zones: vec![] };
         let (cameras, _, _) = choices(&[gate], &cfg);
         assert_eq!(cameras, [pair("gate", "Gate"), pair("drive", "drive"), pair("yard", "Yard")]);
+    }
+
+    #[test]
+    fn choices_offer_cameras_with_an_action_while_frigate_is_away() {
+        let cfg = Config::from_ini(&crate::config::IniDoc::parse(
+            "[camera.gate]
+name = Gate
+action_url = http://h/api/webhook/x
+[camera.drive]
+action_label = Drive
+",
+        ));
+        // An action URL keeps the camera editable; a label alone is no button.
+        let (cameras, _, _) = choices(&[], &cfg);
+        assert_eq!(cameras, [("gate".to_string(), "Gate".to_string())]);
     }
 
     #[test]
