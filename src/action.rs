@@ -6,7 +6,8 @@ use std::io;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-const ARMED_FOR: Duration = Duration::from_secs(3);
+/// How long a first click (or key press) waits for the confirming second one.
+pub const ARMED_FOR: Duration = Duration::from_secs(3);
 /// A confirming click this soon after arming is the second half of a double-click.
 const CONFIRM_AFTER: Duration = Duration::from_millis(400);
 const RESULT_FOR: Duration = Duration::from_secs(2);
@@ -158,6 +159,24 @@ fn slot(buttons: &Buttons, n: usize) -> Option<&Button> {
 
 fn slot_mut(buttons: &mut Buttons, n: usize) -> Option<&mut Button> {
     buttons.get_mut(n.checked_sub(1)?)?.as_mut()
+}
+
+/// Each action's confirmation setting by number (`[n - 1]` is action `n`), `None` for the
+/// numbers without a URL: what `refresh` takes, from `Config::actions_for`.
+pub fn confirms(actions: &[crate::config::ActionView]) -> [Option<bool>; crate::config::ACTIONS] {
+    let mut confirm = [None; crate::config::ACTIONS];
+    for a in actions {
+        if let Some(c) = a.n.checked_sub(1).and_then(|i| confirm.get_mut(i)) {
+            *c = Some(a.confirm);
+        }
+    }
+    confirm
+}
+
+/// The actions' labels as a window shows them, (number, label or the default one), in the order
+/// given (number order from `Config::actions_for`): what `shown` takes.
+pub fn labels(actions: &[crate::config::ActionView]) -> Vec<(usize, String)> {
+    actions.iter().map(|a| (a.n, label_or_default(a.label))).collect()
 }
 
 /// Matches a window's buttons to its actions: `confirm[n - 1]` is action `n`'s confirmation
@@ -320,6 +339,27 @@ pub fn spawn(url: String, camera: String, n: usize, done: impl FnOnce(bool) + Se
     }
 }
 
+/// Sends the request `press` gave `ticket` for, for action `n` of `camera`, on its own thread;
+/// `done` gets the result. With no URL (the settings lost it meanwhile) or no thread, the ticket
+/// is finished as failed at once (`done` is never called), so the button never waits for a
+/// result that cannot come.
+#[allow(clippy::too_many_arguments)]
+pub fn send_or_fail(
+    buttons: &mut Buttons,
+    ticket: u32,
+    url: Option<String>,
+    camera: String,
+    n: usize,
+    done: impl FnOnce(bool) + Send + 'static,
+    now: Instant,
+) {
+    if !url.is_some_and(|url| spawn(url, camera, n, done)) {
+        if let Some(b) = slot_mut(buttons, n) {
+            b.finished(ticket, false, now);
+        }
+    }
+}
+
 /// The pills' margin to the window edges (and to a control beside them), their padding and the
 /// gap between two pills, in unscaled pixels.
 const PILL_MARGIN: f32 = 8.0;
@@ -438,6 +478,43 @@ mod tests {
 
     fn ms(v: u64) -> Duration {
         Duration::from_millis(v)
+    }
+
+    #[test]
+    fn confirmations_and_labels_by_number() {
+        use crate::config::ActionView;
+        crate::i18n::set(crate::i18n::Lang::En);
+        let views = [ActionView { n: 1, label: Some("Gate"), confirm: true }, ActionView { n: 3, label: Some("  "), confirm: false }];
+        assert_eq!(confirms(&views), [Some(true), None, Some(false), None]);
+        assert_eq!(labels(&views), [(1, "Gate".to_string()), (3, "Action".to_string())]);
+        assert_eq!(confirms(&[ActionView { n: 0, label: None, confirm: true }, ActionView { n: 9, label: None, confirm: true }]), [None; 4]);
+        assert!(labels(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_send_without_a_url_fails_at_once() {
+        let t = Instant::now();
+        let mut b: Buttons = Default::default();
+        b[1] = Some(Button::new(false));
+        let ticket = press(&mut b, 2, t).unwrap();
+        let (tx, rx) = mpsc::channel();
+        send_or_fail(&mut b, ticket, None, "gate".into(), 2, move |ok| tx.send(ok).unwrap(), t);
+        assert_eq!(b[1].as_ref().unwrap().look(t), Look::Failed, "not left sending");
+        assert!(rx.try_recv().is_err(), "nothing was sent");
+    }
+
+    #[test]
+    fn a_send_reports_its_result() {
+        let (url, server) = serve_once("204 No Content");
+        let t = Instant::now();
+        let mut b: Buttons = Default::default();
+        b[0] = Some(Button::new(false));
+        let ticket = press(&mut b, 1, t).unwrap();
+        let (tx, rx) = mpsc::channel();
+        send_or_fail(&mut b, ticket, Some(url), "gate".into(), 1, move |ok| tx.send(ok).unwrap(), t);
+        assert_eq!(b[0].as_ref().unwrap().look(t), Look::Sending);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(15)), Ok(true));
+        received(server);
     }
 
     #[test]

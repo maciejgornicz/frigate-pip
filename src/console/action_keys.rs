@@ -4,27 +4,28 @@
 use super::Ev;
 use crate::action::{self, Buttons, Look, Shown};
 use crate::config::{Config, ACTIONS};
+use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-/// How long the choice among several actions stays open after `a`, and after a digit armed one
-/// (as long as the arming lasts, so that the same digit again confirms it).
-const CHOICE_FOR: Duration = Duration::from_secs(3);
+/// How long the choice among several actions stays open after `a`, and after a digit armed one:
+/// as long as the arming lasts, so that the same digit again confirms it.
+const CHOICE_FOR: Duration = action::ARMED_FOR;
+/// A key byte this soon after the previous one of the same key is the keyboard's auto-repeat.
+const REPEAT_GAP: Duration = Duration::from_millis(200);
+/// A key press counts only when no byte of the same key follows this soon. Auto-repeat starts
+/// only after a delay (often 250–660 ms), so its first byte looks like a second press; the
+/// bytes after it come every 25–100 ms and show that the key is held.
+const SETTLE: Duration = Duration::from_millis(150);
 
 /// The camera's actions with a URL as a window shows them: (number, label), in number order.
 pub fn labels(cfg: &Config, camera: &str) -> Vec<(usize, String)> {
-    cfg.actions_for(camera).into_iter().map(|a| (a.n, action::label_or_default(a.label))).collect()
+    action::labels(&cfg.actions_for(camera))
 }
 
 /// The window's buttons follow the camera's settings, number by number (see `action::refresh`).
 pub fn refresh(buttons: &mut Buttons, cfg: &Config, camera: &str) {
-    let mut confirm = [None; ACTIONS];
-    for a in cfg.actions_for(camera) {
-        if let Some(c) = confirm.get_mut(a.n.wrapping_sub(1)) {
-            *c = Some(a.confirm);
-        }
-    }
-    action::refresh(buttons, &confirm);
+    action::refresh(buttons, &action::confirms(&cfg.actions_for(camera)));
 }
 
 /// The numbers of the actions the window has a button for.
@@ -50,11 +51,7 @@ pub fn press(buttons: &mut Buttons, n: usize, cfg: &Config, camera: &str, tx: &S
         let done = move |ok: bool| {
             let _ = tx.send(Ev::ActionDone(ticket, ok));
         };
-        if !url.is_some_and(|url| action::spawn(url, camera.to_string(), n, done)) {
-            if let Some(b) = buttons[n - 1].as_mut() {
-                b.finished(ticket, false, now);
-            }
-        }
+        action::send_or_fail(buttons, ticket, url, camera.to_string(), n, done, now);
     }
     Some(buttons.get(n.checked_sub(1)?)?.as_ref()?.look(now))
 }
@@ -82,15 +79,67 @@ struct Open {
     until: Instant,
 }
 
+/// What a key press that counts does (see `Picker::key`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Key {
+    /// `a`: see `Picker::key_a`.
+    A,
+    /// A digit during the choice: press action `n` of window `win`, then `Picker::pressed`.
+    Digit(u64, usize),
+}
+
 /// The `a` key without a mouse. With one action `a` presses it (with confirmation: `a`, `a`).
 /// With several `a` opens a choice for 3 s: the caption lists the actions with their numbers,
 /// and a listed digit presses that action instead of showing a camera.
+///
+/// A terminal sends no key-up, so a held key would arm and then confirm an action by itself.
+/// Key bytes therefore go through `key`: a byte less than `REPEAT_GAP` after the previous one of
+/// that key is ignored, and a press counts (`settled`) only when no byte of that key follows
+/// within `SETTLE`.
 #[derive(Default)]
 pub struct Picker {
     open: Option<Open>,
+    /// When each key last sent a byte, counted or not.
+    last: HashMap<u8, Instant>,
+    /// Presses waiting for `SETTLE`: (key, when, what they do).
+    pending: Vec<(u8, Instant, Key)>,
 }
 
 impl Picker {
+    /// A key byte. `false` = not for the actions: neither `a` nor a digit the open choice lists
+    /// (a digit then shows a camera at once). `true` = taken; what it does comes from `settled`.
+    pub fn key(&mut self, byte: u8, now: Instant) -> bool {
+        let k = byte.to_ascii_lowercase();
+        let what = match k {
+            b'a' => Key::A,
+            b'1'..=b'9' => match self.digit((k - b'0') as usize, now) {
+                Some((win, n)) => Key::Digit(win, n),
+                None => return false,
+            },
+            _ => return false,
+        };
+        let repeat = self.last.insert(k, now).is_some_and(|t| now.saturating_duration_since(t) < REPEAT_GAP);
+        // A byte right after a waiting press shows that the key is held: neither counts.
+        let waiting = self.pending.len();
+        self.pending.retain(|(pk, at, _)| *pk != k || now.saturating_duration_since(*at) >= SETTLE);
+        if !repeat && self.pending.len() == waiting {
+            self.pending.push((k, now, what));
+        }
+        true
+    }
+
+    /// The presses that count by now, oldest first.
+    pub fn settled(&mut self, now: Instant) -> Vec<Key> {
+        let (done, wait): (Vec<_>, Vec<_>) = self.pending.drain(..).partition(|(_, at, _)| now.saturating_duration_since(*at) >= SETTLE);
+        self.pending = wait;
+        done.into_iter().map(|(_, _, what)| what).collect()
+    }
+
+    /// How long until the next waiting press counts, if one waits.
+    pub fn wait(&self, now: Instant) -> Option<Duration> {
+        self.pending.iter().map(|(_, at, _)| (*at + SETTLE).saturating_duration_since(now)).min()
+    }
+
     /// The choice is open for window `win`.
     pub fn choosing(&self, win: u64, now: Instant) -> bool {
         self.open.as_ref().is_some_and(|o| o.win == win && now < o.until)
@@ -112,9 +161,9 @@ impl Picker {
         }
     }
 
-    /// Digit `d`: `Some((window, n))` = press that window's action `n`, then report with
-    /// `pressed`. `None` = the digit does what it does without the choice (shows a camera):
-    /// no choice is open, or it does not list `d`.
+    /// Digit `d`: `Some((window, n))` = the open choice lists it (press that window's action
+    /// `n`). `None` = the digit does what it does without the choice (shows a camera): no choice
+    /// is open, or it does not list `d`.
     pub fn digit(&self, d: usize, now: Instant) -> Option<(u64, usize)> {
         self.open.as_ref().filter(|o| now < o.until && o.numbers.contains(&d)).map(|o| (o.win, d))
     }
@@ -223,6 +272,110 @@ mod tests {
         assert_eq!(p.digit(4, t + ms(4500)), Some((9, 4)));
         p.close();
         assert_eq!(p.digit(4, t + ms(4500)), None);
+    }
+
+    /// Feeds key bytes at the given milliseconds to a picker for one window (id 1) with one
+    /// button per number in `confirm`, running settled presses every 10 ms like the main loop.
+    /// Returns how many requests were sent and the looks at the end.
+    fn type_keys(confirm: &[bool], bytes: &[(u64, u8)], until: u64) -> (usize, Vec<Look>) {
+        let t = Instant::now();
+        let mut p = Picker::default();
+        let mut b: Buttons = Default::default();
+        for (i, c) in confirm.iter().enumerate() {
+            b[i] = Some(action::Button::new(*c));
+        }
+        let mut sent = 0;
+        let mut act = |b: &mut Buttons, p: &mut Picker, n: usize, at: Instant, digit: bool| {
+            sent += usize::from(action::press(b, n, at).is_some());
+            if digit {
+                p.pressed(b[n - 1].as_ref().is_some_and(|x| x.look(at) == Look::Armed), at);
+            }
+        };
+        let mut next = bytes.iter().peekable();
+        for now_ms in 0..=until {
+            let now = t + ms(now_ms);
+            while let Some(&&(at, byte)) = next.peek() {
+                if at != now_ms {
+                    break;
+                }
+                p.key(byte, now);
+                next.next();
+            }
+            if now_ms % 10 == 0 {
+                for k in p.settled(now) {
+                    match k {
+                        Key::A => {
+                            if let Some(n) = p.key_a(1, &numbers(&b), now) {
+                                act(&mut b, &mut p, n, now, false);
+                            }
+                        }
+                        Key::Digit(_, n) => act(&mut b, &mut p, n, now, true),
+                    }
+                }
+            }
+        }
+        let end = t + ms(until);
+        (sent, b.iter().flatten().map(|x| x.look(end)).collect())
+    }
+
+    /// Bytes of `key` from `from` to `to` ms, one every `every` ms.
+    fn held(key: u8, from: u64, to: u64, every: u64) -> Vec<(u64, u8)> {
+        (from..=to).step_by(every as usize).map(|at| (at, key)).collect()
+    }
+
+    #[test]
+    fn a_held_key_never_confirms() {
+        // Bytes every 40 ms for a second: nothing at all, not even arming.
+        assert_eq!(type_keys(&[true], &held(b'a', 0, 1000, 40), 1500), (0, vec![Look::Idle]));
+        // A real keyboard: the press, then auto-repeat after 500 ms, every 33 ms. The press arms;
+        // the first repeat, 500 ms later, must not count as the confirming press.
+        let mut bytes = vec![(0, b'a')];
+        bytes.extend(held(b'a', 500, 1500, 33));
+        assert_eq!(type_keys(&[true], &bytes, 1600), (0, vec![Look::Armed]));
+        // The same with a 250 ms delay and 10 bytes a second (the Linux console).
+        let mut bytes = vec![(0, b'a')];
+        bytes.extend(held(b'a', 250, 2000, 92));
+        assert_eq!(type_keys(&[true], &bytes, 2100).0, 0);
+        // Upper case is the same key.
+        let mut bytes = vec![(0, b'A')];
+        bytes.extend(held(b'A', 500, 1500, 33));
+        assert_eq!(type_keys(&[true], &bytes, 1600).0, 0);
+    }
+
+    #[test]
+    fn two_deliberate_presses_confirm() {
+        assert_eq!(type_keys(&[true], &[(0, b'a'), (600, b'a')], 1000), (1, vec![Look::Sending]));
+        // Without confirmation one press sends, and holding the key sends nothing more.
+        let mut bytes = vec![(0, b'a')];
+        bytes.extend(held(b'a', 500, 1500, 33));
+        assert_eq!(type_keys(&[false], &bytes, 1600).0, 1);
+    }
+
+    #[test]
+    fn a_held_digit_never_confirms_in_the_choice() {
+        let mut bytes = vec![(0, b'a'), (1000, b'1')];
+        bytes.extend(held(b'1', 1500, 2500, 33));
+        assert_eq!(type_keys(&[true, true], &bytes, 2600), (0, vec![Look::Armed, Look::Idle]));
+        // Deliberately: a, 1 arms, 1 again confirms.
+        assert_eq!(type_keys(&[true, true], &[(0, b'a'), (1000, b'1'), (1700, b'1')], 2000).0, 1);
+    }
+
+    #[test]
+    fn digits_outside_the_choice_are_not_taken() {
+        let t = Instant::now();
+        let mut p = Picker::default();
+        assert!(!p.key(b'1', t), "no choice: shows camera 1");
+        assert!(p.key(b'a', t));
+        assert_eq!(p.settled(t + ms(150)), [Key::A]);
+        p.key_a(4, &[1, 3], t + ms(150));
+        assert!(!p.key(b'2', t + ms(200)), "not listed: shows camera 2");
+        assert!(!p.key(b'7', t + ms(200)));
+        assert!(!p.key(b'x', t + ms(200)), "not a key for the actions");
+        assert!(p.key(b'3', t + ms(200)));
+        assert_eq!(p.wait(t + ms(250)), Some(ms(100)));
+        assert_eq!(p.settled(t + ms(349)), []);
+        assert_eq!(p.settled(t + ms(350)), [Key::Digit(4, 3)]);
+        assert!(!p.key(b'1', t + ms(3200)), "the choice expired: camera 1 again");
     }
 
     #[test]

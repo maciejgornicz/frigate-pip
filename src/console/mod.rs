@@ -3,7 +3,7 @@
 //! inside a terminal (Kitty graphics, Sixel or coloured half blocks) or as tmux popups.
 //! Video is decoded by the `ffmpeg` program.
 
-mod actions;
+mod action_keys;
 mod canvas;
 mod dbus;
 mod desktop;
@@ -25,6 +25,7 @@ use crate::hub::Hub;
 use crate::i18n::{self, t};
 use crate::util::Cancel;
 use crate::view::{choose_slot, choose_stream, Slot, Zoom};
+use action_keys::Key;
 use canvas::Image;
 use ffmpeg::Ffmpeg;
 use std::collections::HashMap;
@@ -719,16 +720,18 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     let rect = Rect { x: 0, y: 0, w: sw, h: sh };
     let mut last: Option<Instant> = None;
     // The camera's action buttons and the `a` key, like in the main window list (one window: 0).
-    let labels = actions::labels(cfg, camera);
+    // A viewer keeps the settings it started with: it lives for one event.
+    let labels = action_keys::labels(cfg, camera);
     let mut buttons: action::Buttons = Default::default();
-    actions::refresh(&mut buttons, cfg, camera);
-    let mut picker = actions::Picker::default();
+    action_keys::refresh(&mut buttons, cfg, camera);
+    let mut picker = action_keys::Picker::default();
     let mut shown: (Vec<Shown>, bool) = (Vec::new(), false);
     // While a button is busy this file asks the background process to leave the popup open.
     let busy_file = arg(args, "--view-lock").map(|p| tmux::busy_path(std::path::Path::new(&p)));
     let mut held = false;
     while !QUIT.load(Ordering::Relaxed) {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        let timeout = picker.wait(Instant::now()).map_or(Duration::from_millis(100), |d| d.min(Duration::from_millis(100)));
+        match rx.recv_timeout(timeout) {
             Ok(Ev::Key(b'q' | b'Q' | b'x' | b'X' | 27 | 3)) | Err(RecvTimeoutError::Disconnected) => break,
             Ok(Ev::Key(b'm' | b'M')) if cfg.camera_audio => {
                 let muted = !shared.muted.fetch_xor(true, Ordering::Relaxed);
@@ -736,18 +739,9 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
                 shared.dirty.store(true, Ordering::Relaxed);
             }
             Ok(Ev::Key(b'r' | b'R')) => shared.replay_pressed.store(true, Ordering::Relaxed),
-            Ok(Ev::Key(b'a' | b'A')) => {
-                let now = Instant::now();
-                if let Some(n) = picker.key_a(0, &actions::numbers(&buttons), now) {
-                    actions::press(&mut buttons, n, cfg, camera, &tx, now);
-                }
-            }
-            Ok(Ev::Key(k @ b'1'..=b'9')) => {
-                let now = Instant::now();
-                if let Some((_, n)) = picker.digit((k - b'0') as usize, now) {
-                    let look = actions::press(&mut buttons, n, cfg, camera, &tx, now);
-                    picker.pressed(look == Some(Look::Armed), now);
-                }
+            Ok(Ev::Key(k @ (b'a' | b'A' | b'1'..=b'9'))) => {
+                // They count once settled (see `Picker::key`); the popup has no camera keys.
+                picker.key(k, Instant::now());
             }
             Ok(Ev::ActionDone(ticket, ok)) => {
                 let now = Instant::now();
@@ -755,8 +749,21 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
             }
             _ => {}
         }
-        // The buttons' looks also change by themselves (arming and results expire).
         let now = Instant::now();
+        for key in picker.settled(now) {
+            match key {
+                Key::A => {
+                    if let Some(n) = picker.key_a(0, &action_keys::numbers(&buttons), now) {
+                        action_keys::press(&mut buttons, n, cfg, camera, &tx, now);
+                    }
+                }
+                Key::Digit(_, n) => {
+                    let look = action_keys::press(&mut buttons, n, cfg, camera, &tx, now);
+                    picker.pressed(look == Some(Look::Armed), now);
+                }
+            }
+        }
+        // The buttons' looks also change by themselves (arming and results expire).
         let view = (action::shown(&buttons, &labels, now), picker.choosing(0, now));
         if view != shown {
             shown = view;
@@ -764,9 +771,19 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         }
         let busy = action::any_busy(&buttons, now) || shown.1;
         if busy != held {
-            held = busy;
-            if let Some(f) = &busy_file {
-                let _ = if busy { std::fs::File::create(f).map(drop) } else { std::fs::remove_file(f) };
+            // Tried again on the next pass (≤ 100 ms) when it fails.
+            let done =
+                busy_file.as_ref().is_none_or(
+                    |f| {
+                        if busy {
+                            std::fs::File::create(f).is_ok()
+                        } else {
+                            std::fs::remove_file(f).is_ok() || !f.exists()
+                        }
+                    },
+                );
+            if done {
+                held = busy;
             }
         }
         if last.is_some_and(|t| t.elapsed() < out.min_interval()) || !shared.dirty.swap(false, Ordering::Relaxed) {
@@ -775,7 +792,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         let frame = shared.frame.lock().unwrap().clone();
         if let Some((frame, _)) = frame {
             let text = with_replay(&shared, with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed)));
-            let text = actions::with_actions(&text, &shown.0, shown.1);
+            let text = action_keys::with_actions(&text, &shown.0, shown.1);
             out.draw(1, rect, frame, &text, shared.live.load(Ordering::Relaxed));
             last = Some(Instant::now());
         }
@@ -853,6 +870,8 @@ struct Win {
     /// another process (`external`: a tmux popup has its own).
     actions: action::Buttons,
     external: bool,
+    /// The actions' labels (number, label), kept from the settings.
+    labels: Vec<(usize, String)>,
     /// The buttons as last shown, and whether the choice of the `a` key was open (a change
     /// draws the window again).
     action_view: (Vec<Shown>, bool),
@@ -894,7 +913,7 @@ struct App {
     hubs: HashMap<String, Arc<Hub>>,
     prebuffer_possible: bool,
     /// The `a` key's choice among several actions.
-    picker: actions::Picker,
+    picker: action_keys::Picker,
 }
 
 impl App {
@@ -922,7 +941,7 @@ impl App {
             info: Arc::default(),
             hubs: HashMap::new(),
             prebuffer_possible: false,
-            picker: actions::Picker::default(),
+            picker: action_keys::Picker::default(),
         }
     }
 
@@ -1104,7 +1123,8 @@ impl App {
         let mut last_reload = Instant::now();
         self.show_status();
         while !QUIT.load(Ordering::Relaxed) {
-            match rx.recv_timeout(Duration::from_millis(100)) {
+            let timeout = self.picker.wait(Instant::now()).map_or(Duration::from_millis(100), |d| d.min(Duration::from_millis(100)));
+            match rx.recv_timeout(timeout) {
                 Ok(Ev::Notice(n)) => self.on_notice(n),
                 Ok(Ev::Key(k)) => {
                     if !self.on_key(k) {
@@ -1126,6 +1146,7 @@ impl App {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
+            self.settled_keys();
             self.draw();
             if last_tick.elapsed() >= Duration::from_millis(500) {
                 last_tick = Instant::now();
@@ -1269,11 +1290,11 @@ impl App {
         w.shared.dirty.store(true, Ordering::Relaxed);
     }
 
-    /// Action `n` of window `i`: arms it or sends its request (see `actions::press`). Returns
+    /// Action `n` of window `i`: arms it or sends its request (see `action_keys::press`). Returns
     /// its look afterwards (`None` = the window has no such action).
     fn press_action(&mut self, i: usize, n: usize) -> Option<Look> {
         let w = &mut self.wins[i];
-        let look = actions::press(&mut w.actions, n, &self.cfg, &w.camera, &self.tx, Instant::now());
+        let look = action_keys::press(&mut w.actions, n, &self.cfg, &w.camera, &self.tx, Instant::now());
         w.shared.dirty.store(true, Ordering::Relaxed);
         look
     }
@@ -1365,7 +1386,14 @@ impl App {
             return;
         }
         // Pinned windows are never replaced.
-        let states: Vec<(bool, bool)> = self.wins.iter().map(|w| (false, w.pinned)).collect();
+        let states: Vec<(bool, bool)> = self
+            .wins
+            .iter()
+            .map(|w| {
+                let busy = action::any_busy(&w.actions, now) || self.picker.choosing(w.id, now) || self.out.kept_open(w.id);
+                crate::view::slot_state(false, w.pinned, busy)
+            })
+            .collect();
         let max_windows = self.out.max_windows().map_or(self.cfg.max_popups, |m| m.min(self.cfg.max_popups));
         let replace_at = match choose_slot(&states, max_windows, self.cfg.replace) {
             Slot::New => None,
@@ -1450,10 +1478,12 @@ impl App {
             own,
             actions: Default::default(),
             external,
+            labels: Vec::new(),
             action_view: (Vec::new(), false),
         };
         if !external {
-            actions::refresh(&mut win.actions, &self.cfg, &win.camera);
+            action_keys::refresh(&mut win.actions, &self.cfg, &win.camera);
+            win.labels = action_keys::labels(&self.cfg, &win.camera);
         }
         match replace_at {
             Some(i) => self.wins.insert(i, win),
@@ -1538,7 +1568,7 @@ impl App {
             }
             // The action buttons also change by themselves (arming and results expire): shown
             // within a pass of the loop (≤ 100 ms), as pills or in the caption.
-            let view = (action::shown(&w.actions, &actions::labels(&self.cfg, &w.camera), now), self.picker.choosing(w.id, now));
+            let view = (action::shown(&w.actions, &w.labels, now), self.picker.choosing(w.id, now));
             if view != w.action_view {
                 w.action_view = view;
                 self.out.set_actions(w.id, &w.action_view.0);
@@ -1568,7 +1598,7 @@ impl App {
                 },
             );
             // Desktop windows show pills instead (also without a caption).
-            let caption = if buttons { caption } else { actions::with_actions(&caption, &w.action_view.0, w.action_view.1) };
+            let caption = if buttons { caption } else { action_keys::with_actions(&caption, &w.action_view.0, w.action_view.1) };
             self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
             // Each time: a window that did not fit for a while comes back as a new one.
             self.out.set_zoomed(w.id, !w.zoom.is_full());
@@ -1690,39 +1720,61 @@ impl App {
                     }
                 }
             }
-            b'a' | b'A' => self.key_a(),
-            // During the `a` key's choice a listed digit presses that action.
-            b'1'..=b'9' if self.choose_action((k - b'0') as usize) => {}
-            b'1'..=b'9' => {
-                if let Some(c) = self.cameras.get((k - b'1') as usize) {
-                    let name = c.name.clone();
-                    self.test(&name);
-                }
-            }
+            b'a' | b'A' | b'1'..=b'9' => self.action_or_camera_key(k),
             _ => {}
         }
         true
     }
 
+    /// `a`, and a digit the `a` key's choice lists, count once settled (see `Picker::key` and
+    /// `settled_keys`); any other digit shows a camera at once.
+    fn action_or_camera_key(&mut self, k: u8) {
+        let taken = self.picker.key(k, Instant::now());
+        if !taken {
+            self.show_camera(k);
+        }
+    }
+
+    /// Digit key `k` (`'1'`–`'9'`): shows that camera.
+    fn show_camera(&mut self, k: u8) {
+        if let Some(c) = k.checked_sub(b'1').and_then(|i| self.cameras.get(i as usize)) {
+            let name = c.name.clone();
+            self.test(&name);
+        }
+    }
+
+    /// The action key presses that count by now (see `Picker::key`).
+    fn settled_keys(&mut self) {
+        for key in self.picker.settled(Instant::now()) {
+            match key {
+                Key::A => self.key_a(),
+                Key::Digit(win, n) => {
+                    if !self.choose_action(win, n) {
+                        self.show_camera(b'0' + n as u8);
+                    }
+                }
+            }
+        }
+    }
+
     /// The `a` key: the newest window on the screen whose camera has actions — one only, so that
     /// with two gates one key never opens both. One action is pressed at once, several open the
-    /// choice (see `actions::Picker`).
+    /// choice (see `action_keys::Picker`).
     fn key_a(&mut self) {
         let wins: Vec<(u64, bool, bool)> = self.wins.iter().map(|w| (w.id, w.actions.iter().any(Option::is_some), w.rect.is_some())).collect();
-        let Some(id) = actions::a_target(&wins) else { return };
+        let Some(id) = action_keys::a_target(&wins) else { return };
         let Some(i) = self.wins.iter().position(|w| w.id == id) else { return };
-        let numbers = actions::numbers(&self.wins[i].actions);
+        let numbers = action_keys::numbers(&self.wins[i].actions);
         if let Some(n) = self.picker.key_a(self.wins[i].id, &numbers, Instant::now()) {
             self.press_action(i, n);
         }
     }
 
-    /// Digit `d` while the `a` key's choice is open: presses that action. `false` = the digit
-    /// is not for the choice (it shows a camera), also when the listed action has gone meanwhile
-    /// (the settings were saved without it).
-    fn choose_action(&mut self, d: usize) -> bool {
+    /// A digit of the `a` key's choice: presses action `n` of window `id`. `false` = the digit
+    /// shows a camera after all: the window has closed, or the action has gone meanwhile (the
+    /// settings were saved without it).
+    fn choose_action(&mut self, id: u64, n: usize) -> bool {
         let now = Instant::now();
-        let Some((id, n)) = self.picker.digit(d, now) else { return false };
         let Some(i) = self.wins.iter().position(|w| w.id == id) else {
             self.picker.close();
             return false;
@@ -1795,7 +1847,8 @@ impl App {
         self.out.configure(&self.cfg);
         // The action buttons follow the new settings, number by number (the next draw shows them).
         for w in self.wins.iter_mut().filter(|w| !w.external) {
-            actions::refresh(&mut w.actions, &self.cfg, &w.camera);
+            action_keys::refresh(&mut w.actions, &self.cfg, &w.camera);
+            w.labels = action_keys::labels(&self.cfg, &w.camera);
         }
         self.update_hubs();
         // The listener also applies the filters (cameras, objects, zones…).

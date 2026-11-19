@@ -16,6 +16,7 @@ pub enum Slot {
 
 /// Where to show a new event. `states`: (closing, pinned), oldest first.
 pub fn choose_slot(states: &[(bool, bool)], max: usize, replace: bool) -> Slot {
+    // `states[i].1` is `kept` (see `slot_state`): such a window is never replaced.
     if states.iter().filter(|s| !s.0).count() < max {
         return Slot::New;
     }
@@ -26,6 +27,14 @@ pub fn choose_slot(states: &[(bool, bool)], max: usize, replace: bool) -> Slot {
         Some(i) => Slot::Replace(i),
         None => Slot::Skip,
     }
+}
+
+/// A window's state for `choose_slot`: (closing, kept). A window is kept, never replaced by a new
+/// event, while pinned or busy with an action button (armed, sending or showing a result, or
+/// the `a` key's choice open for it): replacing it would close it in the middle of the request
+/// or of the confirmation.
+pub fn slot_state(closing: bool, pinned: bool, action_busy: bool) -> (bool, bool) {
+    (closing, pinned || action_busy)
 }
 
 /// Caption on the picture: camera, object, sub label, confidence and time.
@@ -407,5 +416,16 @@ action2_confirm = false
         // closing windows take no slot and are not replaced
         assert_eq!(choose_slot(&[(true, false), (false, false)], 2, true), Slot::New);
         assert_eq!(choose_slot(&[(true, false), (false, false), (false, false)], 2, true), Slot::Replace(1));
+    }
+
+    #[test]
+    fn a_window_busy_with_an_action_is_kept_like_a_pinned_one() {
+        assert_eq!(slot_state(false, false, true), (false, true));
+        assert_eq!(slot_state(true, false, false), (true, false));
+        // The oldest window is sending a request: the next one goes instead.
+        let states = [slot_state(false, false, true), slot_state(false, false, false)];
+        assert_eq!(choose_slot(&states, 2, true), Slot::Replace(1));
+        // The single tmux popup is busy: the new event is skipped, not shown over it.
+        assert_eq!(choose_slot(&[slot_state(false, false, true)], 1, true), Slot::Skip);
     }
 }

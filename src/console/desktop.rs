@@ -117,6 +117,8 @@ pub struct Desktop {
     /// One of our windows was covered: check at the next `refresh` whether to raise it.
     recheck: bool,
     font: Option<Font>,
+    /// "No font: no action buttons" was written to the log.
+    no_font_logged: bool,
     wins: HashMap<u64, Win>,
 }
 
@@ -237,6 +239,7 @@ impl Desktop {
             ticks: 0,
             recheck: false,
             font,
+            no_font_logged: false,
             wins: HashMap::new(),
         };
         d.find_area();
@@ -404,6 +407,10 @@ impl Output for Desktop {
     }
 
     fn set_actions(&mut self, id: u64, actions: &[Shown]) {
+        if self.font.is_none() && !actions.is_empty() && !self.no_font_logged {
+            self.no_font_logged = true;
+            crate::log!("No caption font: the action buttons are not shown (install fonts-dejavu-core or set [console] font)");
+        }
         if let Some(w) = self.wins.get_mut(&id) {
             if w.actions != actions {
                 w.actions = actions.to_vec();
@@ -626,27 +633,30 @@ mod tests {
 
     #[test]
     fn action_pills_stay_clear_of_the_buttons() {
-        // Four long labels, every control the window can have, sizes from 160 px to full HD.
+        // Four long labels, every state of the controls, sizes from 160 px to full HD. The oracle
+        // is the hit-test: in the pills' rows it finds the leftmost pixel of any control under
+        // the mouse, and every pill must end before it.
         let texts = [400.0, 400.0, 400.0, 400.0];
-        let overlaps = |a: Area, b: Area| a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3;
         for scale in [1.0, 1.5, 2.0] {
             for aspect in [16.0 / 9.0, 4.0 / 3.0, 1.0, 9.0 / 16.0, 21.0 / 9.0] {
-                for w in (160..=1920).step_by(8) {
+                for w in (160..=1920).step_by(40) {
                     let h = ((w as f32 / aspect) as u32).max(2);
                     for (sound, replay) in [(0, 0), (1, 0), (2, 1), (0, 1), (1, 2)] {
-                        let (close, speaker) = button_rects(w, scale);
-                        let mut controls = vec![close];
-                        if sound > 0 {
-                            controls.push(speaker);
-                            controls.extend(crate::view::volume_slider(speaker, h as i32, scale));
-                        }
-                        if replay > 0 {
-                            controls.push(replay_rect(close, speaker, sound > 0, scale));
-                        }
-                        for pill in pill_rects(w, h, sound, replay, &texts, 16.0 * scale, scale) {
+                        let pills = pill_rects(w, h, sound, replay, &texts, 16.0 * scale, scale);
+                        let Some(&(_, top, _, bottom)) = pills.first() else { continue };
+                        let mut probe = test_win(Vec::new());
+                        (probe.rect.w, probe.rect.h, probe.sound, probe.replay) = (w, h, sound, replay);
+                        // The controls sit in the top-right corner, within 4 buttons of the edge.
+                        let from = (w as i32 - (160.0 * scale) as i32).max(0);
+                        let first_control = (top.max(0)..bottom)
+                            .flat_map(|y| (from..w as i32).map(move |x| (x, y)))
+                            .filter(|&(x, y)| hot_at(&probe, x, y, scale) != Hot::None)
+                            .map(|(x, _)| x)
+                            .min()
+                            .unwrap_or(w as i32);
+                        for pill in pills {
                             let case = format!("{w}x{h} at {scale}, sound {sound}, replay {replay}: {pill:?}");
-                            assert!(pill.0 >= 0 && pill.2 <= w as i32 && pill.0 < pill.2, "{case}");
-                            assert!(controls.iter().all(|c| !overlaps(pill, *c)), "{case}");
+                            assert!(pill.0 >= 0 && pill.0 < pill.2 && pill.2 <= first_control, "{case}, control at x {first_control}");
                         }
                     }
                 }

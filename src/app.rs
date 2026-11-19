@@ -961,7 +961,13 @@ impl App {
         }
         let (max_popups, replace) = (self.vcfg().max_popups, self.vcfg().replace);
         let slots: Vec<usize> = (0..self.popups.len()).filter(|&i| !self.popups[i].preview).collect();
-        let states: Vec<(bool, bool)> = slots.iter().map(|&i| (self.popups[i].closing, self.popups[i].pinned)).collect();
+        let states: Vec<(bool, bool)> = slots
+            .iter()
+            .map(|&i| {
+                let p = &self.popups[i];
+                crate::view::slot_state(p.closing, p.pinned, action::any_busy(&p.actions, now))
+            })
+            .collect();
         let place = match choose_slot(&states, max_popups, replace) {
             Slot::New => None,
             Slot::Skip => {
@@ -1509,13 +1515,6 @@ impl App {
         }
     }
 
-    /// The camera's actions with a URL as a window shows them: (number, label, ask for
-    /// confirmation), in number order.
-    fn actions_of(&self, camera: &str, preview: bool) -> Vec<(usize, String, bool)> {
-        let views = self.action_cfg(preview).actions_for(camera);
-        views.into_iter().map(|a| (a.n, action::label_or_default(a.label), a.confirm)).collect()
-    }
-
     /// Where the window's action buttons are: (number, client pixels), for those it has and
     /// that were drawn.
     fn action_rects(&mut self, hwnd: HWND) -> Vec<action::Placed> {
@@ -1540,8 +1539,7 @@ impl App {
             }
             return;
         };
-        let labels: Vec<(usize, String)> =
-            self.actions_of(&self.popups[i].camera, self.popups[i].preview).into_iter().map(|(n, label, _)| (n, label)).collect();
+        let labels = action::labels(&self.action_cfg(self.popups[i].preview).actions_for(&self.popups[i].camera));
         let p = &self.popups[i];
         let now = Instant::now();
         p.shared.set_actions(action::shown(&p.actions, &labels, now));
@@ -1563,10 +1561,7 @@ impl App {
     /// The window's action buttons follow its settings, number by number (see `action::refresh`).
     fn refresh_window_actions(&mut self, hwnd: HWND) {
         let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd) else { return };
-        let mut confirm = [None; config::ACTIONS];
-        for (n, _, c) in self.actions_of(&self.popups[i].camera, self.popups[i].preview) {
-            confirm[n - 1] = Some(c);
-        }
+        let confirm = action::confirms(&self.action_cfg(self.popups[i].preview).actions_for(&self.popups[i].camera));
         action::refresh(&mut self.popups[i].actions, &confirm);
         self.sync_window_actions(hwnd);
     }
@@ -1589,10 +1584,11 @@ impl App {
         let p = &mut self.popups[i];
         let now = Instant::now();
         if let Some(ticket) = action::press(&mut p.actions, n, now) {
-            // `press` only sends a button that exists, and `n` came from a drawn pill (1 to ACTIONS).
-            let Some(b) = p.actions[n - 1].as_mut() else { return };
             if p.preview {
-                b.finished(ticket, true, now);
+                // `press` only sends a button that exists, and `n` came from a drawn pill (1 to ACTIONS).
+                if let Some(b) = p.actions[n - 1].as_mut() {
+                    b.finished(ticket, true, now);
+                }
                 crate::log!("action {} {n}: preview, not sent", p.camera);
             } else {
                 // Only here does the URL leave the settings, straight to the request's thread.
@@ -1600,9 +1596,7 @@ impl App {
                 let done = move |ok: bool| unsafe {
                     let _ = PostMessageW(HWND(main as _), WM_APP_ACTION, WPARAM(ticket as usize), LPARAM(ok as isize));
                 };
-                if !url.is_some_and(|url| action::spawn(url, p.camera.clone(), n, done)) {
-                    b.finished(ticket, false, now);
-                }
+                action::send_or_fail(&mut p.actions, ticket, url, p.camera.clone(), n, done, now);
             }
         }
         self.sync_window_actions(hwnd);

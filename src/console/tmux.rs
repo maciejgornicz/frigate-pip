@@ -42,7 +42,7 @@ fn quote(s: &str) -> String {
 }
 
 /// `true` if another process (the viewer) holds the lock on `path`.
-fn lock_held(path: &PathBuf) -> bool {
+fn lock_held(path: &Path) -> bool {
     let Ok(f) = File::open(path) else { return false };
     let fd = f.as_raw_fd();
     unsafe {
@@ -61,6 +61,12 @@ pub fn busy_path(lock: &Path) -> PathBuf {
     let mut name = lock.as_os_str().to_owned();
     name.push(".busy");
     PathBuf::from(name)
+}
+
+/// The viewer of the popup with this lock runs and asks to keep the popup open. Only while it
+/// holds the lock: a viewer that died leaves no popup to keep, whatever file it left behind.
+fn viewer_busy(lock: &Path) -> bool {
+    busy_path(lock).exists() && lock_held(lock)
 }
 
 /// Viewer side: takes the lock for as long as the returned file lives.
@@ -215,8 +221,7 @@ impl Output for Tmux {
     }
 
     fn kept_open(&self, id: u64) -> bool {
-        // Only while the viewer runs: a viewer that died leaves no popup to keep.
-        self.popups.get(&id).is_some_and(|p| busy_path(&p.lock).exists() && lock_held(&p.lock))
+        self.popups.get(&id).is_some_and(|p| viewer_busy(&p.lock))
     }
 }
 
@@ -226,7 +231,8 @@ impl Drop for Tmux {
         for id in ids {
             self.clear(id);
         }
-        let _ = std::fs::remove_dir(&self.lock_dir);
+        // The folder is this process's own; a busy file a viewer could not remove goes with it.
+        let _ = std::fs::remove_dir_all(&self.lock_dir);
     }
 }
 
@@ -243,6 +249,20 @@ mod tests {
     #[test]
     fn the_busy_file_sits_beside_the_lock() {
         assert_eq!(busy_path(Path::new("/run/user/1000/frigate-pip-7/view-3.lock")), Path::new("/run/user/1000/frigate-pip-7/view-3.lock.busy"));
+    }
+
+    #[test]
+    fn a_busy_viewer_keeps_its_popup_only_while_it_runs() {
+        let dir = std::env::temp_dir().join(format!("frigate-pip-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join("view-1.lock");
+        let viewer = hold_lock(&lock.to_string_lossy()).unwrap();
+        assert!(!viewer_busy(&lock), "running, nothing busy");
+        std::fs::write(busy_path(&lock), b"").unwrap();
+        assert!(viewer_busy(&lock), "running and busy");
+        drop(viewer);
+        assert!(!viewer_busy(&lock), "the viewer is gone: its busy file keeps nothing open");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
