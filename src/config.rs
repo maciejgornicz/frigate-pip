@@ -408,6 +408,10 @@ impl Config {
     /// Sets the camera's action button (no URL = no button).
     #[allow(dead_code)] // until the settings window uses it
     pub fn set_action(&mut self, camera: &str, url: Option<String>, label: Option<String>, confirm: bool) {
+        // Empty or blank = none, as an empty key reads back (other values are kept as given,
+        // like `opt` keeps parsed ones).
+        let url = url.filter(|u| !u.trim().is_empty());
+        let label = label.filter(|l| !l.trim().is_empty());
         match self.overrides.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(camera)) {
             Some((_, o)) => (o.action_url, o.action_label, o.action_confirm) = (url, label, confirm),
             None if url.is_some() || label.is_some() || !confirm => {
@@ -882,15 +886,27 @@ mod tests {
 
     #[test]
     fn camera_action_keys() {
+        // `nie` (Polish "no") is one of the spellings `boolean` accepts.
         let c = Config::from_ini(&IniDoc::parse(
-            "[camera.gate]\naction_url = \"http://homeassistant.local:8123/api/webhook/abc#x\"\naction_label = Gate\n\n[camera.yard]\naction_url = http://h/x\naction_confirm = nie\n",
+            "[camera.gate]\naction_url = \"http://homeassistant.local:8123/api/webhook/abc#x\"\naction_label = Gate\n\n[camera.yard]\naction_url = http://h/x\naction_confirm = nie\n\n[camera.drive]\naction_label = Drive\n",
         ));
         let g = c.camera("Gate").unwrap();
         assert_eq!(g.action_url.as_deref(), Some("http://homeassistant.local:8123/api/webhook/abc#x"));
         assert_eq!(g.action_label.as_deref(), Some("Gate"));
         assert!(g.action_confirm, "confirmation is on unless switched off");
+        assert_eq!(c.action_for("gate"), Some(("http://homeassistant.local:8123/api/webhook/abc#x", Some("Gate"), true)));
         assert!(!c.camera("yard").unwrap().action_confirm);
         assert!(c.action_for("garden").is_none());
+        // A label without a URL: no button.
+        assert!(c.action_for("drive").is_none());
+    }
+
+    #[test]
+    fn set_action_treats_blank_values_as_none() {
+        let mut c = Config::from_ini(&IniDoc::parse(""));
+        c.set_action("gate", Some("  ".into()), Some("".into()), true);
+        assert_eq!(c.action_for("gate"), None);
+        assert!(c.overrides.is_empty());
     }
 
     #[test]
@@ -902,6 +918,7 @@ mod tests {
         write_all(&c, &mut doc);
         let back = Config::from_ini(&doc);
         assert_eq!(back.camera("gate").unwrap().action_url.as_deref(), Some("http://h/api/webhook/a#b"));
+        assert_eq!(back.camera("gate").unwrap().action_label.as_deref(), Some("Gate"));
         assert!(!back.camera("gate").unwrap().action_confirm);
         assert!(!doc.sections().iter().any(|s| s == "camera.yard"));
         // Removing the URL leaves the key empty, not the old value.
@@ -909,6 +926,8 @@ mod tests {
         c.set_action("gate", None, None, true);
         write_all(&c, &mut doc);
         assert_eq!(doc.get("camera.gate", "action_url").as_deref(), Some(""));
+        assert_eq!(doc.get("camera.gate", "action_label").as_deref(), Some(""));
+        assert_eq!(doc.get("camera.gate", "action_confirm").as_deref(), Some("true"));
     }
 
     #[test]
