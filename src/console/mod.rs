@@ -264,7 +264,8 @@ https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md#12-
 
 enum Ev {
     Notice(Notice),
-    Key(u8),
+    /// A key byte, and when the reader thread got it (see `action_keys::drain`).
+    Key(u8, Instant),
     /// A window has a new picture.
     Wake,
     /// Mouse on a desktop window, or the desktop went away.
@@ -446,7 +447,7 @@ pub fn main() {
         let tx = tx.clone();
         // The terminal output switches the terminal to raw mode itself.
         term::Keys::start(mode != Mode::Terminal, move |k| {
-            let _ = tx.send(Ev::Key(k));
+            let _ = tx.send(Ev::Key(k, Instant::now()));
         })
     });
     let mut app = App::new(cfg, path, out, ff, tx);
@@ -686,7 +687,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     let _keys = {
         let tx = tx.clone();
         term::Keys::start(false, move |k| {
-            let _ = tx.send(Ev::Key(k));
+            let _ = tx.send(Ev::Key(k, Instant::now()));
         })
     };
     let (sw, sh) = out.size();
@@ -731,26 +732,36 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     let mut held = false;
     while !QUIT.load(Ordering::Relaxed) {
         let timeout = picker.wait(Instant::now()).map_or(Duration::from_millis(100), |d| d.min(Duration::from_millis(100)));
-        match rx.recv_timeout(timeout) {
-            Ok(Ev::Key(b'q' | b'Q' | b'x' | b'X' | 27 | 3)) | Err(RecvTimeoutError::Disconnected) => break,
-            Ok(Ev::Key(b'm' | b'M')) if cfg.camera_audio => {
-                let muted = !shared.muted.fetch_xor(true, Ordering::Relaxed);
-                crate::log!("{camera}: sound {}", if muted { "muted" } else { "on" });
-                shared.dirty.store(true, Ordering::Relaxed);
-            }
-            Ok(Ev::Key(b'r' | b'R')) => shared.replay_pressed.store(true, Ordering::Relaxed),
-            Ok(Ev::Key(k @ (b'a' | b'A' | b'1'..=b'9'))) => {
+        let first = match rx.recv_timeout(timeout) {
+            Ok(ev) => Some(ev),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        let (go, now) = action_keys::drain(first, &rx, |ev| {
+            match ev {
+                Ev::Key(b'q' | b'Q' | b'x' | b'X' | 27 | 3, _) => return false,
+                Ev::Key(b'm' | b'M', _) if cfg.camera_audio => {
+                    let muted = !shared.muted.fetch_xor(true, Ordering::Relaxed);
+                    crate::log!("{camera}: sound {}", if muted { "muted" } else { "on" });
+                    shared.dirty.store(true, Ordering::Relaxed);
+                }
+                Ev::Key(b'r' | b'R', _) => shared.replay_pressed.store(true, Ordering::Relaxed),
                 // They count once settled (see `Picker::key`); the popup has no camera keys.
-                picker.key(k, Instant::now());
+                Ev::Key(k, at) => {
+                    picker.key(k, at);
+                }
+                Ev::ActionDone(ticket, ok) => {
+                    let now = Instant::now();
+                    let _ = buttons.iter_mut().flatten().any(|b| b.finished(ticket, ok, now));
+                }
+                _ => {}
             }
-            Ok(Ev::ActionDone(ticket, ok)) => {
-                let now = Instant::now();
-                let _ = buttons.iter_mut().flatten().any(|b| b.finished(ticket, ok, now));
-            }
-            _ => {}
+            true
+        });
+        if !go {
+            break;
         }
-        let now = Instant::now();
-        for key in picker.settled(now) {
+        while let Some(key) = picker.next_settled(now) {
             match key {
                 Key::A => {
                     if let Some(n) = picker.key_a(0, &action_keys::numbers(&buttons), now) {
@@ -772,16 +783,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         let busy = action::any_busy(&buttons, now) || shown.1;
         if busy != held {
             // Tried again on the next pass (≤ 100 ms) when it fails.
-            let done =
-                busy_file.as_ref().is_none_or(
-                    |f| {
-                        if busy {
-                            std::fs::File::create(f).is_ok()
-                        } else {
-                            std::fs::remove_file(f).is_ok() || !f.exists()
-                        }
-                    },
-                );
+            let done = busy_file.as_ref().is_none_or(|f| set_busy_file(f, busy));
             if done {
                 held = busy;
             }
@@ -801,6 +803,15 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         let _ = std::fs::remove_file(f);
     }
     shared.cancel.cancel();
+}
+
+/// Creates or removes a viewer's busy file (see `tmux::busy_path`); `true` = done.
+fn set_busy_file(f: &std::path::Path, busy: bool) -> bool {
+    if busy {
+        std::fs::File::create(f).is_ok()
+    } else {
+        std::fs::remove_file(f).is_ok() || !f.exists()
+    }
 }
 
 /// Opens an address in the desktop's browser (xdg-open).
@@ -1124,29 +1135,16 @@ impl App {
         self.show_status();
         while !QUIT.load(Ordering::Relaxed) {
             let timeout = self.picker.wait(Instant::now()).map_or(Duration::from_millis(100), |d| d.min(Duration::from_millis(100)));
-            match rx.recv_timeout(timeout) {
-                Ok(Ev::Notice(n)) => self.on_notice(n),
-                Ok(Ev::Key(k)) => {
-                    if !self.on_key(k) {
-                        break;
-                    }
-                }
-                Ok(Ev::Wake) => {}
-                Ok(Ev::Pointer(x11::Event::Closed)) => {
-                    crate::log!("The desktop session ended");
-                    break;
-                }
-                Ok(Ev::Pointer(e)) => {
-                    for (id, action) in self.out.pointer(&e) {
-                        self.on_action(id, action);
-                    }
-                }
-                Ok(Ev::Tray(id)) => self.on_tray(id),
-                Ok(Ev::ActionDone(ticket, ok)) => self.action_done(ticket, ok),
-                Err(RecvTimeoutError::Timeout) => {}
+            let first = match rx.recv_timeout(timeout) {
+                Ok(ev) => Some(ev),
+                Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => break,
+            };
+            let (go, t) = action_keys::drain(first, &rx, |ev| self.on_event(ev));
+            if !go {
+                break;
             }
-            self.settled_keys();
+            self.settled_keys(t);
             self.draw();
             if last_tick.elapsed() >= Duration::from_millis(500) {
                 last_tick = Instant::now();
@@ -1170,6 +1168,27 @@ impl App {
             self.close(i);
         }
         self.listener.cancel();
+    }
+
+    /// One event of the main loop; `false` = quit.
+    fn on_event(&mut self, ev: Ev) -> bool {
+        match ev {
+            Ev::Notice(n) => self.on_notice(n),
+            Ev::Key(k, at) => return self.on_key(k, at),
+            Ev::Wake => {}
+            Ev::Pointer(x11::Event::Closed) => {
+                crate::log!("The desktop session ended");
+                return false;
+            }
+            Ev::Pointer(e) => {
+                for (id, action) in self.out.pointer(&e) {
+                    self.on_action(id, action);
+                }
+            }
+            Ev::Tray(id) => self.on_tray(id),
+            Ev::ActionDone(ticket, ok) => self.action_done(ticket, ok),
+        }
+        true
     }
 
     fn on_notice(&mut self, n: Notice) {
@@ -1686,8 +1705,8 @@ impl App {
         self.layout();
     }
 
-    /// `false` = quit.
-    fn on_key(&mut self, k: u8) -> bool {
+    /// Key `k`, which the reader thread got `at`; `false` = quit.
+    fn on_key(&mut self, k: u8, at: Instant) -> bool {
         match k {
             b'q' | b'Q' | 3 => return false,
             b'x' | b'X' | 27 => {
@@ -1720,7 +1739,7 @@ impl App {
                     }
                 }
             }
-            b'a' | b'A' | b'1'..=b'9' => self.action_or_camera_key(k),
+            b'a' | b'A' | b'1'..=b'9' => self.action_or_camera_key(k, at),
             _ => {}
         }
         true
@@ -1728,8 +1747,8 @@ impl App {
 
     /// `a`, and a digit the `a` key's choice lists, count once settled (see `Picker::key` and
     /// `settled_keys`); any other digit shows a camera at once.
-    fn action_or_camera_key(&mut self, k: u8) {
-        let taken = self.picker.key(k, Instant::now());
+    fn action_or_camera_key(&mut self, k: u8, at: Instant) {
+        let taken = self.picker.key(k, at);
         if !taken {
             self.show_camera(k);
         }
@@ -1743,9 +1762,10 @@ impl App {
         }
     }
 
-    /// The action key presses that count by now (see `Picker::key`).
-    fn settled_keys(&mut self) {
-        for key in self.picker.settled(Instant::now()) {
+    /// The action key presses that count by `t`, the moment the event queue was emptied (see
+    /// `action_keys::drain`), oldest first.
+    fn settled_keys(&mut self, t: Instant) {
+        while let Some(key) = self.picker.next_settled(t) {
             match key {
                 Key::A => self.key_a(),
                 Key::Digit(win, n) => {

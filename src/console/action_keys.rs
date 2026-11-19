@@ -5,7 +5,7 @@ use super::Ev;
 use crate::action::{self, Buttons, Look, Shown};
 use crate::config::{Config, ACTIONS};
 use std::collections::HashMap;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 /// How long the choice among several actions stays open after `a`, and after a digit armed one:
@@ -15,8 +15,14 @@ const CHOICE_FOR: Duration = action::ARMED_FOR;
 const REPEAT_GAP: Duration = Duration::from_millis(200);
 /// A key press counts only when no byte of the same key follows this soon. Auto-repeat starts
 /// only after a delay (often 250–660 ms), so its first byte looks like a second press; the
-/// bytes after it come every 25–100 ms and show that the key is held.
+/// bytes after it come every 25–100 ms and show that the key is held. This needs a repeat
+/// interval under 150 ms (what desktops and the Linux console use); a double tap within 150 ms
+/// counts as nothing.
 const SETTLE: Duration = Duration::from_millis(150);
+/// A digit that pressed an action is still swallowed this long after its last byte when the
+/// choice has ended meanwhile: the first auto-repeat byte comes up to some 660 ms after the
+/// press, and must not show a camera.
+const HELD_AFTER: Duration = Duration::from_secs(1);
 
 /// The camera's actions with a URL as a window shows them: (number, label), in number order.
 pub fn labels(cfg: &Config, camera: &str) -> Vec<(usize, String)> {
@@ -31,6 +37,26 @@ pub fn refresh(buttons: &mut Buttons, cfg: &Config, camera: &str) {
 /// The numbers of the actions the window has a button for.
 pub fn numbers(buttons: &Buttons) -> Vec<usize> {
     (1..=ACTIONS).filter(|&n| buttons[n - 1].is_some()).collect()
+}
+
+/// One pass of an event loop: handles `first` (if any) and then every event already queued, and
+/// returns whether to go on and the moment the queue was looked at. Key bytes carry the time
+/// the reader thread got them, so a slow pass cannot make a held key's repeat look like a new
+/// press; settling presses at that moment, after the queue is empty, means every byte sent
+/// before it has been seen (see `Picker::next_settled`).
+pub fn drain<E>(first: Option<E>, rx: &Receiver<E>, mut handle: impl FnMut(E) -> bool) -> (bool, Instant) {
+    if let Some(e) = first {
+        if !handle(e) {
+            return (false, Instant::now());
+        }
+    }
+    let t = Instant::now();
+    while let Ok(e) = rx.try_recv() {
+        if !handle(e) {
+            return (false, t);
+        }
+    }
+    (true, t)
 }
 
 /// The window the `a` key is for, from (id, has actions, on the screen) of every window: the
@@ -79,7 +105,7 @@ struct Open {
     until: Instant,
 }
 
-/// What a key press that counts does (see `Picker::key`).
+/// What a key press that counts does (see `Picker::next_settled`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Key {
     /// `a`: see `Picker::key_a`.
@@ -88,51 +114,87 @@ pub enum Key {
     Digit(u64, usize),
 }
 
+/// A press waiting for `SETTLE`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Pending {
+    Key(Key),
+    /// A digit typed while an `a` waited: it goes to the choice that `a` opens, or nowhere.
+    AfterA(usize),
+}
+
 /// The `a` key without a mouse. With one action `a` presses it (with confirmation: `a`, `a`).
 /// With several `a` opens a choice for 3 s: the caption lists the actions with their numbers,
 /// and a listed digit presses that action instead of showing a camera.
 ///
 /// A terminal sends no key-up, so a held key would arm and then confirm an action by itself.
-/// Key bytes therefore go through `key`: a byte less than `REPEAT_GAP` after the previous one of
-/// that key is ignored, and a press counts (`settled`) only when no byte of that key follows
-/// within `SETTLE`.
+/// Key bytes therefore go through `key`, with the time the reader thread got them: a byte less
+/// than `REPEAT_GAP` after the previous one of a key the picker took is swallowed, and a press
+/// counts (`next_settled`) only when no byte of that key follows within `SETTLE`.
 #[derive(Default)]
 pub struct Picker {
     open: Option<Open>,
-    /// When each key last sent a byte, counted or not.
+    /// When each key the picker took last sent a byte (taken or swallowed).
     last: HashMap<u8, Instant>,
-    /// Presses waiting for `SETTLE`: (key, when, what they do).
-    pending: Vec<(u8, Instant, Key)>,
+    /// Presses waiting for `SETTLE`, oldest first: (key, when, what they do).
+    pending: Vec<(u8, Instant, Pending)>,
 }
 
 impl Picker {
-    /// A key byte. `false` = not for the actions: neither `a` nor a digit the open choice lists
-    /// (a digit then shows a camera at once). `true` = taken; what it does comes from `settled`.
-    pub fn key(&mut self, byte: u8, now: Instant) -> bool {
+    /// A key byte the reader thread got `at`. `false` = not for the actions (a digit then shows a
+    /// camera at once): neither `a` nor a digit the open choice lists, typed while an `a` waits
+    /// or still held from a press the picker took. `true` = taken; what it does comes from
+    /// `next_settled`.
+    pub fn key(&mut self, byte: u8, at: Instant) -> bool {
         let k = byte.to_ascii_lowercase();
-        let what = match k {
-            b'a' => Key::A,
-            b'1'..=b'9' => match self.digit((k - b'0') as usize, now) {
-                Some((win, n)) => Key::Digit(win, n),
+        if k != b'a' && !(b'1'..=b'9').contains(&k) {
+            return false;
+        }
+        let since = self.last.get(&k).map(|t| at.saturating_duration_since(*t));
+        // A repeat of a key the picker took is swallowed before anything else: a held digit
+        // must not show a camera once its action has ended the choice.
+        let what = if since.is_some_and(|d| d < REPEAT_GAP) {
+            None
+        } else if k == b'a' {
+            Some(Pending::Key(Key::A))
+        } else {
+            let d = (k - b'0') as usize;
+            match self.digit(d, at) {
+                Some((win, n)) => Some(Pending::Key(Key::Digit(win, n))),
+                None if self.pending.iter().any(|p| p.0 == b'a') => Some(Pending::AfterA(d)),
+                // Its first auto-repeat byte, after the choice ended.
+                None if since.is_some_and(|d| d < HELD_AFTER) => None,
                 None => return false,
-            },
-            _ => return false,
+            }
         };
-        let repeat = self.last.insert(k, now).is_some_and(|t| now.saturating_duration_since(t) < REPEAT_GAP);
+        self.last.insert(k, at);
         // A byte right after a waiting press shows that the key is held: neither counts.
         let waiting = self.pending.len();
-        self.pending.retain(|(pk, at, _)| *pk != k || now.saturating_duration_since(*at) >= SETTLE);
-        if !repeat && self.pending.len() == waiting {
-            self.pending.push((k, now, what));
+        self.pending.retain(|(pk, t, _)| *pk != k || at.saturating_duration_since(*t) >= SETTLE);
+        if let (Some(what), true) = (what, self.pending.len() == waiting) {
+            self.pending.push((k, at, what));
         }
         true
     }
 
-    /// The presses that count by now, oldest first.
-    pub fn settled(&mut self, now: Instant) -> Vec<Key> {
-        let (done, wait): (Vec<_>, Vec<_>) = self.pending.drain(..).partition(|(_, at, _)| now.saturating_duration_since(*at) >= SETTLE);
-        self.pending = wait;
-        done.into_iter().map(|(_, _, what)| what).collect()
+    /// The oldest press that counts by `t` (taken right after `drain`), if any. Call it until
+    /// `None`, handling each one before the next: a digit typed while an `a` waited goes to the
+    /// choice that `a` opened, so the `a` must be handled first.
+    pub fn next_settled(&mut self, t: Instant) -> Option<Key> {
+        loop {
+            let &(_, at, what) = self.pending.first()?;
+            if t.saturating_duration_since(at) < SETTLE {
+                return None;
+            }
+            self.pending.remove(0);
+            match what {
+                Pending::Key(key) => return Some(key),
+                Pending::AfterA(d) => {
+                    if let Some((win, n)) = self.digit(d, t) {
+                        return Some(Key::Digit(win, n));
+                    }
+                }
+            }
+        }
     }
 
     /// How long until the next waiting press counts, if one waits.
@@ -302,7 +364,7 @@ mod tests {
                 next.next();
             }
             if now_ms % 10 == 0 {
-                for k in p.settled(now) {
+                while let Some(k) = p.next_settled(now) {
                     match k {
                         Key::A => {
                             if let Some(n) = p.key_a(1, &numbers(&b), now) {
@@ -366,16 +428,90 @@ mod tests {
         let mut p = Picker::default();
         assert!(!p.key(b'1', t), "no choice: shows camera 1");
         assert!(p.key(b'a', t));
-        assert_eq!(p.settled(t + ms(150)), [Key::A]);
+        assert_eq!(p.next_settled(t + ms(150)), Some(Key::A));
         p.key_a(4, &[1, 3], t + ms(150));
         assert!(!p.key(b'2', t + ms(200)), "not listed: shows camera 2");
         assert!(!p.key(b'7', t + ms(200)));
         assert!(!p.key(b'x', t + ms(200)), "not a key for the actions");
         assert!(p.key(b'3', t + ms(200)));
         assert_eq!(p.wait(t + ms(250)), Some(ms(100)));
-        assert_eq!(p.settled(t + ms(349)), []);
-        assert_eq!(p.settled(t + ms(350)), [Key::Digit(4, 3)]);
+        assert_eq!(p.next_settled(t + ms(349)), None);
+        assert_eq!(p.next_settled(t + ms(350)), Some(Key::Digit(4, 3)));
+        assert_eq!(p.next_settled(t + ms(350)), None);
         assert!(!p.key(b'1', t + ms(3200)), "the choice expired: camera 1 again");
+    }
+
+    #[test]
+    fn a_stalled_loop_still_sees_the_repeat() {
+        let t = Instant::now();
+        let mut p = Picker::default();
+        p.key(b'a', t);
+        assert_eq!(p.next_settled(t + ms(150)), Some(Key::A));
+        p.key_a(1, &[1], t + ms(150));
+        // Auto-repeat from 500 ms; the loop was busy and handles both bytes only at 733 ms, with
+        // the times the reader thread gave them.
+        assert!(p.key(b'a', t + ms(500)) && p.key(b'a', t + ms(533)));
+        assert_eq!(p.next_settled(t + ms(733)), None, "the repeat cancels the byte before it");
+    }
+
+    #[test]
+    fn a_pass_reads_the_whole_queue_before_presses_count() {
+        let base = Instant::now().checked_sub(ms(2000)).unwrap();
+        let mut p = Picker::default();
+        p.key(b'a', base);
+        assert_eq!(p.next_settled(base + ms(150)), Some(Key::A));
+        // A notice, then the first repeat byte and the one after it, all waiting in the queue
+        // while the loop was slow. The pass handles the notice first.
+        let (tx, rx) = std::sync::mpsc::channel();
+        for e in [None, Some(base + ms(500)), Some(base + ms(533))] {
+            tx.send(e).unwrap();
+        }
+        let first = Some(rx.recv().unwrap());
+        let (go, t) = drain(first, &rx, |e: Option<Instant>| {
+            if let Some(at) = e {
+                p.key(b'a', at);
+            }
+            true
+        });
+        assert!(go);
+        assert_eq!(p.next_settled(t), None, "both repeat bytes were seen before settling");
+        // A handler that asks to stop ends the pass.
+        tx.send(None).unwrap();
+        assert!(!drain(None, &rx, |_| false).0);
+    }
+
+    #[test]
+    fn a_held_digit_never_shows_a_camera_after_its_action() {
+        let t = Instant::now();
+        let mut p = Picker::default();
+        p.key(b'a', t);
+        assert_eq!(p.next_settled(t + ms(150)), Some(Key::A));
+        p.key_a(1, &[1, 2], t + ms(150));
+        assert!(p.key(b'1', t + ms(1000)));
+        assert_eq!(p.next_settled(t + ms(1150)), Some(Key::Digit(1, 1)));
+        p.pressed(false, t + ms(1150)); // it sent: the choice ends
+                                        // Auto-repeat from 500 ms after the press, every 33 ms: all swallowed, nothing counts.
+        for at in (1500..=2500).step_by(33) {
+            assert!(p.key(b'1', t + ms(at)), "byte at {at} ms shows no camera");
+        }
+        assert_eq!(p.next_settled(t + ms(3000)), None);
+        assert!(!p.key(b'1', t + ms(4000)), "let go long ago: camera 1 again");
+    }
+
+    #[test]
+    fn a_digit_typed_while_a_waits_goes_to_the_choice() {
+        let t = Instant::now();
+        let mut p = Picker::default();
+        assert!(p.key(b'a', t) && p.key(b'2', t + ms(60)), "not camera 2");
+        assert_eq!(p.next_settled(t + ms(250)), Some(Key::A));
+        p.key_a(1, &[1, 2], t + ms(250));
+        assert_eq!(p.next_settled(t + ms(250)), Some(Key::Digit(1, 2)), "the choice `a` opened takes it");
+        // With one action `a` opens no choice: the digit goes nowhere.
+        let mut p = Picker::default();
+        assert!(p.key(b'a', t) && p.key(b'2', t + ms(60)));
+        assert_eq!(p.next_settled(t + ms(250)), Some(Key::A));
+        assert_eq!(p.key_a(1, &[1], t + ms(250)), Some(1));
+        assert_eq!(p.next_settled(t + ms(250)), None);
     }
 
     #[test]
