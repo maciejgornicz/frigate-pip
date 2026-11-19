@@ -25,7 +25,7 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Live video from go2rtc (RTSP)** with hardware decoding of H.264 and H.265 (Media Foundation + Direct3D 11), up to 4K, or MJPEG / snapshots when RTSP is not available.
 - **Camera audio** (AAC, G.711) on a separate thread, so it never delays the picture.
 - **Filters:** cameras, objects (also a separate list per camera), required zones, minimum confidence, stationary objects; every object, or Frigate *Review* alerts / detections only.
-- **Manual events** created through Frigate's API (e.g. by a Home Assistant automation when the doorbell rings) open a window too.
+- **Manual events** created through Frigate's API (e.g. by a [Home Assistant automation when the doorbell rings](#home-assistant)) open a window too.
 - **Windows the way you like them:** monitor, corner, size, timing, how many at once, replace the oldest or skip, always on top, caption, notification sound, quiet during full-screen games and presentations.
 - **Mouse control:** drag to move, click to pin, wheel to resize, Ctrl + wheel to zoom in where the mouse points, Ctrl + drag to move the zoomed picture, speaker button to mute, slider for the volume, ⟲ to replay the start of the event, × or right-click to close, double-click to open the camera in Frigate.
 - **Settings window** with a live preview of your changes, a connection test and a description of every option.
@@ -98,6 +98,30 @@ Every [release](https://github.com/maciejgornicz/frigate-pip/releases/latest) al
 Keys in the terminal or on the console: **q** quit, **x** close windows, **p** pause, **m** sound off / on, **r** replay the start of the event, **1–9** show a camera; a tmux popup closes with **q**, **x** or **Esc** (**m** mutes it, **r** replays it). `frigate-pip --list` shows your cameras with their objects and zones — the names for the filters in `config.ini`.
 
 Running it as a systemd service, all options and troubleshooting: [user guide → Linux version](docs/en/user-guide.md#12-linux-version).
+
+## Home Assistant
+
+FrigatePiP talks to Frigate directly, so it works the same whether Frigate runs as the Home Assistant app (add-on), in Docker or on another machine. With the Frigate app, port 5000 is disabled by default: enable it in the app's *Network* settings, or use port 8971 with a Frigate user.
+
+Besides Frigate's own detections, **any event created through Frigate's API opens a window** — on Windows and on Linux. That lets Home Assistant bring a camera to your screen, for example when the doorbell rings:
+
+```yaml
+# configuration.yaml
+rest_command:
+  frigate_doorbell:
+    url: http://<frigate>:5000/api/events/front_door/doorbell/create
+    method: post
+    content_type: application/json
+    payload: '{"duration": 10}'
+```
+
+Then call the action `rest_command.frigate_doorbell` from the doorbell automation. Replace `front_door` with your camera's name in Frigate; `doorbell` is the label shown in the window's caption.
+
+- The camera must record (`record` enabled in Frigate), because FrigatePiP reacts to the Review item Frigate makes for the event.
+- If you filter objects in FrigatePiP, add `doorbell` to the list (or to that camera's own list).
+- In the *Review alerts only* mode the event opens a window only when its label is one of Frigate's review alert labels (by default `person` and `car`); the default mode and *Review alerts and detections* show it always.
+
+Details: [user guide → Detection](docs/en/user-guide.md#62-detection).
 
 ## Building from source
 
