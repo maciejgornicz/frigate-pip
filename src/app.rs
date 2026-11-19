@@ -1045,7 +1045,7 @@ impl App {
             aspect,
             shared: shared.clone(),
             preview: false,
-            action: self.action_of(&camera).map(|(_, _, confirm)| action::Button::new(confirm)),
+            action: None,
         };
         match &place {
             Some(p) => {
@@ -1059,7 +1059,7 @@ impl App {
             None => self.popups.push(popup),
         }
         self.layout();
-        self.sync_action(hwnd);
+        self.refresh_action(hwnd);
         unsafe {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             SetTimer(hwnd, TIMER_DEADLINE, dur.as_millis() as u32, None);
@@ -1247,6 +1247,8 @@ impl App {
                 p.preview = true;
                 p.pinned = true;
             }
+            // The preview's action button follows the draft.
+            self.refresh_action(h);
         }
     }
 
@@ -1432,6 +1434,7 @@ impl App {
             (true, HTCLOSE) => 2,
             (true, HT_SOUND) => 3,
             (true, HT_REPLAY) => 4,
+            (true, HT_ACTION) => 5,
             (true, _) => 1,
         });
         if on && !p.hovered {
@@ -1471,11 +1474,20 @@ impl App {
         Self::arm(p);
     }
 
-    /// The camera's action button in the display settings (the settings window's draft, so the
-    /// preview follows it): (URL, label to show, ask for confirmation).
-    fn action_of(&self, camera: &str) -> Option<(String, String, bool)> {
-        let (url, label, confirm) = self.vcfg().action_for(camera)?;
-        Some((url.to_string(), action::label_or_default(label), confirm))
+    /// The settings a window's action button follows: the settings window's draft for the
+    /// preview (which never sends), the saved settings for all other windows.
+    fn action_cfg(&self, preview: bool) -> &Config {
+        if preview {
+            self.vcfg()
+        } else {
+            &self.cfg
+        }
+    }
+
+    /// The camera's action button as a window shows it: (label, ask for confirmation).
+    fn action_of(&self, camera: &str, preview: bool) -> Option<(String, bool)> {
+        let (_, label, confirm) = self.action_cfg(preview).action_for(camera)?;
+        Some((action::label_or_default(label), confirm))
     }
 
     /// Where the window's action button is (client pixels), if it has one and it was drawn.
@@ -1491,10 +1503,13 @@ impl App {
             }
             return;
         };
-        let label = self.action_of(&self.popups[i].camera).map(|(_, label, _)| label);
+        let label = self.action_of(&self.popups[i].camera, self.popups[i].preview).map(|(label, _)| label);
         let p = &self.popups[i];
         let now = Instant::now();
-        p.shared.set_action(p.action.as_ref().zip(label).map(|(b, label)| (action::text(&label, b.look(now)), b.look(now))));
+        p.shared.set_action(p.action.as_ref().zip(label).map(|(b, label)| {
+            let look = b.look(now);
+            (action::text(&label, look), look)
+        }));
         let next = p.action.as_ref().filter(|_| !p.closing).and_then(|b| b.next_change(now));
         unsafe {
             match next {
@@ -1510,39 +1525,47 @@ impl App {
         }
     }
 
-    /// The display settings changed: windows get, lose or keep their action button (a new
-    /// label or URL keeps it; a new confirmation setting starts it over).
+    /// The window gets, loses or keeps its action button to match its settings (a new label or
+    /// URL keeps it; a new confirmation setting starts it over).
+    fn refresh_action(&mut self, hwnd: HWND) {
+        let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd) else { return };
+        let want = self.action_of(&self.popups[i].camera, self.popups[i].preview).map(|(_, confirm)| confirm);
+        let p = &mut self.popups[i];
+        match (want, &p.action) {
+            (None, _) => p.action = None,
+            (Some(confirm), Some(b)) if b.confirm() == confirm => {}
+            (Some(confirm), _) => p.action = Some(action::Button::new(confirm)),
+        }
+        self.sync_action(hwnd);
+    }
+
+    /// The draft or saved settings changed: every window's action button follows its settings.
     fn refresh_actions(&mut self) {
-        for i in 0..self.popups.len() {
-            let want = self.action_of(&self.popups[i].camera).map(|(_, _, confirm)| confirm);
-            let p = &mut self.popups[i];
-            match (want, &p.action) {
-                (None, _) => p.action = None,
-                (Some(confirm), Some(b)) if b.confirm() == confirm => {}
-                (Some(confirm), _) => p.action = Some(action::Button::new(confirm)),
-            }
-            let hwnd = p.hwnd;
-            self.sync_action(hwnd);
+        let hwnds: Vec<HWND> = self.popups.iter().map(|p| p.hwnd).collect();
+        for hwnd in hwnds {
+            self.refresh_action(hwnd);
         }
     }
 
-    /// A click on the action button: arms it or sends the request (never from the preview).
+    /// A click on the action button: arms it or sends the request. The preview never sends; it
+    /// shows "done" as if it had, so that the click is seen to work.
     fn press_action(&mut self, hwnd: HWND) {
-        let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd && !p.closing) else { return };
-        let Some((url, _, _)) = self.action_of(&self.popups[i].camera) else { return };
         let main = self.hwnd.0 as isize;
+        let Some(i) = self.popups.iter().position(|p| p.hwnd == hwnd && !p.closing) else { return };
         let p = &mut self.popups[i];
         let Some(b) = p.action.as_mut() else { return };
         let now = Instant::now();
         if let Some(ticket) = b.press(now) {
             if p.preview {
-                b.reset();
+                b.finished(ticket, true, now);
                 crate::log!("action {}: preview, not sent", p.camera);
             } else {
+                // Only here does the URL leave the settings, straight to the request's thread.
+                let url = self.cfg.action_for(&p.camera).map(|(url, _, _)| url.to_string());
                 let done = move |ok: bool| unsafe {
                     let _ = PostMessageW(HWND(main as _), WM_APP_ACTION, WPARAM(ticket as usize), LPARAM(ok as isize));
                 };
-                if !action::spawn(url, p.camera.clone(), done) {
+                if !url.is_some_and(|url| action::spawn(url, p.camera.clone(), done)) {
                     b.finished(ticket, false, now);
                 }
             }

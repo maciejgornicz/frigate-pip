@@ -24,7 +24,8 @@ pub struct Overlay {
     pub text: String,
     pub live: bool,
     /// Close button: 0 = hidden, 1 = shown (mouse over the window), 2 = highlighted (mouse over the button),
-    /// 3 = shown with the sound button highlighted (mouse over that one), 4 = likewise the replay button.
+    /// 3 = shown with the sound button highlighted (mouse over that one), 4 = likewise the replay button,
+    /// 5 = likewise the action button.
     pub close: u8,
     /// Sound button: 0 = no camera audio (no button), 1 = sound on, 2 = muted.
     pub sound: u8,
@@ -96,7 +97,9 @@ pub struct Renderer {
     grey: ID2D1SolidColorBrush,
     /// Lightens a button under the mouse.
     light: ID2D1SolidColorBrush,
+    /// The action button while sending.
     amber: ID2D1SolidColorBrush,
+    /// The action button after a request got HTTP 2xx.
     green: ID2D1SolidColorBrush,
     /// Where the action button was last drawn (client pixels), if it was.
     pub action_rect: Option<(i32, i32, i32, i32)>,
@@ -445,6 +448,8 @@ impl Renderer {
             // The caption must not run under the buttons.
             self.draw_caption(ov, replay.or(sound).or(button).map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
         }
+        // Always shown, not only under the mouse; under the other buttons (they win the hit-test too).
+        let action = ov.action.as_ref().and_then(|(text, look)| self.draw_action(ov, text, *look, dpi));
         if let Some((l, t, r, b)) = button {
             let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
             let circle = D2D1_ELLIPSE { point: D2D_POINT_2F { x: cx, y: cy }, radiusX: rad, radiusY: rad };
@@ -466,21 +471,35 @@ impl Renderer {
                 self.draw_volume(slider, ov.volume);
             }
         }
-        // Always shown, not only under the mouse.
-        let scale = dpi.max(96) as f32 / 96.0;
-        ov.action.as_ref().and_then(|(text, look)| self.draw_action(self.size.1 as i32, text, *look, scale))
+        action
     }
 
-    /// The action button: a pill in the bottom-left corner, coloured by its look. Returns its rect.
-    unsafe fn draw_action(&self, height: i32, text: &str, look: Look, scale: f32) -> Option<(i32, i32, i32, i32)> {
-        let wide: Vec<u16> = HSTRING::from(text).as_wide().to_vec();
-        // Room for the margins and padding of `action::pill_rect` on both sides.
-        let max_w = (self.size.0 as f32 - 36.0 * scale).max(10.0);
-        let layout = self.dwrite.CreateTextLayout(&wide, &self.font, max_w, self.font_px * 2.0).ok()?;
+    /// The action button: a pill in the bottom-left corner, coloured by its look and lit under
+    /// the mouse. Returns its rect.
+    unsafe fn draw_action(&self, ov: &Overlay, text: &str, look: Look, dpi: u32) -> Option<(i32, i32, i32, i32)> {
+        let (w, height) = (self.size.0 as i32, self.size.1 as i32);
+        let scale = dpi.max(96) as f32 / 96.0;
+        let text = HSTRING::from(text);
+        let layout = self.dwrite.CreateTextLayout(text.as_wide(), &self.font, w as f32, self.font_px * 2.0).ok()?;
         let _ = layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         let trimming = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };
         let _ = layout.SetTrimming(&trimming, None);
         let mut m = DWRITE_TEXT_METRICS::default();
+        let _ = layout.GetMetrics(&mut m);
+        // It ends left of the top-right controls level with it: the ones the window has, shown or
+        // not, so that its width does not change under the mouse.
+        let (_, top, _, bottom) = crate::action::pill_rect(height, 0.0, m.height, scale);
+        let mut controls = vec![close_button_rect(w, dpi)];
+        if ov.sound > 0 {
+            controls.push(sound_button_rect(w, dpi));
+            controls.extend(volume_slider_rect(w, height, dpi));
+        }
+        if ov.replay > 0 {
+            controls.push(replay_button_rect(w, dpi, ov.sound > 0));
+        }
+        let right = controls.iter().filter(|c| c.1 < bottom && c.3 > top).map(|c| c.0).min().unwrap_or(w);
+        let max_w = crate::action::pill_text_max(right, scale);
+        let _ = layout.SetMaxWidth(max_w.max(1.0));
         let _ = layout.GetMetrics(&mut m);
         let text_w = m.width.min(max_w);
         let (l, t, r, b) = crate::action::pill_rect(height, text_w, m.height, scale);
@@ -497,6 +516,9 @@ impl Renderer {
             Look::Done => &self.green,
         };
         self.d2d.FillRoundedRectangle(&rr, fill);
+        if ov.close == 5 {
+            self.d2d.FillRoundedRectangle(&rr, &self.light);
+        }
         let origin = D2D_POINT_2F { x: (l + r) as f32 / 2.0 - text_w / 2.0 - m.left, y: (t + b) as f32 / 2.0 - m.height / 2.0 - m.top };
         self.d2d.DrawTextLayout(origin, &layout, &self.white, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         Some((l, t, r, b))

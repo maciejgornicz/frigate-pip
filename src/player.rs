@@ -410,6 +410,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     // `behind`: a replayed picture this far behind live (said in the caption, even without one).
     let overlay_text = |live: bool, behind: Option<Duration>| {
         let text = if shared.overlay_on.load(Ordering::Relaxed) { shared.overlay.lock().unwrap().clone() } else { String::new() };
+        let action = shared.action.lock().unwrap().clone();
         Overlay {
             text: match behind {
                 Some(b) => crate::replay::caption(crate::i18n::t().replay, b, &text),
@@ -423,7 +424,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 (true, true) => 2,
             },
             replay: shared.replay(),
-            action: shared.action.lock().unwrap().clone(),
+            action,
             volume: shared.sound.volume.load(Ordering::Relaxed),
             zoom: shared.zoom(),
         }
@@ -437,6 +438,8 @@ fn play(p: &Params, shared: &Arc<Shared>) {
     let mut last_snapshot = Instant::now();
     let mut aspect_sent: Option<(u32, u32)> = None;
     let names = ["prebuffer", "rtsp", "replay"];
+    // Where the action button was drawn, as last told to the UI thread.
+    let mut drawn_action: Option<(i32, i32, i32, i32)> = None;
 
     while !cancel.is_set() {
         if shared.replay_pressed.swap(false, Ordering::Relaxed) {
@@ -650,7 +653,10 @@ fn play(p: &Params, shared: &Arc<Shared>) {
         } else if shared.dirty.swap(false, Ordering::Relaxed) || r.check_resize().unwrap_or(false) {
             let _ = r.redraw(&overlay_text((shown.is_some() || mjpeg_active) && replay.is_none(), behind));
         }
-        *shared.action_rect.lock().unwrap() = r.action_rect;
+        if r.action_rect != drawn_action {
+            drawn_action = r.action_rect;
+            *shared.action_rect.lock().unwrap() = drawn_action;
+        }
 
         if shown.is_none() && !mjpeg_active && !snapshot_inflight && last_snapshot.elapsed() > Duration::from_millis(400) {
             snapshot_inflight = true;

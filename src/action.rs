@@ -85,6 +85,7 @@ impl Button {
 
     /// Back to idle without sending (e.g. the settings preview changed the action); the result
     /// of a request still running is dropped. A change to `confirm` needs a new `Button`.
+    #[cfg_attr(windows, allow(dead_code))] // the Windows preview shows "done" instead
     pub fn reset(&mut self) {
         self.ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
         self.state = State::Idle;
@@ -222,12 +223,27 @@ pub fn spawn(url: String, camera: String, done: impl FnOnce(bool) + Send + 'stat
     }
 }
 
+/// The pill's margin to the window edges (and to a control beside it) and its padding, in
+/// unscaled pixels.
+const PILL_MARGIN: f32 = 8.0;
+const PILL_PAD_X: f32 = 10.0;
+const PILL_PAD_Y: f32 = 5.0;
+
+fn px(v: f32, scale: f32) -> i32 {
+    (v * scale).round() as i32
+}
+
 /// The pill in the bottom-left corner, in pixels: text size plus padding, 8 px (scaled) margin.
 pub fn pill_rect(height: i32, text_w: f32, text_h: f32, scale: f32) -> (i32, i32, i32, i32) {
-    let margin = (8.0 * scale).round() as i32;
-    let pad_x = (10.0 * scale).round() as i32;
-    let h = (text_h + 10.0 * scale).round() as i32;
+    let (margin, pad_x) = (px(PILL_MARGIN, scale), px(PILL_PAD_X, scale));
+    let h = (text_h + 2.0 * PILL_PAD_Y * scale).round() as i32;
     (margin, height - margin - h, margin + text_w.round() as i32 + 2 * pad_x, height - margin)
+}
+
+/// The widest text whose pill still ends a margin left of `right` (the window's right edge, or
+/// the leftmost control beside the pill), in pixels.
+pub fn pill_text_max(right: i32, scale: f32) -> f32 {
+    (right - 2 * px(PILL_MARGIN, scale) - 2 * px(PILL_PAD_X, scale)).max(0) as f32
 }
 
 #[cfg(test)]
@@ -414,6 +430,16 @@ mod tests {
     fn the_pill_sits_in_the_bottom_left_corner() {
         // (window height, text width, text height, scale) -> (x0, y0, x1, y1)
         assert_eq!(pill_rect(300, 40.0, 16.0, 1.0), (8, 300 - 8 - 26, 8 + 40 + 2 * 10, 300 - 8));
+    }
+
+    #[test]
+    fn the_widest_pill_ends_a_margin_before_the_limit() {
+        for scale in [1.0, 1.5, 2.0] {
+            let right = 200;
+            let (_, _, r, _) = pill_rect(300, pill_text_max(right, scale), 16.0, scale);
+            assert_eq!(r, right - px(PILL_MARGIN, scale), "scale {scale}");
+        }
+        assert_eq!(pill_text_max(20, 1.0), 0.0, "no room: no text, never negative");
     }
 
     /// A one-shot local HTTP server answering `status`. The channel gets the request it
