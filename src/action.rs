@@ -257,7 +257,7 @@ pub fn text(label: &str, look: Look) -> String {
     }
 }
 
-/// The label set for the camera, or "Action" in the current language.
+/// The label set for the action, or "Action" in the current language.
 pub fn label_or_default(label: Option<&str>) -> String {
     label.map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).unwrap_or_else(|| crate::i18n::t().action_default.to_string())
 }
@@ -310,6 +310,11 @@ fn describe(e: &io::Error) -> String {
 /// 200" or the error, never the URL; `true` = HTTP 2xx, i.e. the request was received (not
 /// that the gate opened).
 pub fn send(url: &str, camera: &str, n: usize) -> bool {
+    // A hand-edited URL with a space would go onto the request line as it is.
+    if url.trim().is_empty() || !valid_url(url) {
+        crate::log!("action {camera} {n}: invalid address");
+        return false;
+    }
     let headers = [("Content-Type", "application/json".to_string())];
     match crate::net::request("POST", url.trim(), &headers, body(camera, n).as_bytes(), TIMEOUT, None) {
         // The body does not matter. `net::request` asks for `Connection: close`, so dropping the
@@ -343,7 +348,6 @@ pub fn spawn(url: String, camera: String, n: usize, done: impl FnOnce(bool) + Se
 /// `done` gets the result. With no URL (the settings lost it meanwhile) or no thread, the ticket
 /// is finished as failed at once (`done` is never called), so the button never waits for a
 /// result that cannot come.
-#[allow(clippy::too_many_arguments)]
 pub fn send_or_fail(
     buttons: &mut Buttons,
     ticket: u32,
@@ -1037,6 +1041,13 @@ mod tests {
 
     fn received(rx: mpsc::Receiver<io::Result<String>>) -> String {
         rx.recv_timeout(Duration::from_secs(15)).expect("the server thread answers").expect("the server got a request")
+    }
+
+    #[test]
+    fn send_refuses_an_invalid_url_without_connecting() {
+        // A hand-edited URL with a space, or none at all: no request is made.
+        assert!(!send("http://127.0.0.1:9/api/webhook/a b", "gate", 1));
+        assert!(!send("  ", "gate", 1));
     }
 
     #[test]

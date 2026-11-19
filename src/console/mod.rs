@@ -1404,7 +1404,7 @@ impl App {
             w.shared.dirty.store(true, Ordering::Relaxed);
             return;
         }
-        // Pinned windows are never replaced.
+        // Pinned windows, and windows busy with an action, are never replaced.
         let states: Vec<(bool, bool)> = self
             .wins
             .iter()

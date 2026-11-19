@@ -352,12 +352,20 @@ impl Objects {
 
 /// One row of the Actions tab (one action of a camera) as typed. A URL that `action::valid_url`
 /// refuses stays here but is not saved.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 struct ActionDraft {
     url: String,
     label: String,
     /// Ask for confirmation (two clicks).
     confirm: bool,
+}
+
+/// Like `ActionCfg`'s: the URL is a secret, so Debug only says whether one is typed.
+impl std::fmt::Debug for ActionDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let url = if self.url.is_empty() { "" } else { "<set>" };
+        f.debug_struct("ActionDraft").field("url", &url).field("label", &self.label).field("confirm", &self.confirm).finish()
+    }
 }
 
 impl Default for ActionDraft {
