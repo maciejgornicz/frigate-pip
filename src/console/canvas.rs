@@ -237,6 +237,16 @@ impl Image {
         self.polygon(&icon.head, white);
     }
 
+    /// Round snooze button: a crescent moon, lit under the mouse or while its list is open.
+    pub fn snooze_button(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), hot: bool) {
+        let (cx, cy, rad) = ((x0 + x1) as f32 / 2.0, y0 as f32 + (x1 - x0) as f32 / 2.0, (x1 - x0) as f32 / 2.0);
+        self.disc_alpha(cx, cy, rad, (0, 0, 0), 0.55);
+        if hot {
+            self.disc_alpha(cx, cy, rad, (255, 255, 255), 0.3);
+        }
+        self.polygon(&crate::snooze::moon_icon((cx, cy), rad), (255, 255, 255));
+    }
+
     /// Round close button (×) in `rect` (x0, y0, x1, y1); red under the mouse — like on Windows.
     pub fn close_button(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), hot: bool) {
         let (cx, cy, rad) = ((x0 + x1) as f32 / 2.0, y0 as f32 + (x1 - x0) as f32 / 2.0, (x1 - x0) as f32 / 2.0);
@@ -403,13 +413,18 @@ impl Font {
 
     /// Draws glyphs in white from `x` on the line `baseline`.
     fn blit(img: &mut Image, glyphs: Glyphs, x: f32, baseline: f32) {
+        Self::blit_in(img, glyphs, x, baseline, (255, 255, 255));
+    }
+
+    /// Draws glyphs in `color` from `x` on the line `baseline`.
+    fn blit_in(img: &mut Image, glyphs: Glyphs, x: f32, baseline: f32, color: (u8, u8, u8)) {
         for (gx, m, bitmap) in glyphs {
             let left = (x + gx).round() as i32 + m.xmin;
             let top = baseline as i32 - m.height as i32 - m.ymin;
             for row in 0..m.height {
                 for col in 0..m.width {
                     let a = bitmap[row * m.width + col];
-                    img.blend(left + col as i32, top + row as i32, (255, 255, 255), a);
+                    img.blend(left + col as i32, top + row as i32, color, a);
                 }
             }
         }
@@ -436,6 +451,23 @@ impl Font {
         let tx = x0 + pad * 0.8 + dot + pad * 0.6;
         let baseline = (cy + line / 2.0 - px * 0.1).round();
         Self::blit(img, glyphs, tx, baseline);
+    }
+
+    /// The list under the snooze button: a dark panel, the header in grey and the lengths in
+    /// white (`texts`, already `drawable`, one per row of `list`), the length `hot` lit.
+    pub fn snooze_list(&self, img: &mut Image, (panel, rows): &(action::Rect, Vec<action::Rect>), texts: &[String], hot: Option<usize>, px: f32) {
+        img.shade(panel.0, panel.1, panel.2, panel.3, 0.25);
+        let (ascent, descent) = self.font.horizontal_line_metrics(px).map(|m| (m.ascent, m.descent)).unwrap_or((px * 0.8, -px * 0.2));
+        let pad = ((rows.first().map_or(0, |r| r.3 - r.1)) as f32 * 0.4).round();
+        for (i, (rect, text)) in rows.iter().zip(texts).enumerate() {
+            if i > 0 && hot == Some(i - 1) {
+                img.stadium(*rect, (255, 255, 255), 0.25);
+            }
+            let (glyphs, _) = self.glyphs(text, px, (rect.2 - rect.0) as f32 - 2.0 * pad);
+            let baseline = ((rect.1 + rect.3) as f32 / 2.0 + (ascent + descent) / 2.0).round();
+            let color = if i == 0 { (170, 170, 170) } else { (255, 255, 255) };
+            Self::blit_in(img, glyphs, rect.0 as f32 + pad, baseline, color);
+        }
     }
 
     /// One action button: a pill filling `rect` in the colour of `look`, lit when `hot`, with

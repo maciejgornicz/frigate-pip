@@ -150,6 +150,16 @@ pub struct Strings {
     pub menu_pause_60: &'static str,
     pub menu_pause_forever: &'static str,
     pub menu_resume: &'static str,
+    /// Header of the list under a window's snooze button.
+    pub snooze_title: &'static str,
+    /// {0} = minutes / hours of a snooze length.
+    pub snooze_minutes: &'static str,
+    pub snooze_hours: &'static str,
+    pub menu_snoozed: &'static str,
+    /// {0} = camera, {1} = minutes left
+    pub menu_wake_camera: &'static str,
+    /// Tray tooltip; {0} = the snoozed cameras.
+    pub status_snoozed: &'static str,
     pub menu_close_all: &'static str,
     pub menu_open_frigate: &'static str,
     pub menu_help: &'static str,
@@ -349,6 +359,13 @@ pub struct Strings {
     /// {0} = version
     pub update_balloon_title: &'static str,
     pub update_balloon_text: &'static str,
+    /// The question before installing an update. {0} = new version, {1} = running version.
+    pub update_ask_title: &'static str,
+    pub update_ask_text: &'static str,
+    pub update_ask_notes: &'static str,
+    /// {0} = the release page.
+    pub update_ask_more: &'static str,
+    pub update_ask_install: &'static str,
     pub tip_check_updates: &'static str,
     pub tip_update: &'static str,
 
@@ -512,6 +529,12 @@ mod tests {
                 (en.action_ask, s.action_ask),
                 (en.action_row, s.action_row),
                 (en.action_row_error, s.action_row_error),
+                (en.snooze_minutes, s.snooze_minutes),
+                (en.snooze_hours, s.snooze_hours),
+                (en.menu_wake_camera, s.menu_wake_camera),
+                (en.status_snoozed, s.status_snoozed),
+                (en.update_ask_text, s.update_ask_text),
+                (en.update_ask_more, s.update_ask_more),
             ];
             for (a, b) in pairs {
                 for i in 0..4 {

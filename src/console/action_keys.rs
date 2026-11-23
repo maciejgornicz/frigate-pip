@@ -1,5 +1,6 @@
 //! The action buttons of the Linux windows: what the settings give a window, sending a request,
-//! and the `a` key for outputs without a mouse (terminal, framebuffer, tmux popups).
+//! and the `a` key for outputs without a mouse (terminal, framebuffer, tmux popups). The `z` key
+//! (snooze the window's camera) opens a choice of lengths the same way.
 
 use super::Ev;
 use crate::action::{self, Buttons, Look, Shown};
@@ -97,12 +98,32 @@ pub fn with_actions(caption: &str, shown: &[Shown], choosing: bool) -> String {
     all.join(" · ")
 }
 
-/// The open choice: for which window, its action numbers, until when.
+/// The caption with the open choice, for outputs without buttons (see `with_actions`).
+pub fn with_choice(caption: &str, shown: &[Shown], choice: Choice) -> String {
+    let caption = with_actions(caption, shown, choice == Choice::Actions);
+    match choice {
+        Choice::Snooze => [crate::snooze::choice_line(), caption].into_iter().filter(|c| !c.is_empty()).collect::<Vec<_>>().join(" · "),
+        _ => caption,
+    }
+}
+
+/// What a window's open choice is for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Choice {
+    None,
+    /// The `a` key's: the actions by number.
+    Actions,
+    /// The `z` key's: the snooze lengths by number (`snooze::CHOICES`).
+    Snooze,
+}
+
+/// The open choice: for which window, its numbers, until when, and what for.
 #[derive(Clone, Debug, PartialEq)]
 struct Open {
     win: u64,
     numbers: Vec<usize>,
     until: Instant,
+    snooze: bool,
 }
 
 /// What a key press that counts does (see `Picker::next_settled`).
@@ -112,13 +133,17 @@ pub enum Key {
     A,
     /// A digit during the choice: press action `n` of window `win`, then `Picker::pressed`.
     Digit(u64, usize),
+    /// `z`: see `Picker::key_z`.
+    Z,
+    /// A digit during the `z` key's choice: snooze the camera of window `win` this many minutes.
+    Snooze(u64, u64),
 }
 
 /// A press waiting for `SETTLE`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Pending {
     Key(Key),
-    /// A digit typed while an `a` waited: it goes to the choice that `a` opens, or nowhere.
+    /// A digit typed while an `a` (or `z`) waited: it goes to the choice that key opens, or nowhere.
     AfterA(usize),
 }
 
@@ -146,7 +171,7 @@ impl Picker {
     /// `next_settled`.
     pub fn key(&mut self, byte: u8, at: Instant) -> bool {
         let k = byte.to_ascii_lowercase();
-        if k != b'a' && !(b'1'..=b'9').contains(&k) {
+        if k != b'a' && k != b'z' && !(b'1'..=b'9').contains(&k) {
             return false;
         }
         let since = self.last.get(&k).map(|t| at.saturating_duration_since(*t));
@@ -156,11 +181,13 @@ impl Picker {
             None
         } else if k == b'a' {
             Some(Pending::Key(Key::A))
+        } else if k == b'z' {
+            Some(Pending::Key(Key::Z))
         } else {
             let d = (k - b'0') as usize;
-            match self.digit(d, at) {
-                Some((win, n)) => Some(Pending::Key(Key::Digit(win, n))),
-                None if self.pending.iter().any(|p| p.0 == b'a') => Some(Pending::AfterA(d)),
+            match self.chosen(d, at) {
+                Some(key) => Some(Pending::Key(key)),
+                None if self.pending.iter().any(|p| p.0 == b'a' || p.0 == b'z') => Some(Pending::AfterA(d)),
                 // Its first auto-repeat byte, after the choice ended.
                 None if since.is_some_and(|d| d < HELD_AFTER) => None,
                 None => return false,
@@ -189,8 +216,8 @@ impl Picker {
             match what {
                 Pending::Key(key) => return Some(key),
                 Pending::AfterA(d) => {
-                    if let Some((win, n)) = self.digit(d, t) {
-                        return Some(Key::Digit(win, n));
+                    if let Some(key) = self.chosen(d, t) {
+                        return Some(key);
                     }
                 }
             }
@@ -202,9 +229,30 @@ impl Picker {
         self.pending.iter().map(|(_, at, _)| (*at + SETTLE).saturating_duration_since(now)).min()
     }
 
-    /// The choice is open for window `win`.
+    /// A choice is open for window `win`.
     pub fn choosing(&self, win: u64, now: Instant) -> bool {
-        self.open.as_ref().is_some_and(|o| o.win == win && now < o.until)
+        self.choice(win, now) != Choice::None
+    }
+
+    /// The choice open for window `win`, if any.
+    pub fn choice(&self, win: u64, now: Instant) -> Choice {
+        match &self.open {
+            Some(o) if o.win == win && now < o.until => {
+                if o.snooze {
+                    Choice::Snooze
+                } else {
+                    Choice::Actions
+                }
+            }
+            _ => Choice::None,
+        }
+    }
+
+    /// `z` for window `win` (the newest one on the screen): the choice of snooze lengths opens
+    /// (or starts over, also in place of the `a` key's).
+    pub fn key_z(&mut self, win: u64, now: Instant) {
+        let numbers = (1..=crate::snooze::CHOICES.len()).collect();
+        self.open = Some(Open { win, numbers, until: now + CHOICE_FOR, snooze: true });
     }
 
     /// `a` for window `win` with these action numbers (the newest window that has actions).
@@ -217,7 +265,7 @@ impl Picker {
                 Some(*n)
             }
             _ => {
-                self.open = Some(Open { win, numbers: numbers.to_vec(), until: now + CHOICE_FOR });
+                self.open = Some(Open { win, numbers: numbers.to_vec(), until: now + CHOICE_FOR, snooze: false });
                 None
             }
         }
@@ -228,6 +276,15 @@ impl Picker {
     /// is open, or it does not list `d`.
     pub fn digit(&self, d: usize, now: Instant) -> Option<(u64, usize)> {
         self.open.as_ref().filter(|o| now < o.until && o.numbers.contains(&d)).map(|o| (o.win, d))
+    }
+
+    /// What digit `d` does in the open choice: an action, or a snooze length (see `digit`).
+    fn chosen(&self, d: usize, now: Instant) -> Option<Key> {
+        let (win, n) = self.digit(d, now)?;
+        match self.open.as_ref()?.snooze {
+            true => Some(Key::Snooze(win, *crate::snooze::CHOICES.get(n - 1)?)),
+            false => Some(Key::Digit(win, n)),
+        }
     }
 
     /// After a digit pressed an action: an armed one keeps the choice open as long as it stays
@@ -276,6 +333,39 @@ mod tests {
         assert_eq!(with_actions("", &both, false), "Gate … · Light ✗");
         assert_eq!(with_actions("", &idle, false), "");
         assert_eq!(with_actions(cap, &[], true), cap);
+    }
+
+    #[test]
+    fn z_opens_the_snooze_lengths_and_a_digit_picks_one() {
+        i18n::set(i18n::Lang::En);
+        let t = Instant::now();
+        let mut p = Picker::default();
+        assert!(p.key(b'z', t));
+        assert_eq!(p.next_settled(t + ms(200)), Some(Key::Z));
+        p.key_z(7, t + ms(200));
+        assert_eq!(p.choice(7, t + ms(300)), Choice::Snooze);
+        assert!(p.choosing(7, t + ms(300)));
+        // 3 = the third length (1 h); 9 lists nothing and shows camera 9.
+        assert!(!p.key(b'9', t + ms(400)));
+        assert!(p.key(b'3', t + ms(1000)));
+        assert_eq!(p.next_settled(t + ms(1200)), Some(Key::Snooze(7, 60)));
+        // `a` replaces the choice with its own.
+        p.key_a(7, &[1, 2], t + ms(1300));
+        assert_eq!(p.choice(7, t + ms(1300)), Choice::Actions);
+        let cap = "Garden · person";
+        assert_eq!(with_choice(cap, &[], Choice::Snooze), "z: 1 15 min · 2 30 min · 3 1 h · 4 2 h · 5 4 h · Garden · person");
+        assert_eq!(with_choice("", &[], Choice::Snooze), "z: 1 15 min · 2 30 min · 3 1 h · 4 2 h · 5 4 h");
+        assert_eq!(with_choice(cap, &[], Choice::None), cap);
+    }
+
+    #[test]
+    fn a_digit_typed_right_after_z_goes_to_its_choice() {
+        let t = Instant::now();
+        let mut p = Picker::default();
+        assert!(p.key(b'z', t) && p.key(b'2', t + ms(60)), "not camera 2");
+        assert_eq!(p.next_settled(t + ms(200)), Some(Key::Z));
+        p.key_z(4, t + ms(200));
+        assert_eq!(p.next_settled(t + ms(250)), Some(Key::Snooze(4, 30)));
     }
 
     #[test]
@@ -372,6 +462,7 @@ mod tests {
                             }
                         }
                         Key::Digit(_, n) => act(&mut b, &mut p, n, now, true),
+                        Key::Z | Key::Snooze(..) => panic!("no z typed here"),
                     }
                 }
             }

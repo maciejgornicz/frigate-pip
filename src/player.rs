@@ -56,6 +56,8 @@ pub struct Shared {
     replay: AtomicU8,
     /// The replay button was pressed; the player starts or stops the replay.
     replay_pressed: AtomicBool,
+    /// The window has a snooze button (not the settings preview).
+    pub snooze: AtomicBool,
     /// The action buttons, set by the UI thread; empty = none.
     actions: Mutex<Vec<Shown>>,
     /// The action button under the mouse (its number), 0 = none.
@@ -77,6 +79,7 @@ impl Shared {
             zoom: Mutex::new(Zoom::FULL),
             replay: AtomicU8::new(0),
             replay_pressed: AtomicBool::new(false),
+            snooze: AtomicBool::new(false),
             actions: Mutex::new(Vec::new()),
             hot_action: AtomicU8::new(0),
             action_rects: Mutex::new(Vec::new()),
@@ -436,6 +439,7 @@ fn play(p: &Params, shared: &Arc<Shared>) {
                 (true, true) => 2,
             },
             replay: shared.replay(),
+            snooze: shared.snooze.load(Ordering::Relaxed),
             actions,
             hot_action: shared.hot_action.load(Ordering::Relaxed).into(),
             volume: shared.sound.volume.load(Ordering::Relaxed),

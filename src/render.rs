@@ -24,12 +24,15 @@ pub struct Overlay {
     pub text: String,
     pub live: bool,
     /// Close button: 0 = hidden, 1 = shown (mouse over the window), 2 = highlighted (mouse over the button),
-    /// 3 = shown with the sound button highlighted (mouse over that one), 4 = likewise the replay button.
+    /// 3 = shown with the sound button highlighted (mouse over that one), 4 = likewise the replay button,
+    /// 5 = likewise the snooze button.
     pub close: u8,
     /// Sound button: 0 = no camera audio (no button), 1 = sound on, 2 = muted.
     pub sound: u8,
     /// Replay button: 0 = nothing to replay (no button), 1 = shown with the others, 2 = replaying (it stays).
     pub replay: u8,
+    /// The window has a snooze button (shown with the others).
+    pub snooze: bool,
     /// Action buttons in number order; empty = the camera has none. Always shown.
     pub actions: Vec<Shown>,
     /// The action button under the mouse (its number), 0 = none.
@@ -57,6 +60,18 @@ pub fn sound_button_rect(client_width: i32, dpi: u32) -> (i32, i32, i32, i32) {
 /// Replay button: left of the sound button when the window plays camera audio, otherwise in its place.
 pub fn replay_button_rect(client_width: i32, dpi: u32, sound: bool) -> (i32, i32, i32, i32) {
     let right = if sound { sound_button_rect(client_width, dpi) } else { close_button_rect(client_width, dpi) };
+    crate::view::left_of(right, dpi.max(96) as f32 / 96.0)
+}
+
+/// Snooze button: left of the other buttons in the top-right corner.
+pub fn snooze_button_rect(client_width: i32, dpi: u32, sound: bool, replay: bool) -> (i32, i32, i32, i32) {
+    let right = if replay {
+        replay_button_rect(client_width, dpi, sound)
+    } else if sound {
+        sound_button_rect(client_width, dpi)
+    } else {
+        close_button_rect(client_width, dpi)
+    };
     crate::view::left_of(right, dpi.max(96) as f32 / 96.0)
 }
 
@@ -446,9 +461,10 @@ impl Renderer {
         let sound = (ov.sound > 0 && (ov.close > 0 || ov.sound == 2)).then(|| sound_button_rect(self.size.0 as i32, dpi));
         // Likewise the replay button stays while replaying, so that it can be stopped.
         let replay = (ov.replay > 0 && (ov.close > 0 || ov.replay == 2)).then(|| replay_button_rect(self.size.0 as i32, dpi, ov.sound > 0));
+        let snooze = (ov.snooze && ov.close > 0).then(|| snooze_button_rect(self.size.0 as i32, dpi, ov.sound > 0, ov.replay > 0));
         if !ov.text.is_empty() {
             // The caption must not run under the buttons.
-            self.draw_caption(ov, replay.or(sound).or(button).map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
+            self.draw_caption(ov, snooze.or(replay).or(sound).or(button).map_or(0.0, |b| (self.size.0 as i32 - b.0) as f32));
         }
         // Always shown, not only under the mouse; under the other buttons (they win the hit-test too).
         let actions = self.draw_actions(ov, dpi);
@@ -467,6 +483,9 @@ impl Renderer {
         }
         if let Some(rect) = replay {
             let _ = self.draw_replay_button(rect, ov.replay == 2, ov.close == 4);
+        }
+        if let Some(rect) = snooze {
+            let _ = self.draw_snooze_button(rect, ov.close == 5);
         }
         if ov.sound > 0 && ov.close > 0 {
             if let Some(slider) = volume_slider_rect(self.size.0 as i32, self.size.1 as i32, dpi) {
@@ -504,6 +523,9 @@ impl Renderer {
         }
         if ov.replay > 0 {
             controls.push(replay_button_rect(w, dpi, ov.sound > 0));
+        }
+        if ov.snooze {
+            controls.push(snooze_button_rect(w, dpi, ov.sound > 0, ov.replay > 0));
         }
         let right = controls.iter().filter(|c| c.1 < bottom && c.3 > top).map(|c| c.0).min().unwrap_or(w);
         let widths: Vec<f32> = pills.iter().map(|p| p.3.width).collect();
@@ -599,6 +621,25 @@ impl Renderer {
         sink.EndFigure(D2D1_FIGURE_END_CLOSED);
         sink.Close()?;
         self.d2d.FillGeometry(&head, &self.white, None);
+        Ok(())
+    }
+
+    /// A crescent moon in a circle, lit under the mouse.
+    unsafe fn draw_snooze_button(&self, (l, t, r, b): (i32, i32, i32, i32), hot: bool) -> Result<()> {
+        let (cx, cy, rad) = ((l + r) as f32 / 2.0, (t + b) as f32 / 2.0, (r - l) as f32 / 2.0);
+        let circle = D2D1_ELLIPSE { point: D2D_POINT_2F { x: cx, y: cy }, radiusX: rad, radiusY: rad };
+        self.d2d.FillEllipse(&circle, &self.shade);
+        if hot {
+            self.d2d.FillEllipse(&circle, &self.light);
+        }
+        let points: Vec<D2D_POINT_2F> = crate::snooze::moon_icon((cx, cy), rad).into_iter().map(|(x, y)| D2D_POINT_2F { x, y }).collect();
+        let moon = self.d2f.CreatePathGeometry()?;
+        let sink = moon.Open()?;
+        sink.BeginFigure(points[0], D2D1_FIGURE_BEGIN_FILLED);
+        sink.AddLines(&points[1..]);
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        sink.Close()?;
+        self.d2d.FillGeometry(&moon, &self.white, None);
         Ok(())
     }
 

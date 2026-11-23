@@ -51,7 +51,7 @@ Download `FrigatePiP-<version>-portable.exe` from the Releases page and run it f
 
 ### Updating
 
-FrigatePiP checks for a new version once a day (**Check for updates** in the settings). When one is available, a notification appears and both the tray menu and the settings window offer **Update to …**: FrigatePiP downloads the installer from GitHub, verifies its SHA-256 checksum and runs it — the update takes a few seconds and keeps your settings. **Check now** in the settings looks for a new version at once. You can also run the installer of a new version yourself. The portable version only opens the release page: download the new exe and replace the old one.
+FrigatePiP checks for a new version once a day (**Check for updates** in the settings). When one is available, a notification appears and both the tray menu and the settings window offer **Update to …**. Clicking it (or the notification) first shows what is new: the changes of every version since yours, as listed on GitHub (in English), with a link to the release page. Only when you answer **Yes** does FrigatePiP download the installer from GitHub, verify its SHA-256 checksum and run it — the update takes a few seconds and keeps your settings; **No** leaves everything as it is, and the offer stays. **Check now** in the settings looks for a new version at once. You can also run the installer of a new version yourself. The portable version only opens the release page: download the new exe and replace the old one.
 
 ### Uninstalling
 
@@ -89,10 +89,11 @@ Hover over the icon to see the status (for example *Connected: http://192.168.1.
 | Menu item | What it does |
 |---|---|
 | *(status line)* | Connection state or remaining pause time (informational). |
-| **Update to …** | Appears when a new version is available: downloads and installs it (see [Updating](#updating)). |
+| **Update to …** | Appears when a new version is available: shows what is new and, if you agree, downloads and installs it (see [Updating](#updating)). |
 | **Settings…** | Opens the settings window. |
 | **Show camera** | Opens a preview window of the chosen camera right away, even while notifications are paused. Useful to check the picture or simply to look. |
 | **Pause notifications** | **For 15 minutes**, **For 1 hour**, or **Until resumed**. While paused, detections do not open windows. The item reads **Paused** while a pause is active, and **Resume now** ends it. |
+| **Snoozed cameras** | Appears while a camera is [snoozed](#snoozing-a-camera): one entry per camera with the time left, e.g. *Wake Garden (52 min left)*; clicking it ends the snooze at once. The icon's tooltip lists the snoozed cameras too. |
 | **Close preview windows** | Closes all open preview windows, including pinned ones. |
 | **Open Frigate** | Opens the Frigate web interface in your browser. |
 | **Help** | Opens this guide. |
@@ -122,11 +123,23 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 | **×** (top-right corner) | Closes the window at once. The button appears when you point at the window. |
 | **Speaker** (left of ×) | Turns the window's sound off; click again to turn it back on. The button appears when you point at a window that plays camera audio; while the sound is off, the crossed-out speaker stays visible. |
 | **Volume slider** (under the speaker) | Sets the sound volume of this window: drag it or click on it. It appears together with the speaker; raising the volume also turns muted sound back on. On Linux you hear the new volume just after you let go. |
-| **Replay** ⟲ (left of the other buttons) | Plays the start of the event again at normal speed, without sound; the caption shows *Replay −12 s*: how far behind live the picture is. With the [prebuffer](#prebuffer) the replay starts 5 s before the window opened, without it when the window opened. Click again to return to live video at once; after the replay it returns by itself. The button appears when you point at a window with live video; the window stays open during the replay. |
+| **Replay** ⟲ (left of the speaker) | Plays the start of the event again at normal speed, without sound; the caption shows *Replay −12 s*: how far behind live the picture is. With the [prebuffer](#prebuffer) the replay starts 5 s before the window opened, without it when the window opened. Click again to return to live video at once; after the replay it returns by itself. The button appears when you point at a window with live video; the window stays open during the replay. |
+| **Snooze** ☾ (left of the other buttons) | Opens a list: **15 min**, **30 min**, **1 h**, **2 h**, **4 h**. Picking a length [snoozes the camera](#snoozing-a-camera) and closes its window. The button appears when you point at the window. |
 | **Right click** | Closes the window. |
 | **Double click** | Opens this camera in the Frigate web interface. |
 | **Hover** | While the mouse pointer is over the window, it does not close. After you move away it stays at least 3 more seconds. |
 | **Action buttons** (bottom-left corner) | Run the camera's [actions](#65-actions), for example open the gate or switch on a light. They are always visible. With **Confirmation**, the first click arms the button — it turns red and asks *Gate?* — and a second click within 3 s runs the action (from 0.4 s after the first one, so a double click never runs it); without it, one click runs it. The button then shows *Gate …* (amber) while it sends, and for 2 s *Gate ✓* (green: received) or *Gate ✗* (red: failed). Only one button is armed at a time: clicking another one disarms the first. A click on a button never pins or moves the window and does not open Frigate. |
+
+### Snoozing a camera
+
+When you know a camera will keep seeing someone for a while — someone working in the garden, children playing in the yard — snooze it: point at its window, click the moon ☾ and pick how long. The window closes, and that camera's detections open no window until the time is up; all other cameras go on as usual. Snoozing the same camera again sets a new end.
+
+- **Show camera** in the tray menu still shows a snoozed camera.
+- **Snoozed cameras** in the tray menu wakes a camera before its time.
+- A snooze is not saved: exiting FrigatePiP or restarting the computer wakes every camera.
+- To stop all windows instead, use **Pause notifications**.
+
+On Linux the desktop windows have the same button; in the terminal, on the console and in tmux popups the [**z** key](#keys) does it.
 
 ### When does a window close?
 
@@ -134,7 +147,8 @@ Preview windows never take the keyboard focus, so they do not interrupt typing o
 - At the latest after **at most** seconds, even if the object keeps moving.
 - Never while it is pinned or while the mouse pointer is over it.
 - Never during a replay; afterwards it stays at least 5 more seconds.
-- Never while one of its [action buttons](#65-actions) is armed, sending or showing its result, nor (on Linux) while the choice of the [**a** key](#keys) is open for it. Like a pinned window, it is not replaced by a new event meanwhile.
+- Never while one of its [action buttons](#65-actions) is armed, sending or showing its result, nor (on Linux) while the choice of the [**a** or **z** key](#keys) is open for it. Like a pinned window, it is not replaced by a new event meanwhile.
+- Never while the list under its snooze button is open.
 
 ### More than one camera
 
@@ -161,7 +175,7 @@ Most changes take effect **immediately** on open preview windows, so you can see
 | **Language** | Language of FrigatePiP. **Automatic (Windows)** follows the Windows display language; English is used when that language is not available. See [Language](#9-language). |
 | **Start FrigatePiP with Windows** | Starts FrigatePiP automatically when you sign in to Windows. |
 | **Check for updates** | Once a day FrigatePiP asks GitHub whether a new version exists and, if so, shows a notification and offers the update. Nothing about you or your cameras is sent. |
-| **Check now** / **Update to …** | Looks for a new version at once; when one is found, the button downloads and installs it (your settings are kept). The text next to it shows the result. |
+| **Check now** / **Update to …** | Looks for a new version at once; when one is found, the button shows what is new and, if you agree, downloads and installs it (your settings are kept). The text next to it shows the result. |
 
 ### 6.2 Detection
 
@@ -521,7 +535,7 @@ On a Linux desktop the preview windows work like on Windows: borderless windows 
 - **Start:** applications menu → **FrigatePiP** (installed with apt), or `frigate-pip` in a terminal on the desktop. It runs in the background without a terminal; one copy runs per user. A second start (or `frigate-pip --settings`) opens the settings of the running copy.
 - **With the desktop session:** `frigate-pip --autostart on` (off again: `frigate-pip --autostart off`). To stop it: `frigate-pip --quit`.
 - **Tray icon:** with the same menu as on Windows (see [The tray icon](#4-the-tray-icon)); its colour shows the state: blue — connected, grey — not connected, amber — paused. It appears on KDE Plasma, Xfce, Cinnamon, MATE and Budgie, and on GNOME with the AppIndicator extension (included in Ubuntu).
-- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, the slider under it sets the volume, ⟲ replays the start of the event, dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, the action buttons in the bottom-left corner run the camera's [actions](#65-actions), and a window under the mouse does not close. The action buttons need a caption font (`fonts-dejavu-core`, or another TrueType font set as `font` in `[console]`); without one the windows have no buttons and the log says so once.
+- **Mouse:** like on Windows (see [Mouse actions](#mouse-actions)) — × or the right button closes, the speaker mutes, the slider under it sets the volume, ⟲ replays the start of the event, the moon ☾ [snoozes the camera](#snoozing-a-camera), dragging moves the window, the wheel resizes it, Ctrl + wheel zooms the picture around the mouse, Ctrl + drag moves the zoomed picture, a click pins it, a double click opens the camera in Frigate, the action buttons in the bottom-left corner run the camera's [actions](#65-actions), and a window under the mouse does not close. The action buttons and the list under the snooze button need a caption font (`fonts-dejavu-core`, or another TrueType font set as `font` in `[console]`); without one the windows have neither and the log says so once.
 - **Window options:** `topmost` (with `false` the windows are ordinary windows that others can cover), `sound` (the desktop’s notification sound) and `skip_fullscreen` (nothing while the active window is full-screen) work like on Windows.
 - **Settings:** a click on the icon (or **Settings…** in its menu) opens them in the browser, with the same options, descriptions and connection test as on Windows; the page opens only on this computer. At the first start it opens by itself. They are saved in `~/.config/frigate-pip/config.ini` (described below). The **Actions** section, after **Video & audio**, has the same four rows per camera as the Windows tab (see [Actions](#65-actions)); when a URL you typed is not valid, nothing is saved and the page shows which row is wrong.
 
@@ -535,7 +549,7 @@ In this mode FrigatePiP has no window of its own: it waits for detections in the
 2. Open tmux for your own work — `tmux` starts a new session — and work there. The popups appear over this window.
 
 - To stop FrigatePiP: `tmux kill-session -t frigate-pip`. To use its keys (pause, show a camera): `tmux attach -t frigate-pip`.
-- The popup appears in the chosen **corner** (`position`) and its size follows the **window width** (`width`). It closes by itself after the usual time (`duration`, `max_duration`), or at once with **q**, **x** or **Esc**. **m** turns its sound off and on. **r** replays the start of the event (from the moment the popup opened). **a** (and a digit) presses the popup camera's action buttons, as in the terminal (see [Keys](#keys)). A popup keeps the settings it started with; settings saved meanwhile apply from the next popup.
+- The popup appears in the chosen **corner** (`position`) and its size follows the **window width** (`width`). It closes by itself after the usual time (`duration`, `max_duration`), or at once with **q**, **x** or **Esc**. **m** turns its sound off and on. **r** replays the start of the event (from the moment the popup opened). **a** (and a digit) presses the popup camera's action buttons and **z** (and a digit) snoozes its camera, as in the terminal (see [Keys](#keys)). A popup keeps the settings it started with; settings saved meanwhile apply from the next popup.
 - tmux shows one popup at a time: a detection on another camera replaces the open popup (or is skipped when `replace = false`). While an action button of the popup is armed, sending or showing its result, the popup stays open: a detection on another camera is skipped, one on the same camera extends the popup.
 - For the full colours of the picture, tmux must pass 24-bit colour on: add `set -as terminal-features ",xterm-256color:RGB"` to `~/.tmux.conf` (use your `$TERM` outside tmux) and restart tmux. FrigatePiP writes this hint into its log when the colours are missing.
 
@@ -551,9 +565,10 @@ When FrigatePiP runs in a terminal or on a console:
 | **m** | Sound off / on (with `camera_audio = true`) for all windows, also those opened later; the caption then shows *sound off*. |
 | **r** | Replay the start of the event in every window (see [Mouse actions](#mouse-actions)); again: back to live video. |
 | **a** | Presses an [action button](#65-actions) of the newest window whose camera has actions. With one action, **a** presses it (with confirmation: **a**, then **a** again within 3 s). With several, **a** lists them in the caption for 3 s, e.g. *1 Gate · 2 Light*; a digit then picks that action instead of showing a camera, and with confirmation the same digit again runs it. The caption shows the state: *Gate?*, *Gate …*, *Gate ✓* or *Gate ✗*. While the choice is open for a window, that window does not close and is not replaced. |
-| **1**–**9** | Show camera 1–9 (in the order of the Frigate configuration). While the choice of **a** is open and lists that number: that action instead. |
+| **z** | [Snoozes](#snoozing-a-camera) the camera of the newest window: the caption lists the lengths for 3 s, *z: 1 15 min · 2 30 min · 3 1 h · 4 2 h · 5 4 h*, and a digit picks one; the camera's windows close. The status line shows the snoozed cameras with the time left, e.g. *Snoozed: Garden 52 min*. The [tray menu](#4-the-tray-icon) of the desktop windows wakes them. |
+| **1**–**9** | Show camera 1–9 (in the order of the Frigate configuration). While the choice of **a** or **z** is open and lists that number: that action or length instead. |
 
-The **a** key and the digits of its choice take effect about 150 ms after you press them. A terminal does not report when a key is released, so FrigatePiP waits to see that the key is not held: a held key counts once and never confirms, and two taps within 150 ms count as nothing. This needs the usual key repeat settings (a repeat faster than every 150 ms, as desktops and the Linux console have by default).
+The **a** and **z** keys and the digits of their choice take effect about 150 ms after you press them. A terminal does not report when a key is released, so FrigatePiP waits to see that the key is not held: a held key counts once and never confirms, and two taps within 150 ms count as nothing. This needs the usual key repeat settings (a repeat faster than every 150 ms, as desktops and the Linux console have by default).
 
 ### Command line
 

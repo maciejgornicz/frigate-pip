@@ -8,6 +8,7 @@ use crate::hub::Hub;
 use crate::i18n::{self, t};
 use crate::player::{self, Shared, WM_APP_ASPECT, WM_APP_PLAYER_DONE};
 use crate::settings::{self, Settings};
+use crate::snooze::Snoozes;
 use crate::update::{self, Release};
 use crate::util::Cancel;
 use crate::view::{choose_slot, choose_stream, Slot};
@@ -43,6 +44,8 @@ const WM_APP_UPDATE: u32 = WM_APP + 6;
 /// An action request ended: WPARAM = its ticket, LPARAM = 1 if it got HTTP 2xx. Posted to the
 /// main window, which lives as long as the app (a popup's handle may be gone and reused).
 const WM_APP_ACTION: u32 = WM_APP + 7;
+/// Ask before installing the update found: what changed, and whether to install it now.
+const WM_APP_ASK_UPDATE: u32 = WM_APP + 8;
 pub const COPYDATA_TEST: usize = 0x4650_5450;
 
 const TIMER_DEADLINE: usize = 1;
@@ -52,12 +55,16 @@ const TIMER_TEST: usize = 4;
 const TIMER_UPDATE: usize = 5;
 /// On a popup: an action button's look changes by itself (arming, result or request expires).
 const TIMER_ACTION: usize = 6;
+/// On the main window: the next snoozed camera wakes up.
+const TIMER_SNOOZE: usize = 7;
 
 const CMD_TEST: u32 = 1000;
 const CMD_PAUSE_15: u32 = 1100;
 const CMD_PAUSE_60: u32 = 1101;
 const CMD_PAUSE_FOREVER: u32 = 1102;
 const CMD_RESUME: u32 = 1103;
+/// Wakes the snoozed camera at this index of `App::snoozes` (up to 100).
+const CMD_WAKE: u32 = 1200;
 const CMD_SETTINGS: u32 = 1700;
 const CMD_CLOSE_ALL: u32 = 1800;
 const CMD_OPEN_FRIGATE: u32 = 1801;
@@ -120,6 +127,8 @@ struct Popup {
     preview: bool,
     /// The action buttons by number (`[n - 1]` is action `n`), for the actions with a URL.
     actions: action::Buttons,
+    /// The list under the snooze button is open (the window stays until it closes).
+    snooze_menu: bool,
 }
 
 struct Mon {
@@ -139,6 +148,8 @@ pub struct App {
     connected: bool,
     status: String,
     pause: Pause,
+    /// Cameras snoozed from their windows.
+    snoozes: Snoozes,
     popups: Vec<Popup>,
     listener: Cancel,
     listener_key: String,
@@ -158,6 +169,8 @@ pub struct App {
     update_notified: Option<String>,
     /// The last notification offers the update (a click installs it).
     update_balloon: bool,
+    /// The question before an update is open (it is asked once at a time).
+    update_asking: bool,
 }
 
 // ---------------------------------------------------------------- helpers
@@ -369,6 +382,7 @@ pub fn run(test: Option<String>, open_settings: bool) {
             connected: false,
             status: "…".into(),
             pause: Pause::Off,
+            snoozes: Snoozes::default(),
             popups: Vec::new(),
             listener: Cancel::new(),
             listener_key: String::new(),
@@ -382,6 +396,7 @@ pub fn run(test: Option<String>, open_settings: bool) {
             update_status: update::Status::Idle,
             update_notified: None,
             update_balloon: false,
+            update_asking: false,
         };
         APP.with(|a| *a.borrow_mut() = Some(app));
         with_app(|a| {
@@ -468,6 +483,15 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             with_app(|a| a.action_done(wp.0 as u32, lp.0 != 0));
             LRESULT(0)
         }
+        WM_APP_ASK_UPDATE => {
+            // Outside `with_app`: the message box runs its own message loop, and the preview
+            // windows go on meanwhile.
+            if let Some(Some((owner, title, text))) = with_app(|a| a.update_question()) {
+                let yes = MessageBoxW(owner, &wide(&text), &wide(&title), MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST) == IDYES;
+                with_app(|a| a.update_answered(yes));
+            }
+            LRESULT(0)
+        }
         WM_COPYDATA => {
             let cds = &*(lp.0 as *const COPYDATASTRUCT);
             if cds.dwData == COPYDATA_TEST && !cds.lpData.is_null() {
@@ -482,6 +506,9 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             match wp.0 {
                 TIMER_RESUME => {
                     with_app(|a| a.set_pause(Pause::Off));
+                }
+                TIMER_SNOOZE => {
+                    with_app(|a| a.snoozes_changed());
                 }
                 TIMER_TEST => {
                     with_app(|a| {
@@ -525,6 +552,35 @@ unsafe fn show_menu(hwnd: HWND) {
     }
 }
 
+/// The list under a window's snooze button: how long to snooze its camera. A menu of its own
+/// (the app state is free meanwhile: the window goes on playing).
+unsafe fn show_snooze_menu(popup: HWND) {
+    let Some(Some(main)) = with_app(|a| a.snooze_menu_opens(popup)) else { return };
+    let Ok(menu) = CreatePopupMenu() else {
+        with_app(|a| a.snooze_menu_closed(popup, None));
+        return;
+    };
+    let t = t();
+    let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, &wide(&t.snooze_title.replace('&', "&&")));
+    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+    for (i, &m) in crate::snooze::CHOICES.iter().enumerate() {
+        let _ = AppendMenuW(menu, MF_STRING, i + 1, &wide(&crate::snooze::choice_text(m)));
+    }
+    // Under the button, its right edge on the button's.
+    let mut rc = RECT::default();
+    let _ = GetClientRect(popup, &mut rc);
+    let (sound, replay) = with_app(|a| (a.has_sound(popup), a.has_replay(popup))).unwrap_or_default();
+    let (_, _, r, b) = crate::render::snooze_button_rect(rc.right, GetDpiForWindow(popup), sound, replay);
+    let mut at = POINT { x: r, y: b };
+    let _ = ClientToScreen(popup, &mut at);
+    let _ = SetForegroundWindow(main);
+    let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTALIGN | TPM_TOPALIGN, at.x, at.y, 0, main, None);
+    let _ = PostMessageW(main, WM_NULL, WPARAM(0), LPARAM(0));
+    let _ = DestroyMenu(menu);
+    let minutes = (cmd.0 as usize).checked_sub(1).and_then(|i| crate::snooze::CHOICES.get(i).copied());
+    with_app(|a| a.snooze_menu_closed(popup, minutes));
+}
+
 fn window_rect(hwnd: HWND) -> RECT {
     let mut r = RECT::default();
     unsafe {
@@ -556,13 +612,15 @@ const HT_VOLUME: u32 = HTBORDER;
 const HT_REPLAY: u32 = HTMENU;
 /// Hit-test code of the action buttons, likewise (a popup has no scroll bar).
 const HT_ACTION: u32 = HTHSCROLL;
+/// Hit-test code of the snooze button, likewise.
+const HT_SNOOZE: u32 = HTVSCROLL;
 
 unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_NCHITTEST => {
             // The close button in the top-right corner, the sound button left of it and the
-            // volume slider under that (only with camera audio), then the replay button, then the
-            // action buttons along the bottom-left; the rest of the window drags it.
+            // volume slider under that (only with camera audio), then the replay and the snooze
+            // button, then the action buttons along the bottom-left; the rest of the window drags it.
             let mut pt = lparam_point(lp);
             let _ = ScreenToClient(hwnd, &mut pt);
             let mut rc = RECT::default();
@@ -571,6 +629,7 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             let inside = |(l, t, r, b): (i32, i32, i32, i32)| pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
             let sound = with_app(|a| a.has_sound(hwnd)) == Some(true);
             let replay = with_app(|a| a.has_replay(hwnd)) == Some(true);
+            let snooze = with_app(|a| a.has_snooze(hwnd)) == Some(true);
             let actions = with_app(|a| a.action_rects(hwnd)).unwrap_or_default();
             let hit = if inside(crate::render::close_button_rect(rc.right, dpi)) {
                 HTCLOSE
@@ -580,6 +639,8 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
                 HT_VOLUME
             } else if replay && inside(crate::render::replay_button_rect(rc.right, dpi, sound)) {
                 HT_REPLAY
+            } else if snooze && inside(crate::render::snooze_button_rect(rc.right, dpi, sound, replay)) {
+                HT_SNOOZE
             } else if action::hit(&actions, pt.x, pt.y).is_some() {
                 HT_ACTION
             } else {
@@ -600,6 +661,10 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             with_app(|a| a.toggle_replay(hwnd));
             LRESULT(0)
         }
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HT_SNOOZE => {
+            show_snooze_menu(hwnd);
+            LRESULT(0)
+        }
         // Never pins, drags or opens Frigate; the second half of a double-click is just another
         // press (the button ignores it).
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 as u32 == HT_ACTION => {
@@ -607,7 +672,7 @@ unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             LRESULT(0)
         }
         // The release on a button is ours too (the default handling has nothing to do there).
-        WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND | HT_REPLAY | HT_ACTION) => LRESULT(0),
+        WM_NCLBUTTONUP if matches!(wp.0 as u32, HTCLOSE | HT_SOUND | HT_REPLAY | HT_ACTION | HT_SNOOZE) => LRESULT(0),
         // A hand over the action buttons rather than whatever the default gives a scroll bar.
         WM_SETCURSOR if (lp.0 & 0xFFFF) as u32 == HT_ACTION => {
             if let Ok(c) = LoadCursorW(None, IDC_HAND) {
@@ -779,7 +844,11 @@ impl App {
             hIcon: icon,
             ..Default::default()
         };
-        let tip = format!("FrigatePiP\n{}", self.status_line());
+        let mut tip = format!("FrigatePiP\n{}", self.status_line());
+        if !self.snoozes.list().is_empty() {
+            let names: Vec<&str> = self.snoozes.list().iter().map(|s| s.title.as_str()).collect();
+            tip = format!("{tip}\n{}", i18n::fmt(t().status_snoozed, &[&names.join(", ")]));
+        }
         for (i, c) in tip.encode_utf16().take(nid.szTip.len() - 1).enumerate() {
             nid.szTip[i] = c;
         }
@@ -940,6 +1009,10 @@ impl App {
                 crate::log!("{}: skipped (paused)", d.camera);
                 return;
             }
+            if self.snoozes.is_snoozed(&d.camera, Instant::now()) {
+                crate::log!("{}: skipped (snoozed)", d.camera);
+                return;
+            }
             if self.cfg.skip_fullscreen && fullscreen_active() {
                 crate::log!("{}: skipped (full screen)", d.camera);
                 return;
@@ -1039,6 +1112,7 @@ impl App {
             let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const _ as *const _, 4);
         }
         let shared = Shared::new(text.clone(), v.overlay, v.camera_volume);
+        shared.snooze.store(true, Ordering::Relaxed);
         let now = Instant::now();
         let dur = Duration::from_secs(v.duration as u64);
         let max = Duration::from_secs(v.max_duration.max(v.duration) as u64);
@@ -1058,6 +1132,7 @@ impl App {
             shared: shared.clone(),
             preview: false,
             actions: Default::default(),
+            snooze_menu: false,
         };
         match &place {
             Some(p) => {
@@ -1145,7 +1220,7 @@ impl App {
             settings::ID_SUPPORT => open_url(crate::util::SPONSOR_URL),
             settings::ID_UPDATE => {
                 if self.update.is_some() {
-                    self.run_update();
+                    self.ask_update();
                 } else {
                     self.check_for_update(true);
                 }
@@ -1275,6 +1350,8 @@ impl App {
             if let Some(p) = self.find(h) {
                 p.preview = true;
                 p.pinned = true;
+                // Nothing to snooze in a preview of the settings.
+                p.shared.snooze.store(false, Ordering::Relaxed);
             }
             // The preview's action buttons follow the draft.
             self.refresh_window_actions(h);
@@ -1437,7 +1514,7 @@ impl App {
                 }
                 // Nor does it close while an action button is armed, sending or showing a result.
                 let action_busy = action::any_busy(&p.actions, Instant::now());
-                if p.hovered || p.drag.is_some() || p.pinned || p.preview || replaying || action_busy {
+                if p.hovered || p.drag.is_some() || p.pinned || p.preview || replaying || action_busy || p.snooze_menu {
                     unsafe {
                         SetTimer(hwnd, TIMER_DEADLINE, 1000, None);
                     }
@@ -1465,6 +1542,7 @@ impl App {
             (true, HTCLOSE) => 2,
             (true, HT_SOUND) => 3,
             (true, HT_REPLAY) => 4,
+            (true, HT_SNOOZE) => 5,
             (true, _) => 1,
         });
         p.shared.set_hot_action(pill.unwrap_or(0));
@@ -1494,6 +1572,71 @@ impl App {
     /// The window has something to replay (then it has a replay button).
     fn has_replay(&mut self, hwnd: HWND) -> bool {
         self.find(hwnd).is_some_and(|p| p.shared.replay() > 0)
+    }
+
+    /// The window has a snooze button (every one but the settings preview).
+    fn has_snooze(&mut self, hwnd: HWND) -> bool {
+        self.find(hwnd).is_some_and(|p| !p.closing && p.shared.snooze.load(Ordering::Relaxed))
+    }
+
+    /// The list under the snooze button opens: the window stays meanwhile. Returns the main
+    /// window, the menu's owner.
+    fn snooze_menu_opens(&mut self, hwnd: HWND) -> Option<HWND> {
+        if !self.has_snooze(hwnd) {
+            return None;
+        }
+        let main = self.hwnd;
+        self.find(hwnd)?.snooze_menu = true;
+        Some(main)
+    }
+
+    /// The list closed, with a length picked (`minutes`) or not.
+    fn snooze_menu_closed(&mut self, hwnd: HWND, minutes: Option<u64>) {
+        let Some(p) = self.find(hwnd) else { return };
+        p.snooze_menu = false;
+        // Hovering starts over: the mouse went to the menu and may not be back.
+        p.hovered = false;
+        p.shared.set_close_button(0);
+        let camera = p.camera.clone();
+        if let Some(m) = minutes {
+            self.snooze(&camera, m);
+        }
+    }
+
+    /// Snoozes `camera` for `minutes`: its windows close and its events open none until then.
+    fn snooze(&mut self, camera: &str, minutes: u64) {
+        let title = self.cameras.iter().find(|c| c.name == camera).map_or_else(|| camera.to_string(), |c| c.title.clone());
+        self.snoozes.snooze(camera, &title, minutes, Instant::now());
+        crate::log!("{camera}: snoozed for {minutes} min");
+        let open: Vec<HWND> = self.popups.iter().filter(|p| p.camera == camera && !p.preview && !p.closing).map(|p| p.hwnd).collect();
+        for h in open {
+            self.close_hwnd(h);
+        }
+        self.snoozes_changed();
+    }
+
+    /// Wakes the snoozed camera at `i` (tray menu).
+    fn wake(&mut self, i: usize) {
+        let Some(camera) = self.snoozes.list().get(i).map(|s| s.camera.clone()) else { return };
+        self.snoozes.wake(&camera);
+        crate::log!("{camera}: woken up");
+        self.snoozes_changed();
+    }
+
+    /// Drops the snoozes that ran out, sets the timer for the next one and updates the tray.
+    fn snoozes_changed(&mut self) {
+        let now = Instant::now();
+        for s in self.snoozes.expire(now) {
+            crate::log!("{}: snooze ended", s.camera);
+        }
+        unsafe {
+            let _ = KillTimer(self.hwnd, TIMER_SNOOZE);
+            if let Some(end) = self.snoozes.next_end() {
+                let ms = end.saturating_duration_since(now).as_millis().min(u32::MAX as u128) as u32;
+                SetTimer(self.hwnd, TIMER_SNOOZE, ms.max(1000), None);
+            }
+        }
+        self.tray(NIM_MODIFY);
     }
 
     /// Replay button: starts or stops a replay of the event start (the player does it). A
@@ -1873,14 +2016,55 @@ impl App {
         }
     }
 
-    /// Installs the update found: the installed copy downloads and runs the installer,
-    /// a portable copy opens the release page.
-    fn run_update(&mut self) {
-        let Some(r) = self.update.clone() else { return };
+    /// The user asked for the update found (tray menu, notification, settings window): the
+    /// installed copy first shows what changed and asks (see `update_question`), a portable
+    /// copy opens the release page, which shows the changes itself.
+    fn ask_update(&mut self) {
+        let Some(r) = &self.update else { return };
         if !update::installed() {
             open_url(&r.page);
             return;
         }
+        unsafe {
+            let _ = PostMessageW(self.hwnd, WM_APP_ASK_UPDATE, WPARAM(0), LPARAM(0));
+        }
+    }
+
+    /// The question before an update: (owner window, title, text) — the version, what changed
+    /// since the running one, and whether to install it now. `None` while it is already open,
+    /// or when there is nothing (left) to ask about.
+    fn update_question(&mut self) -> Option<(HWND, String, String)> {
+        let r = self.update.as_ref()?;
+        if self.update_asking || self.update_status == update::Status::Downloading {
+            return None;
+        }
+        self.update_asking = true;
+        let t = t();
+        let mut text = i18n::fmt(t.update_ask_text, &[&r.version, &update::current_version()]);
+        let notes = update::notes_text(&r.notes, 15);
+        if !notes.is_empty() {
+            text = format!("{text}\n\n{}\n{notes}", t.update_ask_notes);
+        }
+        if !r.page.is_empty() {
+            text = format!("{text}\n\n{}", i18n::fmt(t.update_ask_more, &[&r.page]));
+        }
+        text = format!("{text}\n\n{}", t.update_ask_install);
+        // Over the settings window when the question comes from there.
+        let owner = self.settings.as_ref().map_or(self.hwnd, |s| s.hwnd);
+        Some((owner, t.update_ask_title.to_string(), text))
+    }
+
+    fn update_answered(&mut self, yes: bool) {
+        self.update_asking = false;
+        crate::log!("Update {}: {}", self.update.as_ref().map_or("-", |r| r.version.as_str()), if yes { "install" } else { "later" });
+        if yes {
+            self.run_update();
+        }
+    }
+
+    /// Installs the update found (after `ask_update`): downloads and runs the installer.
+    fn run_update(&mut self) {
+        let Some(r) = self.update.clone() else { return };
         if self.update_status == update::Status::Downloading {
             return;
         }
@@ -1896,7 +2080,7 @@ impl App {
 
     fn balloon_clicked(&mut self) {
         if self.update_balloon {
-            self.run_update();
+            self.ask_update();
         }
     }
 
@@ -1970,6 +2154,15 @@ impl App {
                 item(pause, CMD_RESUME, t.menu_resume, false);
             }
             sub(m, pause, if self.paused() { t.menu_paused } else { t.menu_pause });
+            let now = Instant::now();
+            let snoozed: Vec<_> = self.snoozes.list().iter().enumerate().filter(|(_, s)| s.until > now).take(100).collect();
+            if !snoozed.is_empty() {
+                let wake = CreatePopupMenu().unwrap_or_default();
+                for (i, s) in snoozed {
+                    item(wake, CMD_WAKE + i as u32, &crate::snooze::wake_text(s, now), false);
+                }
+                sub(m, wake, t.menu_snoozed);
+            }
             item(m, CMD_CLOSE_ALL, t.menu_close_all, false);
             sep(m);
             item(m, CMD_OPEN_FRIGATE, t.menu_open_frigate, false);
@@ -1996,13 +2189,14 @@ impl App {
             CMD_PAUSE_60 => self.set_pause(Pause::Until(Instant::now() + Duration::from_secs(60 * 60))),
             CMD_PAUSE_FOREVER => self.set_pause(Pause::Forever),
             CMD_RESUME => self.set_pause(Pause::Off),
+            c if (CMD_WAKE..CMD_WAKE + 100).contains(&c) => self.wake((c - CMD_WAKE) as usize),
             CMD_CLOSE_ALL => self.close_all(),
             CMD_OPEN_FRIGATE => open_url(&self.cfg.url),
             CMD_EDIT => open_in_notepad(&self.path),
             CMD_SUPPORT => open_url(crate::util::SPONSOR_URL),
             CMD_LOG => open_in_notepad(&crate::util::log_path()),
             CMD_HELP => open_url(&settings::help_url()),
-            CMD_UPDATE => self.run_update(),
+            CMD_UPDATE => self.ask_update(),
             CMD_EXIT => unsafe { PostQuitMessage(0) },
             _ => {}
         }
@@ -2065,7 +2259,7 @@ mod tests {
     #[test]
     fn tray_menu_contents() {
         let cfg = Config::from_ini(&IniDoc::parse(config::DEFAULT_INI));
-        let app = App {
+        let mut app = App {
             hwnd: HWND::default(),
             hinst: HINSTANCE::default(),
             cfg,
@@ -2083,6 +2277,7 @@ mod tests {
             connected: true,
             status: "http://frigate:5000".into(),
             pause: Pause::Off,
+            snoozes: Snoozes::default(),
             popups: Vec::new(),
             listener: Cancel::new(),
             listener_key: String::new(),
@@ -2096,6 +2291,7 @@ mod tests {
             update_status: update::Status::Idle,
             update_notified: None,
             update_balloon: false,
+            update_asking: false,
         };
         i18n::set(i18n::Lang::En);
         let m = app.build_menu();
@@ -2109,5 +2305,38 @@ mod tests {
         for expected in ["Connected: http://frigate:5000", "Settings…", "Show camera", "  Brama", "Pause notifications", "Help", "Exit"] {
             assert!(items.iter().any(|i| i.ends_with(expected) || i == expected), "missing item: {expected}\n{all}");
         }
+        assert!(!all.contains("Snoozed cameras"), "no snoozed cameras, no submenu\n{all}");
+        // A snoozed camera: a submenu wakes it, with the time left.
+        app.snoozes.snooze("brama", "Brama", 60, Instant::now());
+        let m = app.build_menu();
+        let mut items = Vec::new();
+        menu_texts(m, 0, &mut items);
+        unsafe {
+            let _ = DestroyMenu(m);
+        }
+        let all = items.join("\n");
+        let at = items.iter().position(|i| i == "Snoozed cameras").unwrap_or_else(|| panic!("no submenu\n{all}"));
+        assert!(items[at + 1].starts_with("  Wake Brama (") && items[at + 1].ends_with(" min left)"), "{all}");
+
+        // The question before an update: the version, what changed, the page; asked once at a time.
+        assert!(app.update_question().is_none(), "no update, no question");
+        app.update = Some(Release {
+            version: "9.1.0".into(),
+            page: "https://e/v9.1.0".into(),
+            installer: None,
+            checksums: None,
+            notes: vec![("9.1.0".into(), vec!["Snooze a camera".into()]), ("9.0.0".into(), vec!["Faster start".into()])],
+        });
+        let (_, title, text) = app.update_question().expect("a question");
+        assert_eq!(title, "FrigatePiP update");
+        let want = format!(
+            "FrigatePiP 9.1.0 is available (you have {}).\n\nWhat's new:\n9.1.0\n• Snooze a camera\n\n9.0.0\n• Faster start\n\n\
+             All changes: https://e/v9.1.0\n\nInstall it now? FrigatePiP closes for a moment and starts again; your settings are kept.",
+            update::current_version()
+        );
+        assert_eq!(text, want);
+        assert!(app.update_question().is_none(), "already open");
+        app.update_answered(false);
+        assert!(app.update_question().is_some(), "asked again after \"later\"");
     }
 }

@@ -23,9 +23,10 @@ use crate::frigate::{self, CameraInfo, Notice};
 use crate::history::Recorder;
 use crate::hub::Hub;
 use crate::i18n::{self, t};
+use crate::snooze::Snoozes;
 use crate::util::Cancel;
 use crate::view::{choose_slot, choose_stream, Slot, Zoom};
-use action_keys::Key;
+use action_keys::{Choice, Key};
 use canvas::Image;
 use ffmpeg::Ffmpeg;
 use std::collections::HashMap;
@@ -83,6 +84,11 @@ pub trait Output {
     /// Windows shown by another process: it asks to stay open (an action button is busy there).
     fn kept_open(&self, _id: u64) -> bool {
         false
+    }
+    /// Windows shown by another process, once closed (`alive` said `false`): the snooze length
+    /// in minutes picked there, if one was.
+    fn take_snooze(&mut self, _id: u64) -> Option<u64> {
+        None
     }
     /// The settings changed.
     fn configure(&mut self, _cfg: &Config) {}
@@ -148,6 +154,8 @@ pub enum Action {
     Replay,
     /// The pill of action `n` (1 to `config::ACTIONS`): arm it or send its request.
     Run(usize),
+    /// A length picked under the snooze button: snooze the window's camera this many minutes.
+    Snooze(u64),
 }
 
 /// A window shown by another process (see `Output::open_external`).
@@ -257,8 +265,9 @@ Options:
 Keys (when started in a terminal or on a console): q quit, x close windows,
 p pause / resume, m sound on / off, r replay, 1-9 show camera 1-9, a runs the action
 of the newest window that has one (a second a confirms it if asked); with several
-actions a shows them numbered for 3 s and their number runs one.
-In a tmux popup: q, x or Esc close it, m sound on / off, r replay, a as above.
+actions a shows them numbered for 3 s and their number runs one. z snoozes the camera
+of the newest window: it shows the lengths numbered for 3 s (1 = 15 min ... 5 = 4 h).
+In a tmux popup: q, x or Esc close it, m sound on / off, r replay, a and z as above.
 Settings: ~/.config/frigate-pip/config.ini - user guide:
 https://github.com/maciejgornicz/frigate-pip/blob/main/docs/en/user-guide.md#12-linux-version";
 
@@ -310,6 +319,7 @@ const M_LOG: i32 = 10;
 const M_CONFIG: i32 = 11;
 const M_EXIT: i32 = 13;
 const M_SUPPORT: i32 = 14;
+const M_SNOOZED: i32 = 15;
 /// The separators carry ids of their own: every item in the menu needs one, and two items
 /// sharing an id are one item to the panel that shows them.
 const M_SEP_STATUS: i32 = 2;
@@ -322,6 +332,8 @@ const M_PAUSE_FOREVER: i32 = 53;
 const M_RESUME: i32 = 55;
 const M_NO_CAMERAS: i32 = 99;
 const M_CAMERA: i32 = 100;
+/// Wakes the snoozed camera at this index of `App::snoozes` (up to 100).
+const M_WAKE: i32 = 300;
 
 fn is_tty(fd: libc::c_int) -> bool {
     unsafe { libc::isatty(fd) == 1 }
@@ -726,9 +738,11 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
     let mut buttons: action::Buttons = Default::default();
     action_keys::refresh(&mut buttons, cfg, camera);
     let mut picker = action_keys::Picker::default();
-    let mut shown: (Vec<Shown>, bool) = (Vec::new(), false);
+    let mut shown: (Vec<Shown>, Choice) = (Vec::new(), Choice::None);
     // While a button is busy this file asks the background process to leave the popup open.
     let busy_file = arg(args, "--view-lock").map(|p| tmux::busy_path(std::path::Path::new(&p)));
+    // A snooze picked here goes to the background process in this file; then the popup closes.
+    let snooze_file = arg(args, "--view-lock").map(|p| tmux::snooze_path(std::path::Path::new(&p)));
     let mut held = false;
     while !QUIT.load(Ordering::Relaxed) {
         let timeout = picker.wait(Instant::now()).map_or(Duration::from_millis(100), |d| d.min(Duration::from_millis(100)));
@@ -761,6 +775,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         if !go {
             break;
         }
+        let mut snoozed = false;
         while let Some(key) = picker.next_settled(now) {
             match key {
                 Key::A => {
@@ -772,15 +787,32 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
                     let look = action_keys::press(&mut buttons, n, cfg, camera, &tx, now);
                     picker.pressed(look == Some(Look::Armed), now);
                 }
+                Key::Z => picker.key_z(0, now),
+                Key::Snooze(_, minutes) => {
+                    picker.close();
+                    match &snooze_file {
+                        Some(f) => match std::fs::write(f, minutes.to_string()) {
+                            Ok(()) => {
+                                crate::log!("{camera}: snooze for {minutes} min asked");
+                                snoozed = true;
+                            }
+                            Err(e) => crate::log!("{camera}: cannot snooze ({}: {e})", f.display()),
+                        },
+                        None => crate::log!("{camera}: cannot snooze (no --view-lock)"),
+                    }
+                }
             }
         }
+        if snoozed {
+            break;
+        }
         // The buttons' looks also change by themselves (arming and results expire).
-        let view = (action::shown(&buttons, &labels, now), picker.choosing(0, now));
+        let view = (action::shown(&buttons, &labels, now), picker.choice(0, now));
         if view != shown {
             shown = view;
             shared.dirty.store(true, Ordering::Relaxed);
         }
-        let busy = action::any_busy(&buttons, now) || shown.1;
+        let busy = action::any_busy(&buttons, now) || shown.1 != Choice::None;
         if busy != held {
             // Tried again on the next pass (≤ 100 ms) when it fails.
             let done = busy_file.as_ref().is_none_or(|f| set_busy_file(f, busy));
@@ -794,7 +826,7 @@ fn run_view(camera: &str, args: &[String], cfg: &Config, console: &ConsoleCfg, f
         let frame = shared.frame.lock().unwrap().clone();
         if let Some((frame, _)) = frame {
             let text = with_replay(&shared, with_sound(&caption, cfg.camera_audio && shared.muted.load(Ordering::Relaxed)));
-            let text = action_keys::with_actions(&text, &shown.0, shown.1);
+            let text = action_keys::with_choice(&text, &shown.0, shown.1);
             out.draw(1, rect, frame, &text, shared.live.load(Ordering::Relaxed));
             last = Some(Instant::now());
         }
@@ -883,9 +915,9 @@ struct Win {
     external: bool,
     /// The actions' labels (number, label), kept from the settings.
     labels: Vec<(usize, String)>,
-    /// The buttons as last shown, and whether the choice of the `a` key was open (a change
-    /// draws the window again).
-    action_view: (Vec<Shown>, bool),
+    /// The buttons as last shown, and the choice of the `a` or `z` key open for the window (a
+    /// change draws the window again).
+    action_view: (Vec<Shown>, Choice),
 }
 
 impl Win {
@@ -923,8 +955,10 @@ struct App {
     /// `prebuffer`: a connection to every camera's sub stream, by camera name.
     hubs: HashMap<String, Arc<Hub>>,
     prebuffer_possible: bool,
-    /// The `a` key's choice among several actions.
+    /// The `a` key's choice among several actions, and the `z` key's among snooze lengths.
     picker: action_keys::Picker,
+    /// Cameras snoozed from their windows.
+    snoozes: Snoozes,
 }
 
 impl App {
@@ -953,6 +987,7 @@ impl App {
             hubs: HashMap::new(),
             prebuffer_possible: false,
             picker: action_keys::Picker::default(),
+            snoozes: Snoozes::default(),
         }
     }
 
@@ -1057,12 +1092,27 @@ impl App {
             pause.push(Item::separator(M_SEP_PAUSE));
             pause.push(Item::action(M_RESUME, s.menu_resume));
         }
-        vec![
+        let now = Instant::now();
+        let wake: Vec<Item> = self
+            .snoozes
+            .list()
+            .iter()
+            .enumerate()
+            .filter(|(_, sn)| sn.until > now)
+            .take(100)
+            .map(|(i, sn)| Item::action(M_WAKE + i as i32, &crate::snooze::wake_text(sn, now)))
+            .collect();
+        let mut items = vec![
             Item::disabled(M_STATUS, &self.status_line()),
             Item::separator(M_SEP_STATUS),
             Item::action(M_SETTINGS, s.menu_settings),
             Item::submenu(M_CAMERAS, s.menu_show_camera, cams),
             Item::submenu(M_PAUSE, if paused { s.menu_paused } else { s.menu_pause }, pause),
+        ];
+        if !wake.is_empty() {
+            items.push(Item::submenu(M_SNOOZED, s.menu_snoozed, wake));
+        }
+        items.extend([
             Item::action(M_CLOSE_ALL, s.menu_close_all),
             Item::separator(M_SEP_WINDOWS),
             Item::action(M_OPEN_FRIGATE, s.menu_open_frigate),
@@ -1072,7 +1122,8 @@ impl App {
             Item::action(M_CONFIG, s.menu_config_file),
             Item::separator(M_SEP_EXIT),
             Item::action(M_EXIT, s.menu_exit),
-        ]
+        ]);
+        items
     }
 
     fn update_tray(&self) {
@@ -1108,7 +1159,8 @@ impl App {
             M_LOG => open_url(&crate::util::log_path().to_string_lossy()),
             M_CONFIG => open_url(&self.path.to_string_lossy()),
             M_EXIT => QUIT.store(true, Ordering::Relaxed),
-            id if id >= M_CAMERA => {
+            id if (M_WAKE..M_WAKE + 100).contains(&id) => self.wake((id - M_WAKE) as usize),
+            id if (M_CAMERA..M_CAMERA + 100).contains(&id) => {
                 if let Some(c) = self.cameras.get((id - M_CAMERA) as usize) {
                     let name = c.name.clone();
                     self.test(&name);
@@ -1235,6 +1287,11 @@ impl App {
             }
             Action::Run(n) => {
                 self.press_action(i, n);
+                return;
+            }
+            Action::Snooze(minutes) => {
+                let camera = w.camera.clone();
+                self.snooze(&camera, minutes);
                 return;
             }
             Action::Sound => {
@@ -1387,6 +1444,10 @@ impl App {
             crate::log!("{}: skipped (paused)", d.camera);
             return;
         }
+        if !test && self.snoozes.is_snoozed(&d.camera, Instant::now()) {
+            crate::log!("{}: skipped (snoozed)", d.camera);
+            return;
+        }
         if self.cfg.skip_fullscreen && !test && self.out.fullscreen() {
             crate::log!("{}: skipped (full screen)", d.camera);
             return;
@@ -1498,7 +1559,7 @@ impl App {
             actions: Default::default(),
             external,
             labels: Vec::new(),
-            action_view: (Vec::new(), false),
+            action_view: (Vec::new(), Choice::None),
         };
         if !external {
             action_keys::refresh(&mut win.actions, &self.cfg, &win.camera);
@@ -1587,7 +1648,7 @@ impl App {
             }
             // The action buttons also change by themselves (arming and results expire): shown
             // within a pass of the loop (≤ 100 ms), as pills or in the caption.
-            let view = (action::shown(&w.actions, &w.labels, now), self.picker.choosing(w.id, now));
+            let view = (action::shown(&w.actions, &w.labels, now), self.picker.choice(w.id, now));
             if view != w.action_view {
                 w.action_view = view;
                 self.out.set_actions(w.id, &w.action_view.0);
@@ -1617,7 +1678,7 @@ impl App {
                 },
             );
             // Desktop windows show pills instead (also without a caption).
-            let caption = if buttons { caption } else { action_keys::with_actions(&caption, &w.action_view.0, w.action_view.1) };
+            let caption = if buttons { caption } else { action_keys::with_choice(&caption, &w.action_view.0, w.action_view.1) };
             self.out.draw(w.id, rect, frame, &caption, w.shared.live.load(Ordering::Relaxed));
             // Each time: a window that did not fit for a while comes back as a new one.
             self.out.set_zoomed(w.id, !w.zoom.is_full());
@@ -1638,10 +1699,22 @@ impl App {
             // The minutes left in the tray (sent only when the text changes).
             self.update_tray();
         }
-        // Windows closed by the user in another process (tmux popups).
+        let expired = self.snoozes.expire(Instant::now());
+        for sn in &expired {
+            crate::log!("{}: snooze ended", sn.camera);
+        }
+        // Windows closed by the user in another process (tmux popups), maybe with a snooze picked there.
         let gone: Vec<usize> = (0..self.wins.len()).filter(|&i| !self.out.alive(self.wins[i].id)).collect();
+        let mut snoozed = Vec::new();
         for i in gone.into_iter().rev() {
-            self.wins.remove(i).stop();
+            let w = self.wins.remove(i);
+            w.stop();
+            if let Some(minutes) = self.out.take_snooze(w.id) {
+                snoozed.push((w.camera.clone(), minutes));
+            }
+        }
+        for (camera, minutes) in snoozed {
+            self.snooze(&camera, minutes);
         }
         let now = Instant::now();
         // A replay keeps its window open, and a few seconds of live video follow it.
@@ -1739,13 +1812,13 @@ impl App {
                     }
                 }
             }
-            b'a' | b'A' | b'1'..=b'9' => self.action_or_camera_key(k, at),
+            b'a' | b'A' | b'z' | b'Z' | b'1'..=b'9' => self.action_or_camera_key(k, at),
             _ => {}
         }
         true
     }
 
-    /// `a`, and a digit the `a` key's choice lists, count once settled (see `Picker::key` and
+    /// `a`, `z`, and a digit their choice lists, count once settled (see `Picker::key` and
     /// `settled_keys`); any other digit shows a camera at once.
     fn action_or_camera_key(&mut self, k: u8, at: Instant) {
         let taken = self.picker.key(k, at);
@@ -1773,8 +1846,44 @@ impl App {
                         self.show_camera(b'0' + n as u8);
                     }
                 }
+                Key::Z => self.key_z(),
+                Key::Snooze(win, minutes) => {
+                    self.picker.close();
+                    if let Some(camera) = self.wins.iter().find(|w| w.id == win).map(|w| w.camera.clone()) {
+                        self.snooze(&camera, minutes);
+                    }
+                }
             }
         }
+    }
+
+    /// The `z` key: the choice of snooze lengths for the newest window on the screen.
+    fn key_z(&mut self) {
+        let wins: Vec<(u64, bool, bool)> = self.wins.iter().map(|w| (w.id, true, w.rect.is_some() || w.external)).collect();
+        if let Some(id) = action_keys::a_target(&wins) {
+            self.picker.key_z(id, Instant::now());
+        }
+    }
+
+    /// Snoozes `camera` for `minutes`: its windows close and its events open none until then.
+    fn snooze(&mut self, camera: &str, minutes: u64) {
+        let title = self.cameras.iter().find(|c| c.name == camera).map_or_else(|| camera.to_string(), |c| c.title.clone());
+        self.snoozes.snooze(camera, &title, minutes, Instant::now());
+        crate::log!("{camera}: snoozed for {minutes} min");
+        let open: Vec<usize> = (0..self.wins.len()).filter(|&i| self.wins[i].camera == camera).collect();
+        for i in open.into_iter().rev() {
+            self.close_quiet(i);
+        }
+        self.layout();
+        self.show_status();
+    }
+
+    /// Wakes the snoozed camera at `i` (tray menu).
+    fn wake(&mut self, i: usize) {
+        let Some(camera) = self.snoozes.list().get(i).map(|sn| sn.camera.clone()) else { return };
+        self.snoozes.wake(&camera);
+        crate::log!("{camera}: woken up");
+        self.show_status();
     }
 
     /// The `a` key: the newest window on the screen whose camera has actions — one only, so that
@@ -1809,6 +1918,17 @@ impl App {
         let mut state = self.status_line();
         if self.muted && self.cfg.camera_audio {
             state = format!("{state} · {}", t().console_sound_off);
+        }
+        let now = Instant::now();
+        let snoozed: Vec<String> = self
+            .snoozes
+            .list()
+            .iter()
+            .filter(|sn| sn.until > now)
+            .map(|sn| format!("{} {}", sn.title, crate::snooze::choice_text(crate::snooze::minutes_left(sn.until, now))))
+            .collect();
+        if !snoozed.is_empty() {
+            state = format!("{state} · {}", i18n::fmt(t().status_snoozed, &[&snoozed.join(", ")]));
         }
         let text = format!(" FrigatePiP {} · {state} · {}", env!("CARGO_PKG_VERSION"), t().console_keys);
         self.out.status(&text);
