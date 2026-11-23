@@ -51,7 +51,7 @@ Pobierz `FrigatePiP-<version>-portable.exe` ze strony Releases i uruchom go z do
 
 ### Aktualizacja
 
-FrigatePiP raz dziennie sprawdza, czy jest nowa wersja (opcja **Sprawdzaj aktualizacje** w ustawieniach). Gdy jest dostępna, pojawia się powiadomienie, a menu ikony i okno ustawień proponują **Zaktualizuj do …**: FrigatePiP pobiera instalator z GitHuba, sprawdza jego sumę kontrolną SHA-256 i go uruchamia — aktualizacja trwa kilka sekund i zachowuje Twoje ustawienia. **Sprawdź teraz** w ustawieniach od razu szuka nowej wersji. Możesz też samodzielnie uruchomić instalator nowej wersji. Wersja przenośna tylko otwiera stronę wydania: pobierz nowy plik exe i podmień stary.
+FrigatePiP raz dziennie sprawdza, czy jest nowa wersja (opcja **Sprawdzaj aktualizacje** w ustawieniach). Gdy jest dostępna, pojawia się powiadomienie, a menu ikony i okno ustawień proponują **Zaktualizuj do …**. Kliknięcie tej pozycji (albo powiadomienia) najpierw pokazuje, co nowego: zmiany ze wszystkich wersji od Twojej, tak jak są opisane na GitHubie (po angielsku), z odnośnikiem do strony wydania. Dopiero gdy odpowiesz **Tak**, FrigatePiP pobiera instalator z GitHuba, sprawdza jego sumę kontrolną SHA-256 i go uruchamia — aktualizacja trwa kilka sekund i zachowuje Twoje ustawienia; **Nie** niczego nie zmienia, a propozycja pozostaje. **Sprawdź teraz** w ustawieniach od razu szuka nowej wersji. Możesz też samodzielnie uruchomić instalator nowej wersji. Wersja przenośna tylko otwiera stronę wydania: pobierz nowy plik exe i podmień stary.
 
 ### Odinstalowanie
 
@@ -89,10 +89,11 @@ Najedź kursorem na ikonę, aby zobaczyć stan (na przykład *Połączono: http:
 | Element menu | Działanie |
 |---|---|
 | *(wiersz stanu)* | Stan połączenia lub pozostały czas wstrzymania (tylko informacja). |
-| **Zaktualizuj do …** | Pojawia się, gdy jest dostępna nowa wersja: pobiera ją i instaluje (zob. [Aktualizacja](#aktualizacja)). |
+| **Zaktualizuj do …** | Pojawia się, gdy jest dostępna nowa wersja: pokazuje, co nowego, i jeśli się zgodzisz, pobiera ją i instaluje (zob. [Aktualizacja](#aktualizacja)). |
 | **Ustawienia…** | Otwiera okno ustawień. |
 | **Pokaż kamerę** | Od razu otwiera okno podglądu wybranej kamery, nawet gdy powiadomienia są wstrzymane. Przydaje się do sprawdzenia obrazu albo po prostu do podejrzenia, co się dzieje. |
 | **Wstrzymaj powiadomienia** | **Na 15 minut**, **Na 1 godzinę** lub **Do wznowienia**. W czasie wstrzymania wykrycia nie otwierają okien. Gdy wstrzymanie jest aktywne, ten element menu ma nazwę **Wstrzymano**, a **Wznów teraz** kończy wstrzymanie. |
+| **Uśpione kamery** | Pojawia się, gdy któraś kamera jest [uśpiona](#usypianie-kamery): jeden wpis na kamerę z pozostałym czasem, np. *Obudź: Ogród (jeszcze 52 min)*; kliknięcie od razu kończy uśpienie. Uśpione kamery wymienia też opis, który pojawia się po najechaniu kursorem na ikonę. |
 | **Zamknij okna podglądu** | Zamyka wszystkie otwarte okna podglądu, także przypięte. |
 | **Otwórz Frigate** | Otwiera interfejs webowy Frigate w przeglądarce. |
 | **Pomoc** | Otwiera tę instrukcję. |
@@ -122,11 +123,23 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 | **×** (prawy górny róg) | Od razu zamyka okno. Przycisk pojawia się po najechaniu myszą na okno. |
 | **Głośnik** (na lewo od ×) | Wyłącza dźwięk okna; ponowne kliknięcie włącza go z powrotem. Przycisk pojawia się po wskazaniu okna, które odtwarza dźwięk z kamery; dopóki dźwięk jest wyłączony, przekreślony głośnik pozostaje widoczny. |
 | **Suwak głośności** (pod głośnikiem) | Ustawia głośność dźwięku tego okna: przeciągnij go lub kliknij. Pojawia się razem z głośnikiem; podgłośnienie włącza też wyciszony dźwięk. W Linuksie nową głośność słychać chwilę po puszczeniu przycisku. |
-| **Powtórka** ⟲ (na lewo od pozostałych przycisków) | Odtwarza jeszcze raz początek zdarzenia z normalną prędkością, bez dźwięku; napis pokazuje *Powtórka −12 s*, czyli o ile obraz jest opóźniony względem obrazu na żywo. Z [prebuforem](#prebufor) powtórka zaczyna się 5 s przed otwarciem okna, bez niego od otwarcia okna. Kliknij ponownie, aby od razu wrócić do obrazu na żywo; po powtórce wraca on sam. Przycisk pojawia się po wskazaniu okna z obrazem na żywo; w trakcie powtórki okno się nie zamyka. |
+| **Powtórka** ⟲ (na lewo od głośnika) | Odtwarza jeszcze raz początek zdarzenia z normalną prędkością, bez dźwięku; napis pokazuje *Powtórka −12 s*, czyli o ile obraz jest opóźniony względem obrazu na żywo. Z [prebuforem](#prebufor) powtórka zaczyna się 5 s przed otwarciem okna, bez niego od otwarcia okna. Kliknij ponownie, aby od razu wrócić do obrazu na żywo; po powtórce wraca on sam. Przycisk pojawia się po wskazaniu okna z obrazem na żywo; w trakcie powtórki okno się nie zamyka. |
+| **Uśpienie** ☾ (na lewo od pozostałych przycisków) | Otwiera listę: **15 min**, **30 min**, **1 godz.**, **2 godz.**, **4 godz.** Wybranie czasu [usypia kamerę](#usypianie-kamery) i zamyka jej okno. Przycisk pojawia się po najechaniu myszą na okno. |
 | **Kliknięcie prawym przyciskiem** | Zamyka okno. |
 | **Dwukrotne kliknięcie** | Otwiera tę kamerę w interfejsie webowym Frigate. |
 | **Najechanie kursorem** | Dopóki wskaźnik myszy jest nad oknem, okno się nie zamyka. Gdy odsuniesz kursor, okno pozostaje jeszcze co najmniej 3 sekundy. |
 | **Przyciski akcji** (lewy dolny róg) | Uruchamiają [akcje](#65-akcje) kamery, na przykład otwierają furtkę albo włączają światło. Są zawsze widoczne. Z **Potwierdzeniem** pierwsze kliknięcie uzbraja przycisk — robi się czerwony i pyta *Furtka?* — a drugie w ciągu 3 s uruchamia akcję (najwcześniej 0,4 s po pierwszym, więc dwuklik nigdy jej nie uruchomi); bez potwierdzenia wystarczy jedno kliknięcie. Potem przycisk pokazuje *Furtka …* (pomarańczowy) w trakcie wysyłania, a przez 2 s *Furtka ✓* (zielony: dotarło) albo *Furtka ✗* (czerwony: nie udało się). Uzbrojony może być tylko jeden przycisk naraz: kliknięcie innego rozbraja ten pierwszy. Kliknięcie przycisku nigdy nie przypina ani nie przesuwa okna i nie otwiera Frigate. |
+
+### Usypianie kamery
+
+Gdy wiesz, że kamera przez jakiś czas będzie wciąż kogoś widzieć — ktoś pracuje w ogrodzie, dzieci bawią się na podwórku — uśpij ją: wskaż jej okno, kliknij księżyc ☾ i wybierz, na jak długo. Okno się zamyka, a wykrycia tej kamery nie otwierają okien, dopóki ten czas nie minie; wszystkie inne kamery działają jak zwykle. Ponowne uśpienie tej samej kamery ustawia nowy koniec.
+
+- **Pokaż kamerę** w menu ikony nadal pokazuje uśpioną kamerę.
+- **Uśpione kamery** w menu ikony budzą kamerę przed czasem.
+- Uśpienie nie jest zapisywane: zamknięcie FrigatePiP albo ponowne uruchomienie komputera budzi wszystkie kamery.
+- Aby zamiast tego wstrzymać wszystkie okna, użyj **Wstrzymaj powiadomienia**.
+
+W Linuksie okna na pulpicie mają ten sam przycisk; w terminalu, w konsoli i w okienkach tmux robi to [klawisz **z**](#klawisze).
 
 ### Kiedy okno się zamyka?
 
@@ -134,7 +147,8 @@ Okna podglądu nigdy nie zabierają fokusu klawiatury, więc nie przerywają pis
 - Najpóźniej po upływie liczby sekund ustawionej w **najdłużej**, nawet jeśli obiekt wciąż się porusza.
 - Nigdy, gdy jest przypięte lub gdy wskaźnik myszy znajduje się nad nim.
 - Nigdy w trakcie powtórki; po niej zostaje otwarte jeszcze co najmniej 5 sekund.
-- Nigdy, gdy któryś z jego [przycisków akcji](#65-akcje) jest uzbrojony, wysyła żądanie albo pokazuje wynik, ani (w Linuksie) gdy trwa dla niego wybór akcji po klawiszu [**a**](#klawisze). Tak jak przypięte okno, nie zostanie w tym czasie zastąpione przez nowe zdarzenie.
+- Nigdy, gdy któryś z jego [przycisków akcji](#65-akcje) jest uzbrojony, wysyła żądanie albo pokazuje wynik, ani (w Linuksie) gdy trwa dla niego wybór po klawiszu [**a** lub **z**](#klawisze). Tak jak przypięte okno, nie zostanie w tym czasie zastąpione przez nowe zdarzenie.
+- Nigdy, gdy otwarta jest lista pod jego przyciskiem uśpienia.
 
 ### Więcej niż jedna kamera
 
@@ -161,7 +175,7 @@ Większość zmian działa **od razu** na otwarte okna podglądu, więc widzisz 
 | **Język** | Język FrigatePiP. **Automatycznie (Windows)** oznacza język wyświetlania systemu Windows; gdy ten język nie jest dostępny, używany jest angielski. Zob. [Język](#9-język). |
 | **Uruchamiaj FrigatePiP razem z Windows** | Uruchamia FrigatePiP automatycznie po zalogowaniu do Windows. |
 | **Sprawdzaj aktualizacje** | Raz dziennie FrigatePiP pyta GitHub, czy jest nowa wersja, a jeśli tak — pokazuje powiadomienie i proponuje aktualizację. Nie są wysyłane żadne dane o Tobie ani o kamerach. |
-| **Sprawdź teraz** / **Zaktualizuj do …** | Od razu szuka nowej wersji; gdy ją znajdzie, przycisk pobiera ją i instaluje (ustawienia zostają zachowane). Tekst obok pokazuje wynik. |
+| **Sprawdź teraz** / **Zaktualizuj do …** | Od razu szuka nowej wersji; gdy ją znajdzie, przycisk pokazuje, co nowego, i jeśli się zgodzisz, pobiera ją i instaluje (ustawienia zostają zachowane). Tekst obok pokazuje wynik. |
 
 ### 6.2 Wykrywanie
 
@@ -521,7 +535,7 @@ Na pulpicie Linuksa okna podglądu działają jak w Windows: okna bez ramek nad 
 - **Uruchomienie:** menu aplikacji → **FrigatePiP** (po instalacji przez apt) albo `frigate-pip` w terminalu na pulpicie. Program działa w tle, bez terminala; na użytkownika działa jedna kopia. Ponowne uruchomienie (albo `frigate-pip --settings`) otwiera ustawienia działającej kopii.
 - **Razem z sesją pulpitu:** `frigate-pip --autostart on` (wyłączenie: `frigate-pip --autostart off`). Zatrzymanie: `frigate-pip --quit`.
 - **Ikona w zasobniku:** z tym samym menu co w Windows (zob. [Ikona w zasobniku](#4-ikona-w-zasobniku)); jej kolor pokazuje stan: niebieski — połączono, szary — brak połączenia, pomarańczowy — wstrzymano. Pojawia się w KDE Plasma, Xfce, Cinnamon, MATE i Budgie, a w GNOME z rozszerzeniem AppIndicator (jest w Ubuntu).
-- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, suwak pod nim ustawia głośność, ⟲ powtarza początek zdarzenia, przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, przyciski akcji w lewym dolnym rogu uruchamiają [akcje](#65-akcje) kamery, a okno pod wskaźnikiem myszy się nie zamyka. Przyciski akcji wymagają czcionki do napisów (`fonts-dejavu-core` albo innej czcionki TrueType ustawionej jako `font` w `[console]`); bez niej okna nie mają przycisków, a log raz o tym informuje.
+- **Mysz:** jak w Windows (zob. [Obsługa myszą](#obsługa-myszą)) — × albo prawy przycisk zamyka, głośnik wycisza, suwak pod nim ustawia głośność, ⟲ powtarza początek zdarzenia, księżyc ☾ [usypia kamerę](#usypianie-kamery), przeciągnięcie przesuwa okno, kółko zmienia jego rozmiar, Ctrl + kółko przybliża obraz wokół wskaźnika, Ctrl + przeciągnięcie przesuwa przybliżony obraz, kliknięcie je przypina, dwuklik otwiera kamerę we Frigate, przyciski akcji w lewym dolnym rogu uruchamiają [akcje](#65-akcje) kamery, a okno pod wskaźnikiem myszy się nie zamyka. Przyciski akcji i lista pod przyciskiem uśpienia wymagają czcionki do napisów (`fonts-dejavu-core` albo innej czcionki TrueType ustawionej jako `font` w `[console]`); bez niej okna nie mają ani jednego, ani drugiego, a log raz o tym informuje.
 - **Opcje okien:** `topmost` (przy `false` okna są zwykłymi oknami, które inne mogą zasłonić), `sound` (dźwięk powiadomienia pulpitu) i `skip_fullscreen` (nic, gdy aktywne okno jest na pełnym ekranie) działają jak w Windows.
 - **Ustawienia:** kliknięcie ikony (albo **Ustawienia…** w jej menu) otwiera je w przeglądarce — te same opcje, opisy i test połączenia co w Windows; strona otwiera się tylko na tym komputerze. Przy pierwszym uruchomieniu otwiera się sama. Zapisują się w `~/.config/frigate-pip/config.ini` (opisane niżej). Sekcja **Akcje**, po **Wideo i dźwięk**, ma te same cztery wiersze na kamerę co karta w Windows (zob. [Akcje](#65-akcje)); gdy wpisany adres jest niepoprawny, nic nie zostaje zapisane, a strona pokazuje, który wiersz jest błędny.
 
@@ -535,7 +549,7 @@ W tym trybie FrigatePiP nie ma własnego okna: czeka na wykrycia w tle i przy ka
 2. Otwórz tmux do własnej pracy — `tmux` zaczyna nową sesję — i pracuj w nim. Okienka pojawiają się nad tym oknem.
 
 - Aby zatrzymać FrigatePiP: `tmux kill-session -t frigate-pip`. Aby używać jego klawiszy (wstrzymanie, pokazanie kamery): `tmux attach -t frigate-pip`.
-- Okienko pojawia się w wybranym **rogu ekranu** (`position`), a jego rozmiar zależy od **szerokości okna** (`width`). Zamyka się samo po zwykłym czasie (`duration`, `max_duration`) albo od razu po naciśnięciu **q**, **x** lub **Esc**. **m** wyłącza i włącza jego dźwięk. **r** powtarza początek zdarzenia (od chwili otwarcia okienka). **a** (i cyfra) naciska przyciski akcji kamery pokazanej w okienku, tak jak w terminalu (zob. [Klawisze](#klawisze)). Okienko zachowuje ustawienia, z którymi się otworzyło; ustawienia zapisane w międzyczasie działają od następnego okienka.
+- Okienko pojawia się w wybranym **rogu ekranu** (`position`), a jego rozmiar zależy od **szerokości okna** (`width`). Zamyka się samo po zwykłym czasie (`duration`, `max_duration`) albo od razu po naciśnięciu **q**, **x** lub **Esc**. **m** wyłącza i włącza jego dźwięk. **r** powtarza początek zdarzenia (od chwili otwarcia okienka). **a** (i cyfra) naciska przyciski akcji kamery pokazanej w okienku, a **z** (i cyfra) usypia tę kamerę, tak jak w terminalu (zob. [Klawisze](#klawisze)). Okienko zachowuje ustawienia, z którymi się otworzyło; ustawienia zapisane w międzyczasie działają od następnego okienka.
 - tmux pokazuje jedno okienko naraz: wykrycie na innej kamerze zastępuje otwarte okienko (lub jest pomijane, gdy `replace = false`). Gdy przycisk akcji okienka jest uzbrojony, wysyła żądanie albo pokazuje wynik, okienko zostaje otwarte: wykrycie na innej kamerze jest pomijane, a wykrycie na tej samej kamerze przedłuża okienko.
 - Aby obraz miał pełne kolory, tmux musi przekazywać dalej 24-bitowy kolor: dodaj `set -as terminal-features ",xterm-256color:RGB"` do `~/.tmux.conf` (użyj swojej wartości `$TERM` spoza tmux) i uruchom tmux ponownie. Gdy brakuje kolorów, FrigatePiP zapisuje tę wskazówkę w logu.
 
@@ -551,9 +565,10 @@ Gdy FrigatePiP działa w terminalu lub w konsoli:
 | **m** | Wyłącza / włącza dźwięk (przy `camera_audio = true`) we wszystkich oknach, także otwieranych później; podpis pokazuje wtedy *dźwięk wyłączony*. |
 | **r** | Powtórka początku zdarzenia we wszystkich oknach (zob. [Obsługa myszą](#obsługa-myszą)); ponownie: powrót do obrazu na żywo. |
 | **a** | Naciska [przycisk akcji](#65-akcje) najnowszego okna, którego kamera ma akcje. Przy jednej akcji **a** ją naciska (z potwierdzeniem: **a**, a potem znowu **a** w ciągu 3 s). Przy kilku akcjach **a** wyświetla je na 3 s w napisie na obrazie, np. *1 Furtka · 2 Światło*; cyfra wybiera wtedy tę akcję zamiast pokazywać kamerę, a przy włączonym potwierdzeniu uruchamia ją ponowne naciśnięcie tej samej cyfry. Podpis pokazuje stan: *Furtka?*, *Furtka …*, *Furtka ✓* albo *Furtka ✗*. Dopóki trwa wybór dla okna, to okno się nie zamyka i nie zostaje zastąpione. |
-| **1**–**9** | Pokaż kamerę 1–9 (w kolejności z konfiguracji Frigate). Gdy po **a** trwa wybór akcji, a ten numer jest na liście: ta akcja. |
+| **z** | [Usypia](#usypianie-kamery) kamerę najnowszego okna: napis na obrazie wyświetla na 3 s czasy, *z: 1 15 min · 2 30 min · 3 1 godz. · 4 2 godz. · 5 4 godz.*, a cyfra wybiera jeden z nich; okna tej kamery się zamykają. Wiersz stanu pokazuje uśpione kamery z pozostałym czasem, np. *Uśpione: Ogród 52 min*. Obudzić je można w [menu ikony](#4-ikona-w-zasobniku) w trybie okien na pulpicie. |
+| **1**–**9** | Pokaż kamerę 1–9 (w kolejności z konfiguracji Frigate). Gdy po **a** lub **z** trwa wybór, a ten numer jest na liście: ta akcja lub ten czas. |
 
-Klawisz **a** i cyfry wybierające akcję działają ok. 150 ms po naciśnięciu. Terminal nie informuje o puszczeniu klawisza, więc FrigatePiP chwilę czeka, żeby sprawdzić, czy klawisz nie jest przytrzymany: przytrzymany klawisz liczy się raz i nigdy nie potwierdza, a dwa naciśnięcia w odstępie krótszym niż 150 ms nie liczą się wcale. Wymaga to zwykłych ustawień powtarzania klawiszy (powtórzenie częściej niż co 150 ms — tak domyślnie mają pulpity i konsola Linuksa).
+Klawisze **a** i **z** oraz cyfry ich wyboru działają ok. 150 ms po naciśnięciu. Terminal nie informuje o puszczeniu klawisza, więc FrigatePiP chwilę czeka, żeby sprawdzić, czy klawisz nie jest przytrzymany: przytrzymany klawisz liczy się raz i nigdy nie potwierdza, a dwa naciśnięcia w odstępie krótszym niż 150 ms nie liczą się wcale. Wymaga to zwykłych ustawień powtarzania klawiszy (powtórzenie częściej niż co 150 ms — tak domyślnie mają pulpity i konsola Linuksa).
 
 ### Wiersz poleceń
 

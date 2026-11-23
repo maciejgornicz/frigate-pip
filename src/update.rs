@@ -12,7 +12,8 @@ use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_R
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-const LATEST: &str = "https://api.github.com/repos/maciejgornicz/frigate-pip/releases/latest";
+/// The newest releases: the latest one, and the notes of every one since the running version.
+const RELEASES: &str = "https://api.github.com/repos/maciejgornicz/frigate-pip/releases?per_page=20";
 /// Uninstall key written by the installer (`AppId` in installer/frigate-pip.iss).
 const UNINSTALL_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{6B0F6C2E-5E7A-4E43-9C55-3A1F0B7D2C91}_is1");
 
@@ -26,6 +27,9 @@ pub struct Release {
     pub installer: Option<(String, String)>,
     /// Address of `SHA256SUMS.txt`.
     pub checksums: Option<String>,
+    /// What changed, newest release first: (version, items), for the releases newer than the
+    /// running version (see `parse_releases`).
+    pub notes: Vec<(String, Vec<String>)>,
 }
 
 /// What the settings window shows about updates.
@@ -75,7 +79,80 @@ pub fn parse_release(j: &Json) -> Option<Release> {
     let safe = |n: &str| n.chars().all(|c| c.is_ascii_alphanumeric() || "-._".contains(c));
     let installer = asset(&|n| n.starts_with("FrigatePiP-") && n.ends_with("-installer.exe") && safe(n));
     let checksums = asset(&|n| n == "SHA256SUMS.txt").map(|(_, url)| url);
-    Some(Release { version, page: j.get("html_url").str().unwrap_or_default().to_string(), installer, checksums })
+    let page = j.get("html_url").str().unwrap_or_default().to_string();
+    Some(Release { version, page, installer, checksums, notes: vec![(String::new(), note_items(j.get("body").str().unwrap_or_default()))] })
+}
+
+/// The latest release from GitHub's list of releases (the highest version that is neither a
+/// draft nor a pre-release), with the notes of every such release newer than `current`.
+pub fn parse_releases(list: &Json, current: &str) -> Option<Release> {
+    let mut all: Vec<Release> = list.arr().iter().filter_map(parse_release).collect();
+    all.sort_by_key(|r| std::cmp::Reverse(parse_version(&r.version)));
+    let notes = all
+        .iter()
+        .filter(|r| is_newer(&r.version, current))
+        .map(|r| (r.version.clone(), r.notes.iter().flat_map(|n| n.1.clone()).collect()))
+        .collect();
+    let mut latest = all.into_iter().next()?;
+    latest.notes = notes;
+    Some(latest)
+}
+
+/// The changes listed in a release's notes (GitHub's generated "What's Changed": `* Title by
+/// @user in https://…/pull/1`): the titles, without the author, the link and Markdown marks.
+/// Headings, the "Full Changelog" line and the new contributors are left out.
+pub fn note_items(body: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut contributors = false;
+    for line in body.lines().map(str::trim) {
+        if let Some(heading) = line.strip_prefix('#') {
+            contributors = heading.trim_start_matches('#').trim().eq_ignore_ascii_case("New Contributors");
+            continue;
+        }
+        let Some(item) = line.strip_prefix("* ").or_else(|| line.strip_prefix("- ")) else { continue };
+        if contributors {
+            continue;
+        }
+        let item = match item.find(" by @") {
+            Some(i) => &item[..i],
+            None => item.split(" in https://").next().unwrap_or(item),
+        };
+        let item = item.replace("**", "").replace('`', "");
+        let item = item.trim();
+        if !item.is_empty() {
+            items.push(item.to_string());
+        }
+    }
+    items
+}
+
+/// The notes for the question before an update: one "• item" line per change, under its
+/// version when there is more than one release, at most `max` items (then "…").
+pub fn notes_text(notes: &[(String, Vec<String>)], max: usize) -> String {
+    let listed: Vec<&(String, Vec<String>)> = notes.iter().filter(|n| !n.1.is_empty()).collect();
+    let mut out = Vec::new();
+    let mut left = max;
+    for (version, items) in &listed {
+        if left == 0 {
+            out.push("…".to_string());
+            break;
+        }
+        if listed.len() > 1 {
+            if !out.is_empty() {
+                out.push(String::new());
+            }
+            out.push(version.clone());
+        }
+        for item in items {
+            if left == 0 {
+                out.push("…".to_string());
+                return out.join("\n");
+            }
+            out.push(format!("• {item}"));
+            left -= 1;
+        }
+    }
+    out.join("\n")
 }
 
 /// The SHA-256 of `name` from a `SHA256SUMS.txt` file (`<hash>  <name>` lines).
@@ -94,11 +171,11 @@ fn sha256_hex(data: &[u8]) -> String {
     out.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Asks GitHub for the latest release.
+/// Asks GitHub for the latest release, with the notes since the running version.
 pub fn check() -> Result<Release, String> {
-    let body = https_get(LATEST, 1 << 20)?;
+    let body = https_get(RELEASES, 4 << 20)?;
     let j = Json::parse(&String::from_utf8_lossy(&body)).ok_or("invalid answer from GitHub")?;
-    parse_release(&j).ok_or_else(|| "no release found".into())
+    parse_releases(&j, &current_version()).ok_or_else(|| "no release found".into())
 }
 
 /// Downloads the installer, checks its SHA-256 and starts it silently. The installer
@@ -251,6 +328,49 @@ mod tests {
             Json::parse(r#"{"tag_name": "v9.0.0", "assets": [{"name": "FrigatePiP-..\\x-installer.exe", "browser_download_url": "https://e/x"}]}"#)
                 .unwrap();
         assert_eq!(parse_release(&odd).unwrap().installer, None);
+    }
+
+    #[test]
+    fn notes_from_github_release_bodies() {
+        let body = "## What's Changed\r\n* README: Home Assistant section by @maciejgornicz in https://github.com/x/y/pull/21\r\n                    * **Action buttons**: up to four per camera by @someone in https://github.com/x/y/pull/22\r\n\r\n                    ## New Contributors\r\n* @someone made their first contribution in https://github.com/x/y/pull/22\r\n\r\n                    **Full Changelog**: https://github.com/x/y/compare/v1.7.2...v1.7.3";
+        assert_eq!(note_items(body), ["README: Home Assistant section", "Action buttons: up to four per camera"]);
+        assert_eq!(
+            note_items("- Fixed `config.ini` reload\n- Faster start in https://github.com/x/y/pull/3"),
+            ["Fixed config.ini reload", "Faster start"]
+        );
+        assert!(note_items("").is_empty());
+    }
+
+    #[test]
+    fn notes_of_every_release_since_the_running_one() {
+        let rel = |v: &str, body: &str, pre: bool| {
+            format!(
+                r#"{{"tag_name": "v{v}", "html_url": "https://e/{v}", "prerelease": {pre}, "body": "{body}",
+                    "assets": [{{"name": "FrigatePiP-{v}-installer.exe", "browser_download_url": "https://e/{v}.exe"}}]}}"#
+            )
+        };
+        let list = format!(
+            "[{}, {}, {}, {}]",
+            // `\\n`: an escaped line break inside the JSON string.
+            rel("1.8.0", "* Snooze a camera by @a in https://x/1\\n* Notes before updating by @a in https://x/2", false),
+            rel("1.9.0-beta", "* Beta thing", true),
+            rel("1.7.4", "* Faster start by @a in https://x/3", false),
+            rel("1.7.3", "* Action buttons by @a in https://x/4", false),
+        );
+        let j = Json::parse(&list).unwrap();
+        let r = parse_releases(&j, "1.7.3").unwrap();
+        assert_eq!((r.version.as_str(), r.page.as_str()), ("1.8.0", "https://e/1.8.0"));
+        assert_eq!(r.installer.as_ref().map(|i| i.1.as_str()), Some("https://e/1.8.0.exe"));
+        let versions: Vec<&str> = r.notes.iter().map(|n| n.0.as_str()).collect();
+        assert_eq!(versions, ["1.8.0", "1.7.4"], "newer than the running one, no pre-release");
+        assert_eq!(notes_text(&r.notes, 10), "1.8.0\n• Snooze a camera\n• Notes before updating\n\n1.7.4\n• Faster start");
+        assert_eq!(notes_text(&r.notes, 2), "1.8.0\n• Snooze a camera\n• Notes before updating\n…");
+        assert_eq!(notes_text(&r.notes, 1), "1.8.0\n• Snooze a camera\n…");
+        // One release: no version line.
+        let r = parse_releases(&j, "1.7.4").unwrap();
+        assert_eq!(notes_text(&r.notes, 10), "• Snooze a camera\n• Notes before updating");
+        assert_eq!(notes_text(&[], 10), "");
+        assert!(parse_releases(&Json::parse("[]").unwrap(), "1.0.0").is_none());
     }
 
     #[test]

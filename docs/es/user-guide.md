@@ -51,7 +51,7 @@ Descargue `FrigatePiP-<version>-portable.exe` desde la página Releases y ejecú
 
 ### Actualización
 
-FrigatePiP busca una versión nueva una vez al día (**Buscar actualizaciones** en la configuración). Cuando hay una disponible, aparece una notificación y tanto el menú de la bandeja como la ventana de configuración ofrecen **Actualizar a …**: FrigatePiP descarga el instalador desde GitHub, comprueba su suma de comprobación SHA-256 y lo ejecuta; la actualización tarda unos segundos y conserva su configuración. **Buscar ahora** en la configuración busca una versión nueva al instante. También puede ejecutar usted mismo el instalador de una versión nueva. La versión portátil solo abre la página de la versión: descargue el nuevo exe y reemplace el anterior.
+FrigatePiP busca una versión nueva una vez al día (**Buscar actualizaciones** en la configuración). Cuando hay una disponible, aparece una notificación y tanto el menú de la bandeja como la ventana de configuración ofrecen **Actualizar a …**. Al hacer clic en esa opción (o en la notificación) se muestra primero qué hay de nuevo: los cambios de todas las versiones desde la suya, tal como figuran en GitHub (en inglés), con un enlace a la página de la versión. Solo cuando responde **Sí**, FrigatePiP descarga el instalador desde GitHub, comprueba su suma de comprobación SHA-256 y lo ejecuta; la actualización tarda unos segundos y conserva su configuración. **No** lo deja todo como está, y la oferta se mantiene. **Buscar ahora** en la configuración busca una versión nueva al instante. También puede ejecutar usted mismo el instalador de una versión nueva. La versión portátil solo abre la página de la versión: descargue el nuevo exe y reemplace el anterior.
 
 ### Desinstalación
 
@@ -89,10 +89,11 @@ Pase el puntero sobre el icono para ver el estado (por ejemplo, *Conectado: http
 | Elemento del menú | Qué hace |
 |---|---|
 | *(línea de estado)* | Estado de la conexión o tiempo de pausa restante (informativo). |
-| **Actualizar a …** | Aparece cuando hay una versión nueva disponible: la descarga y la instala (consulte [Actualización](#actualización)). |
+| **Actualizar a …** | Aparece cuando hay una versión nueva disponible: muestra qué hay de nuevo y, si está de acuerdo, la descarga y la instala (consulte [Actualización](#actualización)). |
 | **Configuración…** | Abre la ventana de configuración. |
 | **Mostrar cámara** | Abre de inmediato una ventana de vista previa de la cámara elegida, incluso con las notificaciones en pausa. Sirve para comprobar la imagen o simplemente para mirar. |
 | **Pausar notificaciones** | **Durante 15 minutos**, **Durante 1 hora** o **Hasta reanudar**. Durante la pausa, las detecciones no abren ventanas. Mientras hay una pausa activa, el elemento muestra **En pausa**, y **Reanudar ahora** la termina. |
+| **Cámaras suspendidas** | Aparece mientras alguna cámara está [suspendida](#suspender-una-cámara): una entrada por cámara con el tiempo restante, p. ej., *Reactivar Jardín (quedan 52 min)*; al hacer clic, la cámara se reactiva al instante. La información que aparece al pasar el puntero sobre el icono también enumera las cámaras suspendidas. |
 | **Cerrar ventanas de vista previa** | Cierra todas las ventanas de vista previa abiertas, incluidas las fijadas. |
 | **Abrir Frigate** | Abre la interfaz web de Frigate en el navegador. |
 | **Ayuda** | Abre esta guía. |
@@ -122,11 +123,23 @@ Las ventanas de vista previa nunca toman el foco del teclado, por lo que no inte
 | **×** (esquina superior derecha) | Cierra la ventana al instante. El botón aparece al señalar la ventana con el mouse. |
 | **Altavoz** (a la izquierda de ×) | Silencia la ventana; otro clic vuelve a activar el sonido. El botón aparece al señalar una ventana que reproduce el audio de la cámara; mientras el sonido está desactivado, el altavoz tachado permanece visible. |
 | **Control de volumen** (bajo el altavoz) | Ajusta el volumen de esta ventana: arrástrelo o haga clic en él. Aparece junto con el altavoz; subir el volumen también reactiva el sonido silenciado. En Linux, el nuevo volumen se oye justo después de soltar. |
-| **Repetición** ⟲ (a la izquierda de los demás botones) | Reproduce otra vez el inicio del evento a velocidad normal, sin sonido; el texto muestra *Repetición −12 s*, es decir, cuánto va la imagen por detrás del video en vivo. Con el [búfer previo](#búfer-previo) la repetición empieza 5 s antes de que se abriera la ventana; sin él, al abrirse la ventana. Haga clic de nuevo para volver al instante al video en vivo; al terminar la repetición vuelve solo. El botón aparece al señalar una ventana con video en vivo; durante la repetición la ventana no se cierra. |
+| **Repetición** ⟲ (a la izquierda del altavoz) | Reproduce otra vez el inicio del evento a velocidad normal, sin sonido; el texto muestra *Repetición −12 s*, es decir, cuánto va la imagen por detrás del video en vivo. Con el [búfer previo](#búfer-previo) la repetición empieza 5 s antes de que se abriera la ventana; sin él, al abrirse la ventana. Haga clic de nuevo para volver al instante al video en vivo; al terminar la repetición vuelve solo. El botón aparece al señalar una ventana con video en vivo; durante la repetición la ventana no se cierra. |
+| **Suspender cámara** ☾ (a la izquierda de los demás botones) | Abre una lista: **15 min**, **30 min**, **1 h**, **2 h**, **4 h**. Al elegir una duración se [suspende la cámara](#suspender-una-cámara) y se cierra su ventana. El botón aparece al señalar la ventana. |
 | **Clic derecho** | Cierra la ventana. |
 | **Doble clic** | Abre esta cámara en la interfaz web de Frigate. |
 | **Pasar el puntero** | Mientras el puntero del mouse está sobre la ventana, esta no se cierra. Después de retirarlo, permanece abierta al menos 3 segundos más. |
 | **Botones de acción** (esquina inferior izquierda) | Ejecutan las [acciones](#65-acciones) de la cámara, por ejemplo abrir el portón o encender una luz. Siempre están visibles. Con **Confirmación**, el primer clic arma el botón —se pone rojo y pregunta *¿Portón?*— y un segundo clic en menos de 3 s ejecuta la acción (como pronto 0,4 s después del primero, así que un doble clic nunca la ejecuta); sin confirmación basta un clic. Después el botón muestra *Portón …* (ámbar) mientras envía y, durante 2 s, *Portón ✓* (verde: recibido) o *Portón ✗* (rojo: falló). Solo un botón puede estar armado a la vez: hacer clic en otro desarma el primero. Un clic en un botón nunca fija ni mueve la ventana y no abre Frigate. |
+
+### Suspender una cámara
+
+Cuando sabe que una cámara va a seguir viendo a alguien durante un rato —alguien trabaja en el jardín, los niños juegan en el patio—, suspéndala: señale su ventana, haga clic en la luna ☾ y elija durante cuánto tiempo. La ventana se cierra y las detecciones de esa cámara no abren ninguna ventana hasta que pase el tiempo; todas las demás cámaras siguen como siempre. Si vuelve a suspender la misma cámara, se fija un nuevo final.
+
+- **Mostrar cámara** en el menú de la bandeja sigue mostrando una cámara suspendida.
+- **Cámaras suspendidas** en el menú de la bandeja reactiva una cámara antes de tiempo.
+- La suspensión no se guarda: al salir de FrigatePiP o reiniciar el equipo se reactivan todas las cámaras.
+- Para detener todas las ventanas, use en su lugar **Pausar notificaciones**.
+
+En Linux, las ventanas de escritorio tienen el mismo botón; en la terminal, en la consola y en las ventanas emergentes de tmux lo hace la [tecla **z**](#teclas).
 
 ### ¿Cuándo se cierra una ventana?
 
@@ -134,7 +147,8 @@ Las ventanas de vista previa nunca toman el foco del teclado, por lo que no inte
 - Como muy tarde, tras los segundos indicados en **máximo**, aunque el objeto siga moviéndose.
 - Nunca mientras está fijada o mientras el puntero del mouse está sobre ella.
 - Nunca durante una repetición; después sigue abierta al menos 5 segundos más.
-- Nunca mientras uno de sus [botones de acción](#65-acciones) está armado, enviando o mostrando su resultado, ni (en Linux) mientras la elección de la tecla [**a**](#teclas) está abierta para ella. Como una ventana fijada, mientras tanto tampoco la reemplaza un evento nuevo.
+- Nunca mientras uno de sus [botones de acción](#65-acciones) está armado, enviando o mostrando su resultado, ni (en Linux) mientras la elección de la tecla [**a** o **z**](#teclas) está abierta para ella. Como una ventana fijada, mientras tanto tampoco la reemplaza un evento nuevo.
+- Nunca mientras la lista de su botón de suspender está abierta.
 
 ### Más de una cámara
 
@@ -161,7 +175,7 @@ La mayoría de los cambios se aplican **de inmediato** a las ventanas de vista p
 | **Idioma** | Idioma de FrigatePiP. **Automático (Windows)** usa el idioma para mostrar de Windows; si ese idioma no está disponible, se usa el inglés. Consulte [Idioma](#9-idioma). |
 | **Iniciar FrigatePiP con Windows** | Inicia FrigatePiP automáticamente al iniciar sesión en Windows. |
 | **Buscar actualizaciones** | Una vez al día FrigatePiP consulta en GitHub si hay una versión nueva y, si la hay, muestra una notificación y ofrece la actualización. No se envía ningún dato sobre usted ni sus cámaras. |
-| **Buscar ahora** / **Actualizar a …** | Busca una versión nueva al instante; si la encuentra, el botón la descarga y la instala (la configuración se conserva). El texto de al lado muestra el resultado. |
+| **Buscar ahora** / **Actualizar a …** | Busca una versión nueva al instante; si la encuentra, el botón muestra qué hay de nuevo y, si está de acuerdo, la descarga y la instala (la configuración se conserva). El texto de al lado muestra el resultado. |
 
 ### 6.2 Detección
 
@@ -521,7 +535,7 @@ En un escritorio Linux, las ventanas de vista previa funcionan como en Windows: 
 - **Inicio:** menú de aplicaciones → **FrigatePiP** (instalado con apt) o `frigate-pip` en un terminal del escritorio. Se ejecuta en segundo plano sin terminal; se ejecuta una copia por usuario. Un segundo inicio (o `frigate-pip --settings`) abre la configuración de la copia en ejecución.
 - **Con la sesión del escritorio:** `frigate-pip --autostart on` (para desactivarlo: `frigate-pip --autostart off`). Para detenerlo: `frigate-pip --quit`.
 - **Icono en la bandeja:** con el mismo menú que en Windows (consulte [El icono de la bandeja](#4-el-icono-de-la-bandeja)); su color muestra el estado: azul — conectado, gris — sin conexión, ámbar — en pausa. Aparece en KDE Plasma, Xfce, Cinnamon, MATE y Budgie, y en GNOME con la extensión AppIndicator (incluida en Ubuntu).
-- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, el control bajo él ajusta el volumen, ⟲ repite el inicio del evento, arrastrar mueve la ventana, la rueda cambia su tamaño, Ctrl + rueda acerca la imagen alrededor del puntero, Ctrl + arrastrar mueve la imagen acercada, un clic la fija, un doble clic abre la cámara en Frigate, los botones de acción de la esquina inferior izquierda ejecutan las [acciones](#65-acciones) de la cámara y una ventana bajo el puntero no se cierra. Los botones de acción necesitan una fuente para el texto (`fonts-dejavu-core`, u otra fuente TrueType indicada como `font` en `[console]`); sin ella, las ventanas no tienen botones y el registro lo indica una vez.
+- **Mouse:** como en Windows (consulte [Acciones con el mouse](#acciones-con-el-mouse)): × o el botón derecho cierra, el altavoz silencia, el control bajo él ajusta el volumen, ⟲ repite el inicio del evento, la luna ☾ [suspende la cámara](#suspender-una-cámara), arrastrar mueve la ventana, la rueda cambia su tamaño, Ctrl + rueda acerca la imagen alrededor del puntero, Ctrl + arrastrar mueve la imagen acercada, un clic la fija, un doble clic abre la cámara en Frigate, los botones de acción de la esquina inferior izquierda ejecutan las [acciones](#65-acciones) de la cámara y una ventana bajo el puntero no se cierra. Los botones de acción y la lista del botón de suspender necesitan una fuente para el texto (`fonts-dejavu-core`, u otra fuente TrueType indicada como `font` en `[console]`); sin ella, las ventanas no tienen ni lo uno ni lo otro y el registro lo indica una vez.
 - **Opciones de las ventanas:** `topmost` (con `false`, las ventanas son ventanas normales que otras pueden tapar), `sound` (el sonido de notificación del escritorio) y `skip_fullscreen` (nada mientras la ventana activa está a pantalla completa) funcionan como en Windows.
 - **Configuración:** un clic en el icono (o **Configuración…** en su menú) la abre en el navegador, con las mismas opciones, descripciones y prueba de conexión que en Windows; la página solo se abre en este equipo. En el primer inicio se abre sola. Se guarda en `~/.config/frigate-pip/config.ini` (descrito más abajo). La sección **Acciones**, después de **Video y audio**, tiene las mismas cuatro filas por cámara que la pestaña de Windows (consulte [Acciones](#65-acciones)); si una URL escrita no es válida, no se guarda nada y la página indica qué fila está mal.
 
@@ -535,7 +549,7 @@ En este modo, FrigatePiP no tiene ventana propia: espera detecciones en segundo 
 2. Abra tmux para su propio trabajo — `tmux` inicia una sesión nueva — y trabaje allí. Las ventanas emergentes aparecen sobre esa ventana.
 
 - Para detener FrigatePiP: `tmux kill-session -t frigate-pip`. Para usar sus teclas (pausa, mostrar una cámara): `tmux attach -t frigate-pip`.
-- La ventana emergente aparece en la **esquina** elegida (`position`) y su tamaño sigue el **ancho de la ventana** (`width`). Se cierra sola tras el tiempo habitual (`duration`, `max_duration`) o al instante con **q**, **x** o **Esc**. **m** silencia y reactiva su sonido. **r** repite el inicio del evento (desde que se abrió la ventana emergente). **a** (y un dígito) pulsa los botones de acción de la cámara de la ventana emergente, como en la terminal (consulte [Teclas](#teclas)). Una ventana emergente conserva la configuración con la que se abrió; la configuración guardada mientras tanto se aplica a partir de la siguiente.
+- La ventana emergente aparece en la **esquina** elegida (`position`) y su tamaño sigue el **ancho de la ventana** (`width`). Se cierra sola tras el tiempo habitual (`duration`, `max_duration`) o al instante con **q**, **x** o **Esc**. **m** silencia y reactiva su sonido. **r** repite el inicio del evento (desde que se abrió la ventana emergente). **a** (y un dígito) pulsa los botones de acción de la cámara de la ventana emergente y **z** (y un dígito) suspende su cámara, como en la terminal (consulte [Teclas](#teclas)). Una ventana emergente conserva la configuración con la que se abrió; la configuración guardada mientras tanto se aplica a partir de la siguiente.
 - tmux muestra una sola ventana emergente a la vez: una detección en otra cámara reemplaza la ventana emergente abierta (o se omite si `replace = false`). Mientras un botón de acción de la ventana emergente está armado, enviando o mostrando su resultado, la ventana emergente sigue abierta: una detección en otra cámara se omite, y una en la misma cámara prolonga la ventana emergente.
 - Para ver la imagen con todos sus colores, tmux debe transmitir el color de 24 bits: agregue `set -as terminal-features ",xterm-256color:RGB"` a `~/.tmux.conf` (use su `$TERM` de fuera de tmux) y reinicie tmux. FrigatePiP escribe esta sugerencia en su registro cuando faltan los colores.
 
@@ -551,9 +565,10 @@ Cuando FrigatePiP se ejecuta en una ventana de terminal o en una consola:
 | **m** | Desactiva / activa el sonido (con `camera_audio = true`) en todas las ventanas, también en las que se abran después; el texto muestra entonces *sonido desactivado*. |
 | **r** | Repetir el inicio del evento en todas las ventanas (consulte [Acciones con el mouse](#acciones-con-el-mouse)); otra vez: volver al video en vivo. |
 | **a** | Pulsa un [botón de acción](#65-acciones) de la ventana más reciente cuya cámara tiene acciones. Con una sola acción, **a** la pulsa (con confirmación: **a** y otra vez **a** en menos de 3 s). Con varias, **a** las enumera en el texto durante 3 s, p. ej., *1 Portón · 2 Luz*; un dígito elige entonces esa acción en lugar de mostrar una cámara y, con confirmación, el mismo dígito otra vez la ejecuta. El texto muestra el estado: *¿Portón?*, *Portón …*, *Portón ✓* o *Portón ✗*. Mientras la elección está abierta para una ventana, esta no se cierra ni se reemplaza. |
-| **1**–**9** | Mostrar la cámara 1–9 (en el orden de la configuración de Frigate). Mientras la elección de **a** está abierta y enumera ese número: esa acción. |
+| **z** | [Suspende](#suspender-una-cámara) la cámara de la ventana más reciente: el texto enumera las duraciones durante 3 s, *z: 1 15 min · 2 30 min · 3 1 h · 4 2 h · 5 4 h*, y un dígito elige una; las ventanas de la cámara se cierran. La línea de estado muestra las cámaras suspendidas con el tiempo restante, p. ej., *Suspendidas: Jardín 52 min*. El [menú de la bandeja](#4-el-icono-de-la-bandeja) de las ventanas de escritorio las reactiva. |
+| **1**–**9** | Mostrar la cámara 1–9 (en el orden de la configuración de Frigate). Mientras la elección de **a** o **z** está abierta y enumera ese número: esa acción o duración. |
 
-La tecla **a** y los dígitos de su elección surten efecto unos 150 ms después de pulsarlos. Una terminal no informa de cuándo se suelta una tecla, así que FrigatePiP espera a comprobar que la tecla no se mantiene pulsada: una tecla mantenida cuenta una vez y nunca confirma, y dos pulsaciones en menos de 150 ms no cuentan. Esto requiere los ajustes habituales de repetición del teclado (una repetición más rápida que cada 150 ms, como tienen de forma predeterminada los escritorios y la consola de Linux).
+Las teclas **a** y **z** y los dígitos de su elección surten efecto unos 150 ms después de pulsarlos. Una terminal no informa de cuándo se suelta una tecla, así que FrigatePiP espera a comprobar que la tecla no se mantiene pulsada: una tecla mantenida cuenta una vez y nunca confirma, y dos pulsaciones en menos de 150 ms no cuentan. Esto requiere los ajustes habituales de repetición del teclado (una repetición más rápida que cada 150 ms, como tienen de forma predeterminada los escritorios y la consola de Linux).
 
 ### Línea de comandos
 

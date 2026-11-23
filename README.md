@@ -28,10 +28,10 @@ When Frigate detects a person, a car or any other object, FrigatePiP pops up a s
 - **Manual events** created through Frigate's API (e.g. by a [Home Assistant automation when the doorbell rings](#home-assistant)) open a window too.
 - **Windows the way you like them:** monitor, corner, size, timing, how many at once, replace the oldest or skip, always on top, caption, notification sound, quiet during full-screen games and presentations.
 - **Action buttons:** up to four per camera on its windows — open the gate after the doorbell rings, switch on a light — each one an HTTP POST to a [Home Assistant webhook](#action-buttons) or any other URL, with a confirming second click for gates and doors.
-- **Mouse control:** drag to move, click to pin, wheel to resize, Ctrl + wheel to zoom in where the mouse points, Ctrl + drag to move the zoomed picture, speaker button to mute, slider for the volume, ⟲ to replay the start of the event, × or right-click to close, double-click to open the camera in Frigate.
+- **Mouse control:** drag to move, click to pin, wheel to resize, Ctrl + wheel to zoom in where the mouse points, Ctrl + drag to move the zoomed picture, speaker button to mute, slider for the volume, ⟲ to replay the start of the event, ☾ to snooze the camera for 15 min to 4 h (someone working in the garden), × or right-click to close, double-click to open the camera in Frigate.
 - **Settings window** with a live preview of your changes, a connection test and a description of every option.
 - **Events via the Frigate WebSocket** (nothing else needed) or via **MQTT**.
-- **Updates itself:** checks GitHub once a day and installs a new version with one click (can be switched off).
+- **Updates itself:** checks GitHub once a day, shows what is new and installs the new version when you agree (can be switched off).
 - **Six languages** — English, Polski, Deutsch, Español, Português, Français — chosen automatically from the Windows display language.
 - A single small executable (~0.7 MB) with no runtime dependencies; per-user installer, no administrator rights.
 
@@ -71,7 +71,7 @@ Everything is described in the [user guide](docs/en/user-guide.md).
 
 > **On a Windows PC — also when you work in WSL — use the [Windows application](#windows):** its windows appear over everything, terminals included. The Linux version is meant for Linux computers.
 
-The Linux version (x86_64 and ARM64) shares the Frigate connection (WebSocket or MQTT), the filters, the window corner, size and timing, live video (with the optional prebuffer), MJPEG / snapshots, camera audio and the action buttons with the Windows application; video and audio are decoded by **ffmpeg** (on the graphics card when it can), fed by FrigatePiP's own RTSP client. On a desktop its windows work like on Windows, mouse included (× and the speaker button, the action buttons, drag to move, wheel to resize, Ctrl + wheel to zoom, click to pin, double-click to open the camera in Frigate). There it also has a tray icon with the same menu as on Windows, and its settings open as a page in the browser (with the same options, descriptions and connection test). Settings are stored in `~/.config/frigate-pip/config.ini`.
+The Linux version (x86_64 and ARM64) shares the Frigate connection (WebSocket or MQTT), the filters, the window corner, size and timing, live video (with the optional prebuffer), MJPEG / snapshots, camera audio and the action buttons with the Windows application; video and audio are decoded by **ffmpeg** (on the graphics card when it can), fed by FrigatePiP's own RTSP client. On a desktop its windows work like on Windows, mouse included (× and the speaker button, the snooze button, the action buttons, drag to move, wheel to resize, Ctrl + wheel to zoom, click to pin, double-click to open the camera in Frigate). There it also has a tray icon with the same menu as on Windows, and its settings open as a page in the browser (with the same options, descriptions and connection test). Settings are stored in `~/.config/frigate-pip/config.ini`.
 
 ### Installation
 
@@ -96,7 +96,7 @@ Every [release](https://github.com/maciejgornicz/frigate-pip/releases/latest) al
 | `--output terminal` (default in a terminal without a desktop) | inside the terminal window FrigatePiP runs in | no — it occupies the terminal |
 | `--output tmux` | as tmux popups over your work in tmux — only while you work inside tmux | yes: `tmux new -d -s frigate-pip 'frigate-pip --output tmux'`, then work in tmux (`tmux`) |
 
-Keys in the terminal or on the console: **q** quit, **x** close windows, **p** pause, **m** sound off / on, **r** replay the start of the event, **a** press an action button, **1–9** show a camera; a tmux popup closes with **q**, **x** or **Esc** (**m** mutes it, **r** replays it, **a** presses its action buttons). `frigate-pip --list` shows your cameras with their objects and zones — the names for the filters in `config.ini`.
+Keys in the terminal or on the console: **q** quit, **x** close windows, **p** pause, **m** sound off / on, **r** replay the start of the event, **a** press an action button, **z** snooze a camera, **1–9** show a camera; a tmux popup closes with **q**, **x** or **Esc** (**m** mutes it, **r** replays it, **a** presses its action buttons, **z** snoozes its camera). `frigate-pip --list` shows your cameras with their objects and zones — the names for the filters in `config.ini`.
 
 Running it as a systemd service, all options and troubleshooting: [user guide → Linux version](docs/en/user-guide.md#12-linux-version).
 

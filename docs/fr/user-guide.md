@@ -51,7 +51,7 @@ Téléchargez `FrigatePiP-<version>-portable.exe` depuis la page Releases et ex�
 
 ### Mise à jour
 
-FrigatePiP recherche une nouvelle version une fois par jour (**Rechercher les mises à jour** dans les paramètres). Lorsqu’une version est disponible, une notification apparaît, et le menu de la zone de notification comme la fenêtre des paramètres proposent **Mettre à jour vers …** : FrigatePiP télécharge le programme d’installation depuis GitHub, vérifie sa somme de contrôle SHA-256 et l’exécute — la mise à jour prend quelques secondes et conserve vos paramètres. **Vérifier maintenant** dans les paramètres recherche immédiatement une nouvelle version. Vous pouvez aussi exécuter vous-même le programme d’installation d’une nouvelle version. La version portable ouvre seulement la page de la version : téléchargez le nouveau fichier exe et remplacez l’ancien.
+FrigatePiP recherche une nouvelle version une fois par jour (**Rechercher les mises à jour** dans les paramètres). Lorsqu’une version est disponible, une notification apparaît, et le menu de la zone de notification comme la fenêtre des paramètres proposent **Mettre à jour vers …**. Un clic dessus (ou sur la notification) affiche d’abord les nouveautés : les modifications de toutes les versions depuis la vôtre, telles qu’elles figurent sur GitHub (en anglais), avec un lien vers la page de la version. Ce n’est que si vous répondez **Oui** que FrigatePiP télécharge le programme d’installation depuis GitHub, vérifie sa somme de contrôle SHA-256 et l’exécute — la mise à jour prend quelques secondes et conserve vos paramètres ; **Non** laisse tout en l’état, et la proposition reste. **Vérifier maintenant** dans les paramètres recherche immédiatement une nouvelle version. Vous pouvez aussi exécuter vous-même le programme d’installation d’une nouvelle version. La version portable ouvre seulement la page de la version : téléchargez le nouveau fichier exe et remplacez l’ancien.
 
 ### Désinstallation
 
@@ -89,10 +89,11 @@ Survolez l’icône pour voir l’état (par exemple *Connecté : http://192.16
 | Élément de menu | Action |
 |---|---|
 | *(ligne d’état)* | État de la connexion ou temps de pause restant (à titre informatif). |
-| **Mettre à jour vers …** | Apparaît lorsqu’une nouvelle version est disponible : la télécharge et l’installe (voir [Mise à jour](#mise-à-jour)). |
+| **Mettre à jour vers …** | Apparaît lorsqu’une nouvelle version est disponible : affiche les nouveautés et, si vous acceptez, la télécharge et l’installe (voir [Mise à jour](#mise-à-jour)). |
 | **Paramètres…** | Ouvre la fenêtre des paramètres. |
 | **Afficher la caméra** | Ouvre immédiatement une fenêtre d’aperçu de la caméra choisie, même lorsque les notifications sont suspendues. Pratique pour vérifier l’image ou simplement pour regarder. |
 | **Suspendre les notifications** | **Pendant 15 minutes**, **Pendant 1 heure** ou **Jusqu’à la reprise**. Pendant la pause, les détections n’ouvrent pas de fenêtres. L’élément affiche **En pause** tant qu’une pause est active, et **Reprendre maintenant** y met fin. |
+| **Caméras en veille** | Apparaît tant qu’une caméra est [en veille](#mettre-une-caméra-en-veille) : une entrée par caméra avec le temps restant, p. ex. *Réveiller Jardin (encore 52 min)* ; un clic dessus met fin à la veille immédiatement. L’info-bulle de l’icône énumère aussi les caméras en veille. |
 | **Fermer les fenêtres d’aperçu** | Ferme toutes les fenêtres d’aperçu ouvertes, y compris celles qui sont épinglées. |
 | **Ouvrir Frigate** | Ouvre l’interface web de Frigate dans votre navigateur. |
 | **Aide** | Ouvre ce guide. |
@@ -122,11 +123,23 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 | **×** (coin supérieur droit) | Ferme immédiatement la fenêtre. Le bouton apparaît lorsque vous pointez la souris sur la fenêtre. |
 | **Haut-parleur** (à gauche de ×) | Coupe le son de la fenêtre ; un nouveau clic le rétablit. Le bouton apparaît lorsque vous pointez une fenêtre qui diffuse le son de la caméra ; tant que le son est coupé, le haut-parleur barré reste visible. |
 | **Curseur de volume** (sous le haut-parleur) | Règle le volume de cette fenêtre : faites-le glisser ou cliquez dessus. Il apparaît avec le haut-parleur ; monter le volume réactive aussi le son coupé. Sous Linux, le nouveau volume s’entend juste après avoir relâché. |
-| **Relecture** ⟲ (à gauche des autres boutons) | Rejoue le début de l’événement à vitesse normale, sans son ; la légende affiche *Relecture −12 s*, c’est-à-dire le retard de l’image sur le direct. Avec le [préchargement](#préchargement), la relecture commence 5 s avant l’ouverture de la fenêtre ; sans lui, à l’ouverture de la fenêtre. Cliquez à nouveau pour revenir aussitôt à la vidéo en direct ; après la relecture, elle revient d’elle-même. Le bouton apparaît quand vous pointez une fenêtre avec vidéo en direct ; la fenêtre reste ouverte pendant la relecture. |
+| **Relecture** ⟲ (à gauche du haut-parleur) | Rejoue le début de l’événement à vitesse normale, sans son ; la légende affiche *Relecture −12 s*, c’est-à-dire le retard de l’image sur le direct. Avec le [préchargement](#préchargement), la relecture commence 5 s avant l’ouverture de la fenêtre ; sans lui, à l’ouverture de la fenêtre. Cliquez à nouveau pour revenir aussitôt à la vidéo en direct ; après la relecture, elle revient d’elle-même. Le bouton apparaît quand vous pointez une fenêtre avec vidéo en direct ; la fenêtre reste ouverte pendant la relecture. |
+| **Mise en veille** ☾ (à gauche des autres boutons) | Ouvre une liste : **15 min**, **30 min**, **1 h**, **2 h**, **4 h**. Choisir une durée [met la caméra en veille](#mettre-une-caméra-en-veille) et ferme sa fenêtre. Le bouton apparaît quand vous pointez la fenêtre. |
 | **Clic droit** | Ferme la fenêtre. |
 | **Double-clic** | Ouvre cette caméra dans l’interface web de Frigate. |
 | **Survol** | Tant que le pointeur de la souris se trouve sur la fenêtre, celle-ci ne se ferme pas. Une fois le pointeur éloigné, elle reste encore au moins 3 secondes. |
 | **Boutons d’action** (coin inférieur gauche) | Déclenchent les [actions](#65-actions) de la caméra, par exemple ouvrir le portail ou allumer une lumière. Ils sont toujours visibles. Avec **Confirmation**, le premier clic arme le bouton — il devient rouge et demande *Portail ?* — et un second clic dans les 3 s déclenche l’action (au plus tôt 0,4 s après le premier, si bien qu’un double clic ne la déclenche jamais) ; sans confirmation, un seul clic suffit. Le bouton affiche ensuite *Portail …* (orange) pendant l’envoi, puis pendant 2 s *Portail ✓* (vert : reçu) ou *Portail ✗* (rouge : échec). Un seul bouton peut être armé à la fois : cliquer sur un autre désarme le premier. Un clic sur un bouton n’épingle ni ne déplace jamais la fenêtre et n’ouvre pas Frigate. |
+
+### Mettre une caméra en veille
+
+Quand vous savez qu’une caméra va voir quelqu’un pendant un bon moment — quelqu’un qui travaille au jardin, des enfants qui jouent dans la cour —, mettez-la en veille : pointez sa fenêtre, cliquez sur la lune ☾ et choisissez la durée. La fenêtre se ferme, et les détections de cette caméra n’ouvrent plus de fenêtre jusqu’à la fin de ce délai ; toutes les autres caméras continuent comme d’habitude. Remettre la même caméra en veille fixe une nouvelle fin.
+
+- **Afficher la caméra** dans le menu de la zone de notification affiche toujours une caméra en veille.
+- **Caméras en veille** dans le menu de la zone de notification réveille une caméra avant l’heure.
+- Une mise en veille n’est pas enregistrée : quitter FrigatePiP ou redémarrer l’ordinateur réveille toutes les caméras.
+- Pour arrêter plutôt toutes les fenêtres, utilisez **Suspendre les notifications**.
+
+Sous Linux, les fenêtres de bureau ont le même bouton ; dans le terminal, sur la console et dans les popups tmux, c’est la [touche **z**](#touches) qui s’en charge.
 
 ### Quand une fenêtre se ferme-t-elle ?
 
@@ -134,7 +147,8 @@ Les fenêtres d’aperçu ne prennent jamais le focus du clavier : elles n’in
 - Au plus tard après le nombre de secondes défini dans **au plus**, même si l’objet continue de bouger.
 - Jamais tant qu’elle est épinglée ou que le pointeur de la souris se trouve dessus.
 - Jamais pendant une relecture ; ensuite, elle reste encore ouverte au moins 5 secondes.
-- Jamais tant que l’un de ses [boutons d’action](#65-actions) est armé, en cours d’envoi ou affiche son résultat, ni (sous Linux) tant que le choix de la touche [**a**](#touches) est ouvert pour elle. Comme une fenêtre épinglée, elle n’est pas non plus remplacée entre-temps par un nouvel événement.
+- Jamais tant que l’un de ses [boutons d’action](#65-actions) est armé, en cours d’envoi ou affiche son résultat, ni (sous Linux) tant que le choix de la touche [**a** ou **z**](#touches) est ouvert pour elle. Comme une fenêtre épinglée, elle n’est pas non plus remplacée entre-temps par un nouvel événement.
+- Jamais tant que la liste de son bouton de mise en veille est ouverte.
 
 ### Plusieurs caméras
 
@@ -161,7 +175,7 @@ La plupart des modifications s’appliquent **immédiatement** aux fenêtres d�
 | **Langue** | Langue de FrigatePiP. **Automatique (Windows)** suit la langue d’affichage de Windows ; l’anglais est utilisé lorsque cette langue n’est pas disponible. Voir [Langue](#9-langue). |
 | **Lancer FrigatePiP au démarrage de Windows** | Lance FrigatePiP automatiquement à l’ouverture de votre session Windows. |
 | **Rechercher les mises à jour** | Une fois par jour, FrigatePiP demande à GitHub si une nouvelle version existe et, le cas échéant, affiche une notification et propose la mise à jour. Aucune donnée sur vous ou vos caméras n’est envoyée. |
-| **Vérifier maintenant** / **Mettre à jour vers …** | Recherche immédiatement une nouvelle version ; si elle en trouve une, le bouton la télécharge et l’installe (vos paramètres sont conservés). Le texte à côté affiche le résultat. |
+| **Vérifier maintenant** / **Mettre à jour vers …** | Recherche immédiatement une nouvelle version ; si elle en trouve une, le bouton affiche les nouveautés et, si vous acceptez, la télécharge et l’installe (vos paramètres sont conservés). Le texte à côté affiche le résultat. |
 
 ### 6.2 Détection
 
@@ -521,7 +535,7 @@ Sur un bureau Linux, les fenêtres d’aperçu fonctionnent comme sous Windows 
 - **Lancement :** menu des applications → **FrigatePiP** (installé avec apt), ou `frigate-pip` dans un terminal du bureau. Il s’exécute en arrière-plan sans terminal ; une seule copie s’exécute par utilisateur. Un second lancement (ou `frigate-pip --settings`) ouvre les paramètres de la copie en cours d’exécution.
 - **Avec la session du bureau :** `frigate-pip --autostart on` (pour désactiver : `frigate-pip --autostart off`). Pour l’arrêter : `frigate-pip --quit`.
 - **Icône dans la zone de notification :** avec le même menu que sous Windows (voir [Icône de la zone de notification](#4-icône-de-la-zone-de-notification)) ; sa couleur indique l’état : bleu — connecté, gris — non connecté, orange — en pause. Elle apparaît sous KDE Plasma, Xfce, Cinnamon, MATE et Budgie, ainsi que sous GNOME avec l’extension AppIndicator (incluse dans Ubuntu).
-- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, le curseur en dessous règle le volume, ⟲ rejoue le début de l’événement, un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, les boutons d’action du coin inférieur gauche déclenchent les [actions](#65-actions) de la caméra, et une fenêtre sous la souris ne se ferme pas. Les boutons d’action ont besoin d’une police pour les légendes (`fonts-dejavu-core`, ou une autre police TrueType indiquée comme `font` dans `[console]`) ; sans elle, les fenêtres n’ont pas de boutons et le journal le signale une fois.
+- **Souris :** comme sous Windows (voir [Actions de la souris](#actions-de-la-souris)) — × ou le bouton droit ferme, le haut-parleur coupe le son, le curseur en dessous règle le volume, ⟲ rejoue le début de l’événement, la lune ☾ [met la caméra en veille](#mettre-une-caméra-en-veille), un glisser déplace la fenêtre, la molette la redimensionne, Ctrl + molette zoome sur l’image autour du pointeur, Ctrl + glisser déplace l’image zoomée, un clic l’épingle, un double clic ouvre la caméra dans Frigate, les boutons d’action du coin inférieur gauche déclenchent les [actions](#65-actions) de la caméra, et une fenêtre sous la souris ne se ferme pas. Les boutons d’action et la liste du bouton de mise en veille ont besoin d’une police pour les légendes (`fonts-dejavu-core`, ou une autre police TrueType indiquée comme `font` dans `[console]`) ; sans elle, les fenêtres n’ont ni l’un ni l’autre et le journal le signale une fois.
 - **Options des fenêtres :** `topmost` (avec `false`, les fenêtres sont des fenêtres ordinaires que d’autres peuvent recouvrir), `sound` (le son de notification du bureau) et `skip_fullscreen` (rien tant que la fenêtre active est en plein écran) fonctionnent comme sous Windows.
 - **Paramètres :** un clic sur l’icône (ou **Paramètres…** dans son menu) les ouvre dans le navigateur, avec les mêmes options, descriptions et le même test de connexion que sous Windows ; la page ne s’ouvre que sur cet ordinateur. Au premier lancement, elle s’ouvre d’elle-même. Ils sont enregistrés dans `~/.config/frigate-pip/config.ini` (décrit plus bas). La section **Actions**, après **Vidéo et audio**, a les mêmes quatre lignes par caméra que l’onglet de Windows (voir [Actions](#65-actions)) ; si une URL saisie n’est pas valide, rien n’est enregistré et la page indique quelle ligne est fautive.
 
@@ -535,7 +549,7 @@ Dans ce mode, FrigatePiP n’a pas de fenêtre propre : il attend les détectio
 2. Ouvrez tmux pour votre propre travail — `tmux` démarre une nouvelle session — et travaillez-y. Les popups apparaissent par-dessus cette fenêtre.
 
 - Pour arrêter FrigatePiP : `tmux kill-session -t frigate-pip`. Pour utiliser ses touches (pause, affichage d’une caméra) : `tmux attach -t frigate-pip`.
-- La popup apparaît dans le **coin** choisi (`position`) et sa taille suit la **largeur de la fenêtre** (`width`). Elle se ferme d’elle-même après le délai habituel (`duration`, `max_duration`), ou immédiatement avec **q**, **x** ou **Échap**. **m** coupe et rétablit son son. **r** rejoue le début de l’événement (depuis l’ouverture de la popup). **a** (et un chiffre) appuie sur les boutons d’action de la caméra de la popup, comme dans le terminal (voir [Touches](#touches)). Une popup garde les paramètres avec lesquels elle s’est ouverte ; les paramètres enregistrés entre-temps s’appliquent à partir de la popup suivante.
+- La popup apparaît dans le **coin** choisi (`position`) et sa taille suit la **largeur de la fenêtre** (`width`). Elle se ferme d’elle-même après le délai habituel (`duration`, `max_duration`), ou immédiatement avec **q**, **x** ou **Échap**. **m** coupe et rétablit son son. **r** rejoue le début de l’événement (depuis l’ouverture de la popup). **a** (et un chiffre) appuie sur les boutons d’action de la caméra de la popup et **z** (et un chiffre) met sa caméra en veille, comme dans le terminal (voir [Touches](#touches)). Une popup garde les paramètres avec lesquels elle s’est ouverte ; les paramètres enregistrés entre-temps s’appliquent à partir de la popup suivante.
 - tmux n’affiche qu’une popup à la fois : une détection sur une autre caméra remplace la popup ouverte (ou est ignorée si `replace = false`). Tant qu’un bouton d’action de la popup est armé, en cours d’envoi ou affiche son résultat, la popup reste ouverte : une détection sur une autre caméra est ignorée, une détection sur la même caméra prolonge la popup.
 - Pour obtenir toutes les couleurs de l’image, tmux doit transmettre les couleurs 24 bits : ajoutez `set -as terminal-features ",xterm-256color:RGB"` à `~/.tmux.conf` (en indiquant la valeur de votre `$TERM` hors de tmux) et redémarrez tmux. FrigatePiP inscrit cette indication dans son journal lorsque les couleurs manquent.
 
@@ -551,9 +565,10 @@ Lorsque FrigatePiP s’exécute dans un terminal ou sur une console :
 | **m** | Coupe / rétablit le son (avec `camera_audio = true`) dans toutes les fenêtres, y compris celles ouvertes ensuite ; la légende affiche alors *son coupé*. |
 | **r** | Rejouer le début de l’événement dans toutes les fenêtres (voir [Actions de la souris](#actions-de-la-souris)) ; à nouveau : retour à la vidéo en direct. |
 | **a** | Appuie sur un [bouton d’action](#65-actions) de la fenêtre la plus récente dont la caméra a des actions. Avec une seule action, **a** l’actionne (avec confirmation : **a**, puis à nouveau **a** dans les 3 s). Avec plusieurs, **a** les énumère dans la légende pendant 3 s, p. ex. *1 Portail · 2 Lumière* ; un chiffre choisit alors cette action au lieu d’afficher une caméra et, avec confirmation, le même chiffre une seconde fois la déclenche. La légende affiche l’état : *Portail ?*, *Portail …*, *Portail ✓* ou *Portail ✗*. Tant que le choix est ouvert pour une fenêtre, celle-ci ne se ferme pas et n’est pas remplacée. |
-| **1**–**9** | Afficher la caméra 1 à 9 (dans l’ordre de la configuration de Frigate). Tant que le choix de **a** est ouvert et énumère ce numéro : cette action. |
+| **z** | [Met en veille](#mettre-une-caméra-en-veille) la caméra de la fenêtre la plus récente : la légende énumère les durées pendant 3 s, *z: 1 15 min · 2 30 min · 3 1 h · 4 2 h · 5 4 h*, et un chiffre en choisit une ; les fenêtres de la caméra se ferment. La ligne d’état affiche les caméras en veille avec le temps restant, p. ex. *En veille : Jardin 52 min*. Le [menu de la zone de notification](#4-icône-de-la-zone-de-notification) des fenêtres de bureau les réveille. |
+| **1**–**9** | Afficher la caméra 1 à 9 (dans l’ordre de la configuration de Frigate). Tant que le choix de **a** ou **z** est ouvert et énumère ce numéro : cette action ou cette durée. |
 
-La touche **a** et les chiffres de son choix prennent effet environ 150 ms après l’appui. Un terminal ne signale pas le relâchement d’une touche ; FrigatePiP attend donc de voir que la touche n’est pas maintenue : une touche maintenue compte une fois et ne confirme jamais, et deux frappes à moins de 150 ms d’intervalle ne comptent pas. Cela suppose les réglages habituels de répétition des touches (une répétition plus rapide que toutes les 150 ms, comme le prévoient par défaut les bureaux et la console Linux).
+Les touches **a** et **z** et les chiffres de leur choix prennent effet environ 150 ms après l’appui. Un terminal ne signale pas le relâchement d’une touche ; FrigatePiP attend donc de voir que la touche n’est pas maintenue : une touche maintenue compte une fois et ne confirme jamais, et deux frappes à moins de 150 ms d’intervalle ne comptent pas. Cela suppose les réglages habituels de répétition des touches (une répétition plus rapide que toutes les 150 ms, comme le prévoient par défaut les bureaux et la console Linux).
 
 ### Ligne de commande
 

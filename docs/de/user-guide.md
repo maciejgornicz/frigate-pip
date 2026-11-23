@@ -51,7 +51,7 @@ Laden Sie `FrigatePiP-<version>-portable.exe` von der Releases-Seite herunter un
 
 ### Aktualisieren
 
-FrigatePiP sucht einmal täglich nach einer neuen Version (**Nach Updates suchen** in den Einstellungen). Ist eine verfügbar, erscheint eine Benachrichtigung, und sowohl das Tray-Menü als auch das Einstellungsfenster bieten **Auf … aktualisieren** an: FrigatePiP lädt das Installationsprogramm von GitHub herunter, prüft seine SHA-256-Prüfsumme und führt es aus – das Update dauert wenige Sekunden, Ihre Einstellungen bleiben erhalten. **Jetzt prüfen** in den Einstellungen sucht sofort nach einer neuen Version. Sie können das Installationsprogramm einer neuen Version auch selbst ausführen. Die portable Version öffnet nur die Release-Seite: Laden Sie die neue EXE-Datei herunter und ersetzen Sie die alte.
+FrigatePiP sucht einmal täglich nach einer neuen Version (**Nach Updates suchen** in den Einstellungen). Ist eine verfügbar, erscheint eine Benachrichtigung, und sowohl das Tray-Menü als auch das Einstellungsfenster bieten **Auf … aktualisieren** an. Ein Klick darauf (oder auf die Benachrichtigung) zeigt zuerst, was neu ist: die Änderungen aller Versionen seit Ihrer, so wie sie auf GitHub stehen (auf Englisch), mit einem Link zur Release-Seite. Erst wenn Sie mit **Ja** antworten, lädt FrigatePiP das Installationsprogramm von GitHub herunter, prüft seine SHA-256-Prüfsumme und führt es aus – das Update dauert wenige Sekunden, Ihre Einstellungen bleiben erhalten; **Nein** lässt alles, wie es ist, und das Angebot bleibt bestehen. **Jetzt prüfen** in den Einstellungen sucht sofort nach einer neuen Version. Sie können das Installationsprogramm einer neuen Version auch selbst ausführen. Die portable Version öffnet nur die Release-Seite: Laden Sie die neue EXE-Datei herunter und ersetzen Sie die alte.
 
 ### Deinstallieren
 
@@ -89,10 +89,11 @@ Zeigen Sie mit der Maus auf das Symbol, um den Status zu sehen (z. B. *Verbunden
 | Menüeintrag | Funktion |
 |---|---|
 | *(Statuszeile)* | Verbindungsstatus oder verbleibende Pausenzeit (nur zur Information). |
-| **Auf … aktualisieren** | Erscheint, wenn eine neue Version verfügbar ist: lädt sie herunter und installiert sie (siehe [Aktualisieren](#aktualisieren)). |
+| **Auf … aktualisieren** | Erscheint, wenn eine neue Version verfügbar ist: zeigt, was neu ist, und lädt sie, wenn Sie zustimmen, herunter und installiert sie (siehe [Aktualisieren](#aktualisieren)). |
 | **Einstellungen…** | Öffnet das Einstellungsfenster. |
 | **Kamera anzeigen** | Öffnet sofort ein Vorschaufenster der gewählten Kamera, auch während Benachrichtigungen pausiert sind. Nützlich, um das Bild zu prüfen oder einfach nachzusehen. |
 | **Benachrichtigungen pausieren** | **Für 15 Minuten**, **Für 1 Stunde** oder **Bis zur Fortsetzung**. Während der Pause öffnen Erkennungen keine Fenster. Bei aktiver Pause lautet der Eintrag **Pausiert**, und **Jetzt fortsetzen** beendet sie. |
+| **Ruhende Kameras** | Erscheint, solange eine Kamera [ruht](#eine-kamera-ruhen-lassen): ein Eintrag pro Kamera mit der verbleibenden Zeit, z. B. *Garten wecken (noch 52 Min.)*; ein Klick darauf weckt die Kamera sofort. Auch der Tooltip des Symbols listet die ruhenden Kameras auf. |
 | **Vorschaufenster schließen** | Schließt alle geöffneten Vorschaufenster, auch angeheftete. |
 | **Frigate öffnen** | Öffnet die Frigate-Weboberfläche in Ihrem Browser. |
 | **Hilfe** | Öffnet dieses Handbuch. |
@@ -122,11 +123,23 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 | **×** (oben rechts) | Schließt das Fenster sofort. Die Schaltfläche erscheint, wenn Sie mit der Maus auf das Fenster zeigen. |
 | **Lautsprecher** (links neben ×) | Schaltet den Ton des Fensters aus; ein weiterer Klick schaltet ihn wieder ein. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Kameraton zeigen; solange der Ton aus ist, bleibt der durchgestrichene Lautsprecher sichtbar. |
 | **Lautstärkeregler** (unter dem Lautsprecher) | Stellt die Lautstärke dieses Fensters ein: ziehen oder anklicken. Er erscheint zusammen mit dem Lautsprecher; Lauterstellen schaltet auch stummgeschalteten Ton wieder ein. Unter Linux ist die neue Lautstärke kurz nach dem Loslassen zu hören. |
-| **Wiederholung** ⟲ (links neben den anderen Schaltflächen) | Spielt den Beginn des Ereignisses noch einmal in normaler Geschwindigkeit ab, ohne Ton; die Beschriftung zeigt *Wiederholung −12 s*, also wie weit das Bild hinter dem Livebild liegt. Mit dem [Vorpuffer](#vorpuffer) beginnt die Wiederholung 5 s, bevor sich das Fenster öffnete, ohne ihn mit dem Öffnen des Fensters. Klicken Sie erneut, um sofort zum Livevideo zurückzukehren; nach der Wiederholung kehrt es von selbst zurück. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Livevideo zeigen; während der Wiederholung bleibt das Fenster offen. |
+| **Wiederholung** ⟲ (links neben dem Lautsprecher) | Spielt den Beginn des Ereignisses noch einmal in normaler Geschwindigkeit ab, ohne Ton; die Beschriftung zeigt *Wiederholung −12 s*, also wie weit das Bild hinter dem Livebild liegt. Mit dem [Vorpuffer](#vorpuffer) beginnt die Wiederholung 5 s, bevor sich das Fenster öffnete, ohne ihn mit dem Öffnen des Fensters. Klicken Sie erneut, um sofort zum Livevideo zurückzukehren; nach der Wiederholung kehrt es von selbst zurück. Die Schaltfläche erscheint, wenn Sie auf ein Fenster mit Livevideo zeigen; während der Wiederholung bleibt das Fenster offen. |
+| **Ruhen lassen** ☾ (links neben den anderen Schaltflächen) | Öffnet eine Liste: **15 Min.**, **30 Min.**, **1 Std.**, **2 Std.**, **4 Std.** Die Wahl einer Dauer [lässt die Kamera ruhen](#eine-kamera-ruhen-lassen) und schließt ihr Fenster. Die Schaltfläche erscheint, wenn Sie mit der Maus auf das Fenster zeigen. |
 | **Rechtsklick** | Schließt das Fenster. |
 | **Doppelklick** | Öffnet diese Kamera in der Frigate-Weboberfläche. |
 | **Darauf zeigen** | Solange sich der Mauszeiger über dem Fenster befindet, schließt es sich nicht. Nachdem Sie die Maus wegbewegt haben, bleibt es noch mindestens 3 Sekunden geöffnet. |
 | **Aktionsschaltflächen** (unten links) | Führen die [Aktionen](#65-aktionen) der Kamera aus, z. B. das Tor öffnen oder das Licht einschalten. Sie sind immer sichtbar. Mit **Bestätigung** macht der erste Klick die Schaltfläche scharf — sie wird rot und fragt *Tor?* —, und ein zweiter Klick innerhalb von 3 s führt die Aktion aus (frühestens 0,4 s nach dem ersten, sodass ein Doppelklick sie nie auslöst); ohne Bestätigung genügt ein Klick. Danach zeigt die Schaltfläche während des Sendens *Tor …* (orange) und 2 s lang *Tor ✓* (grün: angekommen) oder *Tor ✗* (rot: fehlgeschlagen). Es ist immer nur eine Schaltfläche scharf: Ein Klick auf eine andere entschärft die erste. Ein Klick auf eine Schaltfläche heftet das Fenster nie an, verschiebt es nicht und öffnet Frigate nicht. |
+
+### Eine Kamera ruhen lassen
+
+Wenn Sie wissen, dass eine Kamera eine Weile lang immer wieder jemanden sehen wird — jemand arbeitet im Garten, Kinder spielen im Hof —, lassen Sie sie ruhen: Zeigen Sie auf ihr Fenster, klicken Sie auf den Mond ☾ und wählen Sie, wie lange. Das Fenster schließt sich, und Erkennungen dieser Kamera öffnen kein Fenster, bis die Zeit abgelaufen ist; alle anderen Kameras arbeiten wie gewohnt weiter. Wenn Sie dieselbe Kamera erneut ruhen lassen, gilt das neue Ende.
+
+- **Kamera anzeigen** im Tray-Menü zeigt auch eine ruhende Kamera an.
+- **Ruhende Kameras** im Tray-Menü weckt eine Kamera vor Ablauf der Zeit.
+- Das Ruhen wird nicht gespeichert: Beim Beenden von FrigatePiP oder einem Neustart des Computers werden alle Kameras geweckt.
+- Um stattdessen alle Fenster anzuhalten, verwenden Sie **Benachrichtigungen pausieren**.
+
+Unter Linux haben die Desktop-Fenster dieselbe Schaltfläche; im Terminal, auf der Konsole und in tmux-Popups erledigt das die [Taste **z**](#tasten).
 
 ### Wann schließt sich ein Fenster?
 
@@ -134,7 +147,8 @@ Vorschaufenster übernehmen nie den Tastaturfokus und unterbrechen daher weder d
 - Spätestens nach der unter **höchstens** eingestellten Zahl von Sekunden, auch wenn sich das Objekt weiter bewegt.
 - Nie, solange es angeheftet ist oder sich der Mauszeiger darüber befindet.
 - Nie während einer Wiederholung; danach bleibt es noch mindestens 5 Sekunden geöffnet.
-- Nie, solange eine seiner [Aktionsschaltflächen](#65-aktionen) scharf ist, sendet oder ihr Ergebnis zeigt, und (unter Linux) nie, solange die Auswahl der Taste [**a**](#tasten) für es offen ist. Wie ein angeheftetes Fenster wird es in dieser Zeit auch nicht durch ein neues Ereignis ersetzt.
+- Nie, solange eine seiner [Aktionsschaltflächen](#65-aktionen) scharf ist, sendet oder ihr Ergebnis zeigt, und (unter Linux) nie, solange die Auswahl der Taste [**a** oder **z**](#tasten) für es offen ist. Wie ein angeheftetes Fenster wird es in dieser Zeit auch nicht durch ein neues Ereignis ersetzt.
+- Nie, solange die Liste unter seiner Schaltfläche ☾ offen ist.
 
 ### Mehrere Kameras
 
@@ -161,7 +175,7 @@ Die meisten Änderungen wirken sich **sofort** auf geöffnete Vorschaufenster au
 | **Sprache** | Sprache von FrigatePiP. **Automatisch (Windows)** folgt der Windows-Anzeigesprache; ist diese Sprache nicht verfügbar, wird Englisch verwendet. Siehe [Sprache](#9-sprache). |
 | **FrigatePiP mit Windows starten** | Startet FrigatePiP automatisch, wenn Sie sich bei Windows anmelden. |
 | **Nach Updates suchen** | Einmal täglich fragt FrigatePiP bei GitHub nach einer neuen Version und zeigt gegebenenfalls eine Benachrichtigung mit dem Update-Angebot. Es werden keine Daten über Sie oder Ihre Kameras gesendet. |
-| **Jetzt prüfen** / **Auf … aktualisieren** | Sucht sofort nach einer neuen Version; wurde eine gefunden, lädt die Schaltfläche sie herunter und installiert sie (die Einstellungen bleiben erhalten). Der Text daneben zeigt das Ergebnis. |
+| **Jetzt prüfen** / **Auf … aktualisieren** | Sucht sofort nach einer neuen Version; wurde eine gefunden, zeigt die Schaltfläche, was neu ist, und lädt sie, wenn Sie zustimmen, herunter und installiert sie (die Einstellungen bleiben erhalten). Der Text daneben zeigt das Ergebnis. |
 
 ### 6.2 Erkennung
 
@@ -521,7 +535,7 @@ Auf einem Linux-Desktop funktionieren die Vorschaufenster wie unter Windows: rah
 - **Start:** Anwendungsmenü → **FrigatePiP** (mit apt installiert) oder `frigate-pip` in einem Terminal auf dem Desktop. Es läuft im Hintergrund ohne Terminal; pro Benutzer läuft eine Kopie. Ein zweiter Start (oder `frigate-pip --settings`) öffnet die Einstellungen der laufenden Kopie.
 - **Mit der Desktop-Sitzung:** `frigate-pip --autostart on` (wieder aus: `frigate-pip --autostart off`). Zum Beenden: `frigate-pip --quit`.
 - **Symbol im Infobereich:** mit demselben Menü wie unter Windows (siehe [Das Tray-Symbol](#4-das-tray-symbol)); seine Farbe zeigt den Zustand: blau — verbunden, grau — nicht verbunden, orange — pausiert. Es erscheint unter KDE Plasma, Xfce, Cinnamon, MATE und Budgie sowie unter GNOME mit der Erweiterung AppIndicator (in Ubuntu enthalten).
-- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, ⟲ wiederholt den Beginn des Ereignisses, Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, die Aktionsschaltflächen unten links führen die [Aktionen](#65-aktionen) der Kamera aus, und ein Fenster unter der Maus schließt sich nicht. Die Aktionsschaltflächen brauchen eine Schriftart für Beschriftungen (`fonts-dejavu-core` oder eine andere TrueType-Schrift, die als `font` in `[console]` eingetragen ist); ohne sie haben die Fenster keine Schaltflächen, und das Protokoll meldet es einmal.
+- **Maus:** wie unter Windows (siehe [Mausaktionen](#mausaktionen)) — × oder die rechte Maustaste schließt, der Lautsprecher schaltet stumm, der Regler darunter stellt die Lautstärke ein, ⟲ wiederholt den Beginn des Ereignisses, der Mond ☾ [lässt die Kamera ruhen](#eine-kamera-ruhen-lassen), Ziehen verschiebt das Fenster, das Mausrad ändert seine Größe, Strg + Mausrad zoomt das Bild um den Mauszeiger, Strg + Ziehen verschiebt das gezoomte Bild, ein Klick heftet es an, ein Doppelklick öffnet die Kamera in Frigate, die Aktionsschaltflächen unten links führen die [Aktionen](#65-aktionen) der Kamera aus, und ein Fenster unter der Maus schließt sich nicht. Die Aktionsschaltflächen und die Liste unter der Schaltfläche ☾ brauchen eine Schriftart für Beschriftungen (`fonts-dejavu-core` oder eine andere TrueType-Schrift, die als `font` in `[console]` eingetragen ist); ohne sie haben die Fenster keines von beiden, und das Protokoll meldet es einmal.
 - **Fensteroptionen:** `topmost` (bei `false` sind die Fenster gewöhnliche Fenster, die andere verdecken können), `sound` (der Benachrichtigungston des Desktops) und `skip_fullscreen` (nichts, solange das aktive Fenster im Vollbild ist) wirken wie unter Windows.
 - **Einstellungen:** Ein Klick auf das Symbol (oder **Einstellungen…** in seinem Menü) öffnet sie im Browser — mit denselben Optionen, Beschreibungen und demselben Verbindungstest wie unter Windows; die Seite lässt sich nur auf diesem Rechner öffnen. Beim ersten Start öffnet sie sich von selbst. Gespeichert wird in `~/.config/frigate-pip/config.ini` (unten beschrieben). Der Abschnitt **Aktionen** nach **Video & Audio** hat dieselben vier Zeilen pro Kamera wie der Reiter unter Windows (siehe [Aktionen](#65-aktionen)); ist eine eingegebene URL ungültig, wird nichts gespeichert, und die Seite zeigt, welche Zeile falsch ist.
 
@@ -535,7 +549,7 @@ In diesem Modus hat FrigatePiP kein eigenes Fenster: Es wartet im Hintergrund au
 2. Öffnen Sie tmux für Ihre eigene Arbeit — `tmux` startet eine neue Sitzung — und arbeiten Sie dort. Die Popups erscheinen über diesem Fenster.
 
 - Zum Beenden von FrigatePiP: `tmux kill-session -t frigate-pip`. Um seine Tasten zu verwenden (Pause, Kamera anzeigen): `tmux attach -t frigate-pip`.
-- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein. **r** wiederholt den Beginn des Ereignisses (ab dem Öffnen des Popups). **a** (und eine Ziffer) drückt die Aktionsschaltflächen der Kamera des Popups, wie im Terminal (siehe [Tasten](#tasten)). Ein Popup behält die Einstellungen, mit denen es geöffnet wurde; inzwischen gespeicherte Einstellungen gelten ab dem nächsten Popup.
+- Das Popup erscheint in der gewählten **Bildschirmecke** (`position`), und seine Größe richtet sich nach der **Fensterbreite** (`width`). Es schließt sich nach der üblichen Zeit von selbst (`duration`, `max_duration`) oder sofort mit **q**, **x** oder **Esc**. **m** schaltet seinen Ton aus und wieder ein. **r** wiederholt den Beginn des Ereignisses (ab dem Öffnen des Popups). **a** (und eine Ziffer) drückt die Aktionsschaltflächen der Kamera des Popups, und **z** (und eine Ziffer) lässt seine Kamera ruhen, wie im Terminal (siehe [Tasten](#tasten)). Ein Popup behält die Einstellungen, mit denen es geöffnet wurde; inzwischen gespeicherte Einstellungen gelten ab dem nächsten Popup.
 - tmux zeigt immer nur ein Popup gleichzeitig: Eine Erkennung auf einer anderen Kamera ersetzt das geöffnete Popup (oder wird bei `replace = false` übersprungen). Solange eine Aktionsschaltfläche des Popups scharf ist, sendet oder ihr Ergebnis zeigt, bleibt das Popup offen: Eine Erkennung auf einer anderen Kamera wird übersprungen, eine auf derselben Kamera verlängert das Popup.
 - Für die vollen Farben des Bildes muss tmux 24-Bit-Farbe weitergeben: Fügen Sie `set -as terminal-features ",xterm-256color:RGB"` zu `~/.tmux.conf` hinzu (verwenden Sie dabei Ihren `$TERM` außerhalb von tmux) und starten Sie tmux neu. FrigatePiP schreibt diesen Hinweis in sein Protokoll, wenn die Farben fehlen.
 
@@ -551,9 +565,10 @@ Wenn FrigatePiP in einem Terminal oder auf einer Konsole läuft:
 | **m** | Ton aus / ein (bei `camera_audio = true`) für alle Fenster, auch später geöffnete; die Beschriftung zeigt dann *Ton aus*. |
 | **r** | Den Beginn des Ereignisses in allen Fenstern wiederholen (siehe [Mausaktionen](#mausaktionen)); erneut: zurück zum Livevideo. |
 | **a** | Drückt eine [Aktionsschaltfläche](#65-aktionen) des neuesten Fensters, dessen Kamera Aktionen hat. Bei einer Aktion drückt **a** sie (mit Bestätigung: **a** und innerhalb von 3 s noch einmal **a**). Bei mehreren listet **a** sie 3 s lang in der Beschriftung auf, z. B. *1 Tor · 2 Licht*; eine Ziffer wählt dann diese Aktion, statt eine Kamera anzuzeigen, und mit Bestätigung führt dieselbe Ziffer sie beim zweiten Mal aus. Die Beschriftung zeigt den Zustand: *Tor?*, *Tor …*, *Tor ✓* oder *Tor ✗*. Solange die Auswahl für ein Fenster offen ist, schließt es sich nicht und wird nicht ersetzt. |
-| **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). Solange die Auswahl von **a** offen ist und diese Nummer auflistet: diese Aktion. |
+| **z** | [Lässt die Kamera](#eine-kamera-ruhen-lassen) des neuesten Fensters ruhen: Die Beschriftung listet 3 s lang die Dauern auf, *z: 1 15 Min. · 2 30 Min. · 3 1 Std. · 4 2 Std. · 5 4 Std.*, und eine Ziffer wählt eine davon; die Fenster der Kamera schließen sich. Die Statuszeile zeigt die ruhenden Kameras mit der verbleibenden Zeit, z. B. *Ruhend: Garten 52 Min.* Das [Tray-Menü](#4-das-tray-symbol) der Desktop-Fenster weckt sie. |
+| **1**–**9** | Kamera 1–9 anzeigen (in der Reihenfolge der Frigate-Konfiguration). Solange die Auswahl von **a** oder **z** offen ist und diese Nummer auflistet: diese Aktion bzw. Dauer. |
 
-Die Taste **a** und die Ziffern ihrer Auswahl wirken etwa 150 ms nach dem Drücken. Ein Terminal meldet nicht, wann eine Taste losgelassen wird; FrigatePiP wartet daher ab, ob die Taste gehalten wird: Eine gehaltene Taste zählt einmal und bestätigt nie, und zwei Anschläge innerhalb von 150 ms zählen gar nicht. Das setzt die üblichen Einstellungen der Tastenwiederholung voraus (eine Wiederholung schneller als alle 150 ms, wie Desktops und die Linux-Konsole sie standardmäßig haben).
+Die Tasten **a** und **z** und die Ziffern ihrer Auswahl wirken etwa 150 ms nach dem Drücken. Ein Terminal meldet nicht, wann eine Taste losgelassen wird; FrigatePiP wartet daher ab, ob die Taste gehalten wird: Eine gehaltene Taste zählt einmal und bestätigt nie, und zwei Anschläge innerhalb von 150 ms zählen gar nicht. Das setzt die üblichen Einstellungen der Tastenwiederholung voraus (eine Wiederholung schneller als alle 150 ms, wie Desktops und die Linux-Konsole sie standardmäßig haben).
 
 ### Befehlszeile
 

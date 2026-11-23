@@ -34,6 +34,8 @@ pub struct Tmux {
     lock_dir: PathBuf,
     /// The hint about 24-bit colour was written to the log.
     rgb_hint: bool,
+    /// Snooze lengths picked in popups closed since (by window id), see `take_snooze`.
+    snoozed: HashMap<u64, u64>,
 }
 
 /// Single-quotes an argument for the shell that tmux runs the popup command with.
@@ -61,6 +63,22 @@ pub fn busy_path(lock: &Path) -> PathBuf {
     let mut name = lock.as_os_str().to_owned();
     name.push(".busy");
     PathBuf::from(name)
+}
+
+/// The file a viewer leaves next to its lock when a snooze was picked there (`z`, a digit): the
+/// length in minutes. The background process reads it once the popup has closed.
+pub fn snooze_path(lock: &Path) -> PathBuf {
+    let mut name = lock.as_os_str().to_owned();
+    name.push(".snooze");
+    PathBuf::from(name)
+}
+
+/// The snooze length a closed viewer left beside `lock`, if any; the file goes.
+fn read_snooze(lock: &Path) -> Option<u64> {
+    let f = snooze_path(lock);
+    let minutes = std::fs::read_to_string(&f).ok().and_then(|s| s.trim().parse().ok());
+    let _ = std::fs::remove_file(&f);
+    minutes
 }
 
 /// The viewer of the popup with this lock runs and asks to keep the popup open. Only while it
@@ -119,7 +137,7 @@ impl Tmux {
         let lock_dir = base.join(format!("frigate-pip-{}", std::process::id()));
         std::fs::create_dir_all(&lock_dir).map_err(|e| format!("{}: {e}", lock_dir.display()))?;
         crate::log!("tmux output: popups from {}", exe.display());
-        Ok(Tmux { exe, width, corner, popups: HashMap::new(), lock_dir, rgb_hint: false })
+        Ok(Tmux { exe, width, corner, popups: HashMap::new(), lock_dir, rgb_hint: false, snoozed: HashMap::new() })
     }
 
     fn close(&mut self, id: u64, popup: Popup) {
@@ -127,6 +145,7 @@ impl Tmux {
             let _ = Command::new("tmux").args(["display-popup", "-C", "-c", &popup.client]).stderr(Stdio::null()).status();
         }
         let _ = std::fs::remove_file(busy_path(&popup.lock));
+        let _ = std::fs::remove_file(snooze_path(&popup.lock));
         let _ = std::fs::remove_file(&popup.lock);
         crate::log!("tmux popup {id} closed");
     }
@@ -212,6 +231,9 @@ impl Output for Tmux {
         let alive = !p.seen && p.opened.elapsed().as_secs() < 5;
         if !alive {
             if let Some(p) = self.popups.remove(&id) {
+                if let Some(minutes) = read_snooze(&p.lock) {
+                    self.snoozed.insert(id, minutes);
+                }
                 let _ = std::fs::remove_file(busy_path(&p.lock));
                 let _ = std::fs::remove_file(&p.lock);
                 crate::log!("tmux popup {id} closed by the user");
@@ -222,6 +244,10 @@ impl Output for Tmux {
 
     fn kept_open(&self, id: u64) -> bool {
         self.popups.get(&id).is_some_and(|p| viewer_busy(&p.lock))
+    }
+
+    fn take_snooze(&mut self, id: u64) -> Option<u64> {
+        self.snoozed.remove(&id)
     }
 }
 
@@ -244,6 +270,19 @@ mod tests {
     fn shell_quoting() {
         assert_eq!(quote("a b"), "'a b'");
         assert_eq!(quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn a_snooze_picked_in_a_popup_is_read_once() {
+        let dir = std::env::temp_dir().join(format!("fpip-snooze-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join("view-2.lock");
+        assert_eq!(snooze_path(&lock), dir.join("view-2.lock.snooze"));
+        assert_eq!(read_snooze(&lock), None);
+        std::fs::write(snooze_path(&lock), b"60").unwrap();
+        assert_eq!(read_snooze(&lock), Some(60));
+        assert_eq!(read_snooze(&lock), None, "the file is gone");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

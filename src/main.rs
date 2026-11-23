@@ -20,6 +20,7 @@ mod net;
 mod replay;
 mod rtp;
 mod rtsp;
+mod snooze;
 mod timing;
 mod tls;
 mod view;

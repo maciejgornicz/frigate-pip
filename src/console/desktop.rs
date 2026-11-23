@@ -1,8 +1,8 @@
 //! Desktop output: each preview window is a borderless always-on-top X11 window (an X11
 //! desktop, or Wayland through XWayland) in the chosen corner of the chosen monitor.
 //! The mouse works like on Windows: × closes, the speaker mutes, the slider under it sets
-//! the volume, ⟲ replays the start of the event, the pills in the bottom-left corner run the
-//! camera's actions, dragging moves (with Ctrl a zoomed picture, otherwise the window), a
+//! the volume, ⟲ replays the start of the event, the moon opens a list of lengths to snooze the
+//! camera for, the pills in the bottom-left corner run the camera's actions, dragging moves (with Ctrl a zoomed picture, otherwise the window), a
 //! click pins, a double click opens the camera in Frigate, the right button closes.
 
 use super::canvas::{Font, Image};
@@ -20,6 +20,10 @@ enum Hot {
     Sound,
     Volume,
     Replay,
+    Snooze,
+    /// The open snooze list: a length (index into `snooze::CHOICES`), or the rest of the list.
+    Length(usize),
+    List,
     /// The pill of action `n`.
     Action(usize),
 }
@@ -89,6 +93,9 @@ struct Win {
     replay: u8,
     /// Volume in percent.
     volume: u8,
+    /// The window has a snooze button (it needs the font for its list), and the list is open.
+    snooze: bool,
+    list: bool,
     /// The picture is zoomed in.
     zoomed: bool,
     /// The action buttons as they look now, and where their pills were last drawn (window
@@ -138,11 +145,42 @@ fn replay_rect(close: Area, sound: Area, with_sound: bool, scale: f32) -> Area {
     crate::view::left_of(if with_sound { sound } else { close }, scale)
 }
 
-/// The action pills of a window `w`×`h` with the given sound and replay states (see `Win`), one
-/// per text width, as `action::pill_row` places them: the row ends left of the leftmost
-/// top-right control level with it — the controls the window has, shown or not, so that the
-/// pills keep their width under the mouse (like on Windows).
-fn pill_rects(w: u32, h: u32, sound: u8, replay: u8, text_widths: &[f32], text_h: f32, scale: f32) -> Vec<Area> {
+/// Snooze button: left of the other buttons in the top-right corner.
+fn snooze_rect(close: Area, sound: Area, with_sound: bool, with_replay: bool, scale: f32) -> Area {
+    let right = if with_replay {
+        replay_rect(close, sound, with_sound, scale)
+    } else if with_sound {
+        sound
+    } else {
+        close
+    };
+    crate::view::left_of(right, scale)
+}
+
+/// The list under the snooze button `button` of a window `h` pixels high: the panel and its
+/// rows, a header and one per length (`text_widths`: the header's first, then the lengths';
+/// `line_h`: a line of text). It ends at the button's right edge; rows that do not fit above the
+/// window's bottom are left out.
+fn snooze_list(button: Area, h: u32, text_widths: &[f32], line_h: f32, scale: f32) -> (Area, Vec<Area>) {
+    let pad = (6.0 * scale).round() as i32;
+    let row_h = (line_h * 1.3).round().max(1.0) as i32;
+    let width = text_widths.iter().copied().fold(0.0, f32::max).ceil() as i32 + 4 * pad;
+    let (right, top) = (button.2, button.3 + (4.0 * scale).round() as i32);
+    let left = (right - width).max(0);
+    let rows: Vec<Area> = (0..text_widths.len() as i32)
+        .map(|i| (left + pad / 2, top + pad / 2 + i * row_h, right - pad / 2, top + pad / 2 + (i + 1) * row_h))
+        .take_while(|r| r.3 + pad / 2 <= h as i32)
+        .collect();
+    let bottom = rows.last().map_or(top, |r| r.3 + pad / 2);
+    ((left, top, right, bottom), rows)
+}
+
+/// The action pills of a window `w`×`h` with the given sound and replay states and snooze button
+/// (see `Win`), one per text width, as `action::pill_row` places them: the row ends left of the
+/// leftmost top-right control level with it — the controls the window has, shown or not, so
+/// that the pills keep their width under the mouse (like on Windows).
+#[allow(clippy::too_many_arguments)]
+fn pill_rects(w: u32, h: u32, sound: u8, replay: u8, snooze: bool, text_widths: &[f32], text_h: f32, scale: f32) -> Vec<Area> {
     let (close, speaker) = button_rects(w, scale);
     let mut controls = vec![close];
     if sound > 0 {
@@ -151,6 +189,9 @@ fn pill_rects(w: u32, h: u32, sound: u8, replay: u8, text_widths: &[f32], text_h
     }
     if replay > 0 {
         controls.push(replay_rect(close, speaker, sound > 0, scale));
+    }
+    if snooze {
+        controls.push(snooze_rect(close, speaker, sound > 0, replay > 0, scale));
     }
     let (top, bottom) = action::pill_band(h as i32, text_h, scale);
     let right = controls.iter().filter(|c| c.1 < bottom && c.3 > top).map(|c| c.0).min().unwrap_or(w as i32);
@@ -162,7 +203,7 @@ fn draw_pills(font: &Font, pic: &mut Image, w: &Win, scale: f32) -> Vec<Placed> 
     let px = Font::text_px(pic.h);
     let texts: Vec<String> = w.actions.iter().map(|a| font.drawable(&a.text)).collect();
     let widths: Vec<f32> = texts.iter().map(|t| font.width(t, px)).collect();
-    let rects = pill_rects(pic.w, pic.h, w.sound, w.replay, &widths, font.line_height(px), scale);
+    let rects = pill_rects(pic.w, pic.h, w.sound, w.replay, w.snooze, &widths, font.line_height(px), scale);
     // `pill_row` drops pills from the right: `zip` stops at the last one it kept.
     w.actions
         .iter()
@@ -175,17 +216,45 @@ fn draw_pills(font: &Font, pic: &mut Image, w: &Win, scale: f32) -> Vec<Placed> 
         .collect()
 }
 
-/// What is under the mouse at (x, y) in window `w`: the top-right controls show under the mouse
-/// and win where they overlap a pill; the action pills are always there.
-fn hot_at(w: &Win, x: i32, y: i32, scale: f32) -> Hot {
+/// The texts of the snooze list: the header, then the lengths.
+fn list_texts(font: &Font) -> Vec<String> {
+    std::iter::once(crate::i18n::t().snooze_title.to_string())
+        .chain(crate::snooze::CHOICES.iter().map(|&m| crate::snooze::choice_text(m)))
+        .map(|t| font.drawable(&t))
+        .collect()
+}
+
+/// The snooze list of window `w` with these texts (see `snooze_list`), at the size of its text.
+fn list_of(font: &Font, w: &Win, scale: f32) -> (Area, Vec<Area>) {
+    let px = Font::text_px(w.rect.h);
+    let widths: Vec<f32> = list_texts(font).iter().map(|t| font.width(t, px)).collect();
+    let (close, sound) = button_rects(w.rect.w, scale);
+    snooze_list(snooze_rect(close, sound, w.sound > 0, w.replay > 0, scale), w.rect.h, &widths, font.line_height(px), scale)
+}
+
+/// What is under the mouse at (x, y) in window `w`: the open snooze list (`list`: its panel and
+/// rows) first, then the top-right controls, which show under the mouse and win where they
+/// overlap a pill; the action pills are always there.
+fn hot_at(w: &Win, x: i32, y: i32, scale: f32, list: Option<&(Area, Vec<Area>)>) -> Hot {
     let (close, sound) = button_rects(w.rect.w, scale);
     let slider = crate::view::volume_slider(sound, w.rect.h as i32, scale);
     let replay = replay_rect(close, sound, w.sound > 0, scale);
+    let snooze = snooze_rect(close, sound, w.sound > 0, w.replay > 0, scale);
+    if let Some((panel, rows)) = list.filter(|_| w.list) {
+        // The first row is the header.
+        if let Some(i) = rows.iter().skip(1).position(|r| inside(*r, x, y)) {
+            return Hot::Length(i);
+        }
+        if inside(*panel, x, y) {
+            return Hot::List;
+        }
+    }
     match () {
         _ if w.hover && inside(close, x, y) => Hot::Close,
         _ if w.hover && w.sound > 0 && inside(sound, x, y) => Hot::Sound,
         _ if w.hover && w.sound > 0 && slider.is_some_and(|s| inside(s, x, y)) => Hot::Volume,
         _ if w.hover && w.replay > 0 && inside(replay, x, y) => Hot::Replay,
+        _ if w.hover && w.snooze && inside(snooze, x, y) => Hot::Snooze,
         _ => action::hit(&w.pills, x, y).map_or(Hot::None, Hot::Action),
     }
 }
@@ -268,7 +337,11 @@ impl Desktop {
         let show_sound = w.sound > 0 && (w.hover || w.sound == 2);
         let replay = replay_rect(close, sound, w.sound > 0, self.scale);
         let show_replay = w.replay > 0 && (w.hover || w.replay == 2);
-        let left = if show_replay {
+        let snooze = snooze_rect(close, sound, w.sound > 0, w.replay > 0, self.scale);
+        let show_snooze = w.snooze && w.hover;
+        let left = if show_snooze {
+            snooze.0
+        } else if show_replay {
             replay.0
         } else if show_sound {
             sound.0
@@ -295,8 +368,20 @@ impl Desktop {
         if show_replay {
             pic.replay_button(replay, w.replay == 2, w.hot == Hot::Replay);
         }
+        if show_snooze {
+            pic.snooze_button(snooze, w.hot == Hot::Snooze || w.list);
+        }
         if let Some(slider) = crate::view::volume_slider(sound, pic.h as i32, self.scale).filter(|_| w.hover && w.sound > 0) {
             pic.volume_slider(slider, w.volume);
+        }
+        // Over everything else, the slider too.
+        if let (Some(font), true) = (&self.font, w.list) {
+            let list = list_of(font, w, self.scale);
+            let hot = match w.hot {
+                Hot::Length(i) => Some(i),
+                _ => None,
+            };
+            font.snooze_list(&mut pic, &list, &list_texts(font), hot, Font::text_px(w.rect.h));
         }
         let xid = w.xid;
         self.x.put_image(xid, &pic);
@@ -335,6 +420,8 @@ impl Output for Desktop {
             sound: 0,
             replay: 0,
             volume: 100,
+            snooze: false,
+            list: false,
             zoomed: false,
             actions: Vec::new(),
             pills: Vec::new(),
@@ -342,6 +429,8 @@ impl Output for Desktop {
             last_click: None,
             on_top: *topmost,
         });
+        // The list under the snooze button needs the font.
+        w.snooze = self.font.is_some();
         // Not while the user drags it.
         if w.rect != r && !matches!(w.press, Some(Press::Window { moved: true, .. })) {
             x.configure(w.xid, r.x, r.y, r.w, r.h, w.on_top);
@@ -466,6 +555,10 @@ impl Output for Desktop {
         let (scale, area) = (self.scale, self.area);
         let Some(w) = self.wins.get_mut(&id) else { return Vec::new() };
         let slider = crate::view::volume_slider(button_rects(w.rect.w, scale).1, w.rect.h as i32, scale);
+        let list = match (&self.font, w.list) {
+            (Some(font), true) => Some(list_of(font, w, scale)),
+            _ => None,
+        };
         let mut actions = Vec::new();
         let mut repaint = false;
         match *e {
@@ -477,6 +570,7 @@ impl Output for Desktop {
             Event::Leave { .. } if w.press.is_none() => {
                 w.hover = false;
                 w.hot = Hot::None;
+                w.list = false;
                 repaint = true;
                 actions.push(Action::Hover(false));
             }
@@ -501,15 +595,35 @@ impl Output for Desktop {
                         None => {}
                     }
                 } else {
-                    let h = hot_at(w, x, y, scale);
+                    let h = hot_at(w, x, y, scale, list.as_ref());
                     if h != w.hot {
                         w.hot = h;
                         repaint = true;
                     }
                 }
             }
-            Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y, scale) {
+            // With the list open, a click elsewhere only closes it.
+            Event::Press { button: 1, x, y, .. } if w.list && !matches!(hot_at(w, x, y, scale, list.as_ref()), Hot::Snooze | Hot::Length(_)) => {
+                w.list = false;
+                w.last_click = None;
+                repaint = true;
+            }
+            Event::Press { button: 1, x, y, root_x, root_y, time, state, .. } => match hot_at(w, x, y, scale, list.as_ref()) {
                 Hot::Close => actions.push(Action::Close),
+                Hot::Snooze => {
+                    w.list = !w.list;
+                    w.last_click = None;
+                    repaint = true;
+                }
+                Hot::Length(i) => {
+                    w.list = false;
+                    w.last_click = None;
+                    repaint = true;
+                    if let Some(&minutes) = crate::snooze::CHOICES.get(i) {
+                        actions.push(Action::Snooze(minutes));
+                    }
+                }
+                Hot::List => {}
                 Hot::Sound => actions.push(Action::Sound),
                 Hot::Replay => actions.push(Action::Replay),
                 // Neither a click that pins nor the start of a move or a double click.
@@ -624,6 +738,36 @@ mod tests {
     }
 
     #[test]
+    fn the_snooze_button_comes_left_of_all_others_and_opens_a_list_under_it() {
+        let (close, sound) = button_rects(480, 1.0);
+        assert_eq!(snooze_rect(close, sound, true, true, 1.0), (358, 8, 382, 32));
+        assert_eq!(snooze_rect(close, sound, true, false, 1.0), (388, 8, 412, 32));
+        assert_eq!(snooze_rect(close, sound, false, false, 1.0), sound);
+        // A header and five lengths, 20 px a row, right-aligned under the button.
+        let button = (358, 8, 382, 32);
+        let widths = [150.0, 40.0, 40.0, 30.0, 30.0, 30.0];
+        let (panel, rows) = snooze_list(button, 270, &widths, 15.4, 1.0);
+        assert_eq!(panel, (208, 36, 382, 162));
+        assert_eq!(rows.len(), 6);
+        assert_eq!((rows[0], rows[5]), ((211, 39, 379, 59), (211, 139, 379, 159)));
+        // A low window: only the rows that fit; a narrow one: the panel starts at its left edge.
+        assert_eq!(snooze_list(button, 120, &widths, 15.4, 1.0).1.len(), 3);
+        assert_eq!(snooze_list((40, 8, 64, 32), 270, &widths, 15.4, 1.0).0 .0, 0);
+        // The mouse: lengths by index (the header is none of them), the rest of the panel is
+        // the list's; closed, the place is the picture again.
+        let mut w = test_win(Vec::new());
+        w.list = true;
+        let list = (panel, rows.clone());
+        let hot = |w: &Win, x, y| hot_at(w, x, y, 1.0, Some(&list));
+        assert_eq!(hot(&w, 300, 45), Hot::List, "the header");
+        assert_eq!(hot(&w, 300, 65), Hot::Length(0));
+        assert_eq!(hot(&w, 300, 150), Hot::Length(4));
+        assert_eq!(hot(&w, 370, 20), Hot::Snooze);
+        w.list = false;
+        assert_eq!(hot(&w, 300, 65), Hot::None);
+    }
+
+    #[test]
     fn the_replay_button_comes_left_of_the_others() {
         let (close, sound) = button_rects(480, 1.0);
         assert_eq!(replay_rect(close, sound, true, 1.0), (388, 8, 412, 32));
@@ -642,7 +786,7 @@ mod tests {
                 for w in (160..=1920).step_by(40) {
                     let h = ((w as f32 / aspect) as u32).max(2);
                     for (sound, replay) in [(0, 0), (1, 0), (2, 1), (0, 1), (1, 2)] {
-                        let pills = pill_rects(w, h, sound, replay, &texts, 16.0 * scale, scale);
+                        let pills = pill_rects(w, h, sound, replay, true, &texts, 16.0 * scale, scale);
                         let Some(&(_, top, _, bottom)) = pills.first() else { continue };
                         let mut probe = test_win(Vec::new());
                         (probe.rect.w, probe.rect.h, probe.sound, probe.replay) = (w, h, sound, replay);
@@ -650,7 +794,7 @@ mod tests {
                         let from = (w as i32 - (160.0 * scale) as i32).max(0);
                         let first_control = (top.max(0)..bottom)
                             .flat_map(|y| (from..w as i32).map(move |x| (x, y)))
-                            .filter(|&(x, y)| hot_at(&probe, x, y, scale) != Hot::None)
+                            .filter(|&(x, y)| hot_at(&probe, x, y, scale, None) != Hot::None)
                             .map(|(x, _)| x)
                             .min()
                             .unwrap_or(w as i32);
@@ -663,7 +807,7 @@ mod tests {
             }
         }
         // A short label on an ordinary window: one pill, its own width.
-        assert_eq!(pill_rects(480, 270, 1, 1, &[40.0], 16.0, 1.0), [(8, 236, 68, 262)]);
+        assert_eq!(pill_rects(480, 270, 1, 1, true, &[40.0], 16.0, 1.0), [(8, 236, 68, 262)]);
     }
 
     /// A desktop window's state for the mouse tests, without an X11 connection.
@@ -677,6 +821,8 @@ mod tests {
             sound: 1,
             replay: 1,
             volume: 100,
+            snooze: true,
+            list: false,
             zoomed: false,
             actions: Vec::new(),
             pills,
@@ -690,7 +836,7 @@ mod tests {
     fn a_pill_is_hit_with_or_without_hover_but_the_buttons_win() {
         let (close, _) = button_rects(480, 1.0);
         let mut w = test_win(vec![(2, (8, 236, 68, 262)), (4, close)]);
-        let hot = |w: &Win, x, y| hot_at(w, x, y, 1.0);
+        let hot = |w: &Win, x, y| hot_at(w, x, y, 1.0, None);
         assert_eq!(hot(&w, 20, 250), Hot::Action(2));
         assert_eq!(hot(&w, 460, 20), Hot::Close, "the close button wins over a pill under it");
         w.hover = false;
